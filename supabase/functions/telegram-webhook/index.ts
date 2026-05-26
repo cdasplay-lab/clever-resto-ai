@@ -18,18 +18,38 @@ function safeEqual(a: string | null, b: string) {
   return d === 0;
 }
 
-async function tgSend(chatId: number, text: string) {
+async function tgCall(method: string, body: any) {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
   const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY")!;
-  await fetch(`${GATEWAY}/sendMessage`, {
+  return await fetch(`${GATEWAY}/${method}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LOVABLE_API_KEY}`,
       "X-Connection-Api-Key": TELEGRAM_API_KEY,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ chat_id: chatId, text }),
+    body: JSON.stringify(body),
   });
+}
+
+async function tgSend(chatId: number, text: string) {
+  await tgCall("sendMessage", { chat_id: chatId, text });
+}
+
+async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]) {
+  // Telegram sendMediaGroup: 2-10 items per group, only first caption shows under album
+  // We'll send in chunks of 10 with a caption per photo (some clients show all)
+  for (let i = 0; i < items.length; i += 10) {
+    const chunk = items.slice(i, i + 10);
+    if (chunk.length === 1) {
+      await tgCall("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
+    } else {
+      await tgCall("sendMediaGroup", {
+        chat_id: chatId,
+        media: chunk.map((m) => ({ type: "photo", media: m.photo_url, caption: m.caption })),
+      });
+    }
+  }
 }
 
 Deno.serve(async (req) => {
