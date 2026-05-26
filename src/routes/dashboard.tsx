@@ -33,6 +33,7 @@ type MenuItem = {
   category: string | null;
   price: number;
   is_available: boolean;
+  image_url: string | null;
 };
 type Order = {
   id: string;
