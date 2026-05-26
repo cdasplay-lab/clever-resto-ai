@@ -121,7 +121,25 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "show_menu",
+      description:
+        "اعرض المنيو كاملاً (أو حسب صنف معين) للزبون مع الصور. استخدمه لما الزبون يطلب 'المنيو' أو 'شنو عندكم' أو يسأل عن أصناف فئة معينة. سيدز الصور مباشرة للزبون.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", description: "اختياري: اسم فئة محددة (مثلاً: ساندويش، مشروبات)" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
+
+// Media to deliver via the channel (filled by show_menu tool)
+type MediaItem = { photo_url: string; caption: string };
 
 // ---------- System prompt builder ----------
 function systemPrompt(restaurant: any, conv: any) {
@@ -158,6 +176,7 @@ async function runTool(
   restaurant: any,
   name: string,
   args: any,
+  media: MediaItem[],
 ): Promise<any> {
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
@@ -292,6 +311,35 @@ async function runTool(
     return { ok: true };
   }
 
+  if (name === "show_menu") {
+    let q = db
+      .from("menu_items")
+      .select("id,name,description,price,category,image_url,is_available")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_available", true)
+      .order("category", { nullsFirst: false })
+      .order("name");
+    if (args.category) q = q.ilike("category", `%${args.category}%`);
+    const { data: items } = await q;
+    const list = items ?? [];
+    // Queue media for the channel
+    for (const it of list) {
+      if (it.image_url) {
+        const caption = `${it.name}${it.category ? ` — ${it.category}` : ""}\n${it.price} ${restaurant.currency}${it.description ? `\n${it.description}` : ""}`;
+        media.push({ photo_url: it.image_url, caption });
+      }
+    }
+    return {
+      ok: true,
+      count: list.length,
+      with_images: media.length,
+      items: list.map((i) => ({ id: i.id, name: i.name, price: i.price, category: i.category })),
+      note: media.length
+        ? "تم تجهيز صور المنيو وستُرسل للزبون مع ردك. اكتفِ بجملة قصيرة مثل 'تفضل المنيو 👇' ولا تكرر الأسعار."
+        : "لا توجد صور للأصناف. اعرض المنيو نصياً.",
+    };
+  }
+
   return { error: "unknown tool" };
 }
 
@@ -355,6 +403,7 @@ Deno.serve(async (req) => {
       }),
     ];
 
+    const media: MediaItem[] = [];
     let finalText = "";
     for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
       const resp = await callModel(llmMessages);
@@ -382,7 +431,7 @@ Deno.serve(async (req) => {
             kind: `tool_call:${name}`,
             payload: { args },
           });
-          const result = await runTool(db, conv, restaurant, name, args);
+          const result = await runTool(db, conv, restaurant, name, args, media);
           await db.from("agent_logs").insert({
             conversation_id,
             restaurant_id: restaurant.id,
@@ -412,7 +461,7 @@ Deno.serve(async (req) => {
       break;
     }
 
-    return json({ reply: finalText, state: conv.state });
+    return json({ reply: finalText, state: conv.state, media });
   } catch (e: any) {
     const msg = e?.message || "error";
     if (msg === "rate_limited") return json({ error: "rate_limited" }, 429);

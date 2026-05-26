@@ -33,6 +33,7 @@ type MenuItem = {
   category: string | null;
   price: number;
   is_available: boolean;
+  image_url: string | null;
 };
 type Order = {
   id: string;
@@ -206,7 +207,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   async function load() {
     const { data } = await supabase
       .from("menu_items")
-      .select("id,name,description,category,price,is_available")
+      .select("id,name,description,category,price,is_available,image_url")
       .eq("restaurant_id", restaurantId)
       .order("category", { nullsFirst: false })
       .order("name");
@@ -215,11 +216,37 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   }
   useEffect(() => { load(); }, [restaurantId]);
 
+  async function uploadImage(file: File): Promise<string | null> {
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `${restaurantId}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from("menu-images").upload(path, file, { upsert: false });
+    if (error) { toast.error(error.message); return null; }
+    const { data } = supabase.storage.from("menu-images").getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  async function setItemImage(item: MenuItem, file: File) {
+    const url = await uploadImage(file);
+    if (!url) return;
+    const { error } = await supabase.from("menu_items").update({ image_url: url }).eq("id", item.id);
+    if (error) return toast.error(error.message);
+    toast.success("تم رفع الصورة");
+    load();
+  }
+
+  async function removeItemImage(item: MenuItem) {
+    await supabase.from("menu_items").update({ image_url: null }).eq("id", item.id);
+    load();
+  }
+
   async function addItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAdding(true);
-    const fd = new FormData(e.currentTarget);
     const form = e.currentTarget;
+    const fd = new FormData(form);
+    const file = (fd.get("image") as File | null);
+    let image_url: string | null = null;
+    if (file && file.size > 0) image_url = await uploadImage(file);
     const { data, error } = await supabase
       .from("menu_items")
       .insert({
@@ -228,6 +255,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
         description: String(fd.get("description") || "") || null,
         category: String(fd.get("category") || "") || null,
         price: Number(fd.get("price") || 0),
+        image_url,
       })
       .select()
       .single();
@@ -260,11 +288,12 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
           <CardTitle>إضافة صنف</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-6">
             <Input name="name" placeholder="اسم الصنف" required />
             <Input name="category" placeholder="الصنف (مثلاً: ساندويش)" />
             <Input name="price" placeholder="السعر" type="number" required />
-            <Input name="description" placeholder="وصف مختصر" className="md:col-span-1" />
+            <Input name="description" placeholder="وصف مختصر" />
+            <Input name="image" type="file" accept="image/*" />
             <Button type="submit" disabled={adding}>
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="ml-1 h-4 w-4" />إضافة</>}
             </Button>
@@ -283,13 +312,25 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
           ) : (
             <div className="space-y-2">
               {items.map((it) => (
-                <div key={it.id} className="flex items-center justify-between rounded-lg border p-3">
-                  <div>
-                    <div className="font-medium">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}</div>
-                    {it.description && <div className="text-sm text-muted-foreground">{it.description}</div>}
+                <div key={it.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {it.image_url ? (
+                      <img src={it.image_url} alt={it.name} className="h-14 w-14 rounded object-cover" />
+                    ) : (
+                      <div className="h-14 w-14 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">لا صورة</div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}</div>
+                      {it.description && <div className="text-sm text-muted-foreground truncate">{it.description}</div>}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <div className="font-mono">{it.price}</div>
+                    <label className="cursor-pointer">
+                      <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
+                      <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
+                    </label>
+                    {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
                     <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
                   </div>
                 </div>
