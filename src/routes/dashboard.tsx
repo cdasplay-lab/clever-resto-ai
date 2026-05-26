@@ -424,7 +424,7 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
 
   async function changeStatus(orderId: string, status: string) {
     setUpdating(orderId);
-    const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+    const { error } = await supabase.from("orders").update({ status: status as any }).eq("id", orderId);
     if (error) { toast.error(error.message); setUpdating(null); return; }
     // Notify customer on their channel (non-blocking)
     supabase.functions.invoke("notify-order-status", { body: { order_id: orderId } })
