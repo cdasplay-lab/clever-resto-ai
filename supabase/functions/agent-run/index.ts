@@ -404,6 +404,11 @@ Deno.serve(async (req) => {
       .single();
     if (e1 || !conv) return json({ error: "conversation not found" }, 404);
 
+    // Human handoff: if owner paused the bot, don't run the LLM at all.
+    if (conv.is_bot_paused) {
+      return json({ reply: "", state: conv.state, media: [], skipped: "bot_paused" });
+    }
+
     const { data: restaurant, error: e2 } = await db
       .from("restaurants")
       .select("*")
