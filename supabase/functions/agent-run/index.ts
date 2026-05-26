@@ -403,6 +403,7 @@ Deno.serve(async (req) => {
       }),
     ];
 
+    const media: MediaItem[] = [];
     let finalText = "";
     for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
       const resp = await callModel(llmMessages);
