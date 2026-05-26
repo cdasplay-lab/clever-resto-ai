@@ -46,13 +46,27 @@ const TOOLS = [
     type: "function",
     function: {
       name: "add_to_cart",
-      description: "أضف صنفاً للسلة باستخدام menu_item_id من نتائج search_menu. لا تخمن المعرف.",
+      description:
+        "أضف صنفاً للسلة باستخدام menu_item_id من نتائج search_menu. لا تخمن المعرف. إذا الصنف عنده options (مجموعات خيارات/إضافات) لازم تسأل الزبون أولاً ثم مرر selected_options.",
       parameters: {
         type: "object",
         properties: {
           menu_item_id: { type: "string" },
           qty: { type: "integer", minimum: 1 },
           notes: { type: "string" },
+          selected_options: {
+            type: "array",
+            description: "اختيارات الزبون لمجموعات options. كل عنصر: { group, choice }.",
+            items: {
+              type: "object",
+              properties: {
+                group: { type: "string" },
+                choice: { type: "string" },
+              },
+              required: ["group", "choice"],
+              additionalProperties: false,
+            },
+          },
         },
         required: ["menu_item_id", "qty"],
         additionalProperties: false,
