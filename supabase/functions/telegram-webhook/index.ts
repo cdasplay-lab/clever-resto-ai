@@ -144,6 +144,9 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
+  if (Array.isArray(data.media) && data.media.length) {
+    await tgSendMedia(chatId, data.media);
+  }
   if (data.reply) await tgSend(chatId, data.reply);
   return json({ ok: true });
 });
