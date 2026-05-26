@@ -17,6 +17,7 @@ type CartItem = {
   qty: number;
   unit_price: number;
   notes?: string;
+  selected_options?: { group: string; choice: string }[];
 };
 
 type Delivery = {
