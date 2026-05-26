@@ -9,12 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2 } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone } from "lucide-react";
 
 export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
 });
 
+type OpenHours = Record<string, { open: string; close: string; closed: boolean }>;
 type Restaurant = {
   id: string;
   name: string;
@@ -25,6 +26,7 @@ type Restaurant = {
   min_order: number;
   platform_webhook_url: string | null;
   platform_webhook_secret: string | null;
+  open_hours: OpenHours | null;
 };
 type MenuItem = {
   id: string;
@@ -52,7 +54,44 @@ type Conversation = {
   customer_name: string | null;
   state: string;
   last_message_at: string;
+  last_message?: string | null;
 };
+
+const DAYS: { key: string; label: string }[] = [
+  { key: "sat", label: "السبت" },
+  { key: "sun", label: "الأحد" },
+  { key: "mon", label: "الإثنين" },
+  { key: "tue", label: "الثلاثاء" },
+  { key: "wed", label: "الأربعاء" },
+  { key: "thu", label: "الخميس" },
+  { key: "fri", label: "الجمعة" },
+];
+
+function defaultHours(): OpenHours {
+  return Object.fromEntries(DAYS.map((d) => [d.key, { open: "10:00", close: "23:00", closed: false }]));
+}
+
+function channelMeta(ch: string) {
+  const c = ch.toLowerCase();
+  if (c === "telegram") return { label: "Telegram", icon: Send, color: "bg-sky-500/15 text-sky-400 border-sky-500/30" };
+  if (c === "whatsapp") return { label: "WhatsApp", icon: Phone, color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" };
+  if (c === "instagram") return { label: "Instagram", icon: Instagram, color: "bg-pink-500/15 text-pink-400 border-pink-500/30" };
+  if (c === "facebook") return { label: "Facebook", icon: Facebook, color: "bg-blue-500/15 text-blue-400 border-blue-500/30" };
+  return { label: ch, icon: MessageSquare, color: "bg-muted text-muted-foreground border-border" };
+}
+
+function timeAgo(iso: string) {
+  const d = new Date(iso).getTime();
+  const diff = Math.max(0, Date.now() - d);
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "الآن";
+  if (m < 60) return `${m} د`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} س`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days} ي`;
+  return new Date(iso).toLocaleDateString("ar");
+}
 
 function Dashboard() {
   const [loading, setLoading] = useState(true);
@@ -397,6 +436,9 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
   const [convs, setConvs] = useState<Conversation[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "open" | "urgent">("all");
+  const [channelFilter, setChannelFilter] = useState<string>("all");
 
   async function loadConvs() {
     const { data } = await supabase
@@ -404,10 +446,33 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
       .select("id,channel,customer_handle,customer_name,state,last_message_at")
       .eq("restaurant_id", restaurantId)
       .order("last_message_at", { ascending: false })
-      .limit(50);
-    setConvs((data as any) ?? []);
+      .limit(100);
+    const list = (data as Conversation[]) ?? [];
+    // fetch last message preview for each (parallel, small N)
+    const withPreview = await Promise.all(
+      list.map(async (c) => {
+        const { data: m } = await supabase
+          .from("messages")
+          .select("content,role")
+          .eq("conversation_id", c.id)
+          .in("role", ["user", "assistant"])
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        return { ...c, last_message: m?.content ?? null };
+      }),
+    );
+    setConvs(withPreview);
   }
-  useEffect(() => { loadConvs(); }, [restaurantId]);
+  useEffect(() => {
+    loadConvs();
+    const ch = supabase
+      .channel(`convs-${restaurantId}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "conversations", filter: `restaurant_id=eq.${restaurantId}` }, () => loadConvs())
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, () => loadConvs())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [restaurantId]);
 
   useEffect(() => {
     if (!selected) return;
@@ -417,37 +482,140 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
       .eq("conversation_id", selected)
       .order("created_at")
       .then(({ data }) => setMessages(data ?? []));
+    const ch = supabase
+      .channel(`msgs-${selected}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `conversation_id=eq.${selected}` }, (payload) => {
+        setMessages((prev) => [...prev, payload.new]);
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
   }, [selected]);
 
+  const channels = Array.from(new Set(convs.map((c) => c.channel)));
+  const filtered = convs.filter((c) => {
+    if (channelFilter !== "all" && c.channel !== channelFilter) return false;
+    if (filter === "open" && !["greeting", "collecting_items", "confirm"].includes(c.state)) return false;
+    if (filter === "urgent" && c.state !== "handoff") return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const hit = (c.customer_name || "").toLowerCase().includes(q)
+        || (c.customer_handle || "").toLowerCase().includes(q)
+        || (c.last_message || "").toLowerCase().includes(q);
+      if (!hit) return false;
+    }
+    return true;
+  });
+
+  const selectedConv = convs.find((c) => c.id === selected);
+
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-      <Card className="md:col-span-1">
-        <CardHeader><CardTitle>المحادثات</CardTitle></CardHeader>
-        <CardContent className="max-h-[60vh] overflow-y-auto">
-          {convs.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو محادثات</p> : (
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+      {/* List */}
+      <Card className="lg:col-span-2 flex flex-col max-h-[75vh]">
+        <CardHeader className="space-y-3 pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle>المحادثات</CardTitle>
+            <Badge variant="secondary">{filtered.length}</Badge>
+          </div>
+          <div className="relative">
+            <Search className="absolute right-2 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="بحث بالاسم أو الرسالة…" value={search} onChange={(e) => setSearch(e.target.value)} className="pr-8" />
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {(["all", "open", "urgent"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                className={`rounded-md border px-2.5 py-1 text-xs transition ${filter === f ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}
+              >
+                {f === "all" ? "الكل" : f === "open" ? "مفتوح" : "عاجل"}
+              </button>
+            ))}
+            <div className="mx-1 h-5 w-px bg-border" />
+            <button
+              onClick={() => setChannelFilter("all")}
+              className={`rounded-md border px-2.5 py-1 text-xs ${channelFilter === "all" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}
+            >كل القنوات</button>
+            {channels.map((c) => {
+              const m = channelMeta(c);
+              const Icon = m.icon;
+              return (
+                <button
+                  key={c}
+                  onClick={() => setChannelFilter(c)}
+                  className={`flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs ${channelFilter === c ? "bg-primary text-primary-foreground border-primary" : "hover:bg-accent"}`}
+                >
+                  <Icon className="h-3 w-3" />{m.label}
+                </button>
+              );
+            })}
+          </div>
+        </CardHeader>
+        <CardContent className="flex-1 overflow-y-auto p-2">
+          {filtered.length === 0 ? <p className="p-4 text-sm text-muted-foreground">ما اكو محادثات</p> : (
             <ul className="space-y-1">
-              {convs.map((c) => (
-                <li key={c.id}>
-                  <button
-                    onClick={() => setSelected(c.id)}
-                    className={`w-full rounded-md p-2 text-right text-sm hover:bg-accent ${selected === c.id ? "bg-accent" : ""}`}
-                  >
-                    <div className="font-medium">{c.customer_name || c.customer_handle}</div>
-                    <div className="text-xs text-muted-foreground">{c.channel} · {c.state}</div>
-                  </button>
-                </li>
-              ))}
+              {filtered.map((c) => {
+                const m = channelMeta(c.channel);
+                const Icon = m.icon;
+                const isSel = selected === c.id;
+                return (
+                  <li key={c.id}>
+                    <button
+                      onClick={() => setSelected(c.id)}
+                      className={`w-full rounded-lg border p-3 text-right transition ${isSel ? "border-primary bg-accent/60" : "border-transparent hover:bg-accent/40"}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border ${m.color}`}>
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium">{c.customer_name || c.customer_handle || "زبون"}</div>
+                            {c.customer_handle && c.customer_name && (
+                              <div className="truncate text-xs text-muted-foreground">{c.customer_handle}</div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(c.last_message_at)}</div>
+                      </div>
+                      {c.last_message && (
+                        <div className="mt-1.5 truncate text-xs text-muted-foreground">{c.last_message}</div>
+                      )}
+                      <div className="mt-1.5 flex items-center gap-1">
+                        <Badge variant="outline" className={`text-[10px] ${m.color}`}>{m.label}</Badge>
+                        <Badge variant="outline" className="text-[10px]">{c.state}</Badge>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>
       </Card>
-      <Card className="md:col-span-2">
-        <CardHeader><CardTitle>الرسائل</CardTitle></CardHeader>
-        <CardContent className="max-h-[60vh] space-y-2 overflow-y-auto">
-          {!selected ? <p className="text-sm text-muted-foreground">اختر محادثة</p> : messages.map((m) => (
-            <div key={m.id} className={`rounded-lg p-2 text-sm ${m.role === "user" ? "bg-accent" : m.role === "assistant" ? "bg-primary/10" : "bg-muted text-xs font-mono"}`}>
-              <div className="text-xs text-muted-foreground">{m.role}{m.name ? `:${m.name}` : ""}</div>
-              <div className="whitespace-pre-wrap">{m.content}</div>
+
+      {/* Thread */}
+      <Card className="lg:col-span-3 flex flex-col max-h-[75vh]">
+        <CardHeader className="pb-3">
+          {selectedConv ? (
+            <div className="flex items-center gap-3">
+              {(() => { const m = channelMeta(selectedConv.channel); const Icon = m.icon; return (
+                <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${m.color}`}><Icon className="h-5 w-5" /></div>
+              ); })()}
+              <div>
+                <CardTitle className="text-base">{selectedConv.customer_name || selectedConv.customer_handle || "زبون"}</CardTitle>
+                <CardDescription className="text-xs">{selectedConv.customer_handle} · {channelMeta(selectedConv.channel).label}</CardDescription>
+              </div>
+            </div>
+          ) : <CardTitle>الرسائل</CardTitle>}
+        </CardHeader>
+        <CardContent className="flex-1 space-y-2 overflow-y-auto">
+          {!selected ? <p className="text-sm text-muted-foreground">اختر محادثة من القائمة</p> : messages.length === 0 ? <p className="text-sm text-muted-foreground">لا رسائل</p> : messages.map((m) => (
+            <div key={m.id} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
+              <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "bg-accent" : m.role === "assistant" ? "bg-primary text-primary-foreground" : "bg-muted text-xs font-mono"}`}>
+                <div className="mb-0.5 text-[10px] opacity-70">{m.role === "user" ? "عميل" : m.role === "assistant" ? "بوت" : m.role}{m.name ? ` · ${m.name}` : ""}</div>
+                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+              </div>
             </div>
           ))}
         </CardContent>
@@ -457,13 +625,14 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
 }
 
 function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChange: (r: Restaurant) => void }) {
-  const [r, setR] = useState(restaurant);
+  const [r, setR] = useState<Restaurant>({ ...restaurant, open_hours: restaurant.open_hours && Object.keys(restaurant.open_hours).length ? restaurant.open_hours : defaultHours() });
   const [saving, setSaving] = useState(false);
   async function save() {
     setSaving(true);
     const { data, error } = await supabase.from("restaurants").update({
       name: r.name, description: r.description, tone: r.tone, language: r.language,
       currency: r.currency, min_order: r.min_order,
+      open_hours: r.open_hours as any,
       platform_webhook_url: r.platform_webhook_url, platform_webhook_secret: r.platform_webhook_secret,
     }).eq("id", r.id).select().single();
     setSaving(false);
@@ -471,23 +640,61 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
     onChange(data as any);
     toast.success("تم الحفظ");
   }
+  function updateDay(day: string, patch: Partial<{ open: string; close: string; closed: boolean }>) {
+    const hours = { ...(r.open_hours || defaultHours()) };
+    hours[day] = { ...hours[day], ...patch };
+    setR({ ...r, open_hours: hours });
+  }
+  const hours = r.open_hours || defaultHours();
   return (
-    <Card>
-      <CardHeader><CardTitle>إعدادات المطعم</CardTitle></CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="space-y-2"><Label>الاسم</Label><Input value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></div>
-          <div className="space-y-2"><Label>اللغة</Label><Input value={r.language} onChange={(e) => setR({ ...r, language: e.target.value })} /></div>
-          <div className="space-y-2 md:col-span-2"><Label>نبرة الرد</Label><Input value={r.tone} onChange={(e) => setR({ ...r, tone: e.target.value })} /></div>
-          <div className="space-y-2 md:col-span-2"><Label>الوصف</Label><Textarea value={r.description ?? ""} onChange={(e) => setR({ ...r, description: e.target.value })} /></div>
-          <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
-          <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
-          <div className="space-y-2 md:col-span-2"><Label>رابط Webhook لمنصتك (يُرسل إليه الطلب المؤكد)</Label><Input value={r.platform_webhook_url ?? ""} onChange={(e) => setR({ ...r, platform_webhook_url: e.target.value })} placeholder="https://your-saas.com/api/incoming-order" /></div>
-          <div className="space-y-2 md:col-span-2"><Label>سر Webhook (للتحقق من التوقيع HMAC-SHA256)</Label><Input value={r.platform_webhook_secret ?? ""} onChange={(e) => setR({ ...r, platform_webhook_secret: e.target.value })} placeholder="optional" /></div>
-        </div>
-        <Button onClick={save} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "حفظ"}</Button>
-      </CardContent>
-    </Card>
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle>إعدادات المطعم</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div className="space-y-2"><Label>الاسم</Label><Input value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></div>
+            <div className="space-y-2"><Label>اللغة</Label><Input value={r.language} onChange={(e) => setR({ ...r, language: e.target.value })} /></div>
+            <div className="space-y-2 md:col-span-2"><Label>نبرة الرد</Label><Input value={r.tone} onChange={(e) => setR({ ...r, tone: e.target.value })} /></div>
+            <div className="space-y-2 md:col-span-2"><Label>الوصف</Label><Textarea value={r.description ?? ""} onChange={(e) => setR({ ...r, description: e.target.value })} /></div>
+            <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
+            <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
+            <div className="space-y-2 md:col-span-2"><Label>رابط Webhook لمنصتك (يُرسل إليه الطلب المؤكد)</Label><Input value={r.platform_webhook_url ?? ""} onChange={(e) => setR({ ...r, platform_webhook_url: e.target.value })} placeholder="https://your-saas.com/api/incoming-order" /></div>
+            <div className="space-y-2 md:col-span-2"><Label>سر Webhook (للتحقق من التوقيع HMAC-SHA256)</Label><Input value={r.platform_webhook_secret ?? ""} onChange={(e) => setR({ ...r, platform_webhook_secret: e.target.value })} placeholder="optional" /></div>
+          </div>
+          <Button onClick={save} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "حفظ"}</Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>أوقات العمل</CardTitle>
+          <CardDescription>الوكيل راح يعرف اشتغل الحين أو لا، ويرد على الزبون بناءً عليها.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-2">
+            {DAYS.map((d) => {
+              const h = hours[d.key] || { open: "10:00", close: "23:00", closed: false };
+              return (
+                <div key={d.key} className="grid grid-cols-12 items-center gap-2 rounded-lg border p-2">
+                  <div className="col-span-3 text-sm font-medium">{d.label}</div>
+                  <label className="col-span-3 flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={h.closed} onChange={(e) => updateDay(d.key, { closed: e.target.checked })} />
+                    مغلق
+                  </label>
+                  <div className="col-span-3">
+                    <Input type="time" value={h.open} disabled={h.closed} onChange={(e) => updateDay(d.key, { open: e.target.value })} />
+                  </div>
+                  <div className="col-span-3">
+                    <Input type="time" value={h.close} disabled={h.closed} onChange={(e) => updateDay(d.key, { close: e.target.value })} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <Button onClick={save} disabled={saving} className="mt-4">{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "حفظ أوقات العمل"}</Button>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

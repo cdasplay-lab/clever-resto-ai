@@ -142,6 +142,30 @@ const TOOLS = [
 type MediaItem = { photo_url: string; caption: string };
 
 // ---------- System prompt builder ----------
+const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+function openHoursStatus(open_hours: any): string {
+  if (!open_hours || typeof open_hours !== "object" || !Object.keys(open_hours).length) {
+    return "أوقات العمل: غير محددة (افترض مفتوح).";
+  }
+  // Iraq timezone (Asia/Baghdad, UTC+3, no DST)
+  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const dayKey = DAY_KEYS[now.getUTCDay()];
+  const h = open_hours[dayKey];
+  const hhmm = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+  const lines = DAY_KEYS.map((k) => {
+    const d = open_hours[k];
+    if (!d) return `${k}: —`;
+    return d.closed ? `${k}: مغلق` : `${k}: ${d.open}-${d.close}`;
+  }).join(" | ");
+  let status = "أوقات العمل غير محددة لهذا اليوم.";
+  if (h) {
+    if (h.closed) status = `المطعم اليوم مغلق. الوقت الحالي ${hhmm}.`;
+    else if (hhmm >= h.open && hhmm <= h.close) status = `المطعم مفتوح الآن (${h.open}-${h.close}). الوقت ${hhmm}.`;
+    else status = `المطعم مغلق الآن. دوام اليوم ${h.open}-${h.close}. الوقت ${hhmm}.`;
+  }
+  return `${status}\nجدول الأسبوع: ${lines}`;
+}
+
 function systemPrompt(restaurant: any, conv: any) {
   const cartLines =
     Array.isArray(conv.cart) && conv.cart.length
@@ -153,6 +177,8 @@ function systemPrompt(restaurant: any, conv: any) {
   return `أنت موظف استقبال طلبات لمطعم "${restaurant.name}".
 نبرة الرد: ${restaurant.tone}. اللغة: ${restaurant.language === "ar" ? "عربي عراقي بسيط" : restaurant.language}.
 
+${openHoursStatus(restaurant.open_hours)}
+
 قواعد صارمة:
 1) لا تخترع أي صنف أو سعر. استخدم أداة search_menu دائماً قبل ما تضيف للسلة.
 2) قبل ما تستدعي submit_order، اعرض ملخص الطلب (السلة + العنوان + الإجمالي) واطلب تأكيد صريح ("نعم" / "أكد").
@@ -161,6 +187,7 @@ function systemPrompt(restaurant: any, conv: any) {
 5) لا تكلم الزبون بأي موضوع خارج طلبات المطعم.
 6) لو ما فهمت أو الزبون متضايق، استخدم handoff_to_human.
 7) ردودك قصيرة ومباشرة. سؤال واحد بكل رسالة.
+8) إذا المطعم مغلق الآن، اعتذر بأدب واذكر وقت الافتتاح القادم. لا تأخذ طلب نهائي خارج أوقات العمل إلا إذا الزبون يطلب جدولته لوقت ضمن الدوام.
 
 السلة الحالية:
 ${cartLines}
