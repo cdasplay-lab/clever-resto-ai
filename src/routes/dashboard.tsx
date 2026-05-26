@@ -207,7 +207,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   async function load() {
     const { data } = await supabase
       .from("menu_items")
-      .select("id,name,description,category,price,is_available")
+      .select("id,name,description,category,price,is_available,image_url")
       .eq("restaurant_id", restaurantId)
       .order("category", { nullsFirst: false })
       .order("name");
@@ -215,6 +215,29 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
     setLoading(false);
   }
   useEffect(() => { load(); }, [restaurantId]);
+
+  async function uploadImage(file: File): Promise<string | null> {
+    const ext = file.name.split(".").pop() || "jpg";
+    const path = `${restaurantId}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage.from("menu-images").upload(path, file, { upsert: false });
+    if (error) { toast.error(error.message); return null; }
+    const { data } = supabase.storage.from("menu-images").getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  async function setItemImage(item: MenuItem, file: File) {
+    const url = await uploadImage(file);
+    if (!url) return;
+    const { error } = await supabase.from("menu_items").update({ image_url: url }).eq("id", item.id);
+    if (error) return toast.error(error.message);
+    toast.success("تم رفع الصورة");
+    load();
+  }
+
+  async function removeItemImage(item: MenuItem) {
+    await supabase.from("menu_items").update({ image_url: null }).eq("id", item.id);
+    load();
+  }
 
   async function addItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
