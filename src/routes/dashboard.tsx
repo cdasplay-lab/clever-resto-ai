@@ -15,6 +15,7 @@ export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
 });
 
+type OpenHours = Record<string, { open: string; close: string; closed: boolean }>;
 type Restaurant = {
   id: string;
   name: string;
@@ -25,6 +26,7 @@ type Restaurant = {
   min_order: number;
   platform_webhook_url: string | null;
   platform_webhook_secret: string | null;
+  open_hours: OpenHours | null;
 };
 type MenuItem = {
   id: string;
@@ -52,7 +54,44 @@ type Conversation = {
   customer_name: string | null;
   state: string;
   last_message_at: string;
+  last_message?: string | null;
 };
+
+const DAYS: { key: string; label: string }[] = [
+  { key: "sat", label: "السبت" },
+  { key: "sun", label: "الأحد" },
+  { key: "mon", label: "الإثنين" },
+  { key: "tue", label: "الثلاثاء" },
+  { key: "wed", label: "الأربعاء" },
+  { key: "thu", label: "الخميس" },
+  { key: "fri", label: "الجمعة" },
+];
+
+function defaultHours(): OpenHours {
+  return Object.fromEntries(DAYS.map((d) => [d.key, { open: "10:00", close: "23:00", closed: false }]));
+}
+
+function channelMeta(ch: string) {
+  const c = ch.toLowerCase();
+  if (c === "telegram") return { label: "Telegram", icon: Send, color: "bg-sky-500/15 text-sky-400 border-sky-500/30" };
+  if (c === "whatsapp") return { label: "WhatsApp", icon: Phone, color: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" };
+  if (c === "instagram") return { label: "Instagram", icon: Instagram, color: "bg-pink-500/15 text-pink-400 border-pink-500/30" };
+  if (c === "facebook") return { label: "Facebook", icon: Facebook, color: "bg-blue-500/15 text-blue-400 border-blue-500/30" };
+  return { label: ch, icon: MessageSquare, color: "bg-muted text-muted-foreground border-border" };
+}
+
+function timeAgo(iso: string) {
+  const d = new Date(iso).getTime();
+  const diff = Math.max(0, Date.now() - d);
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "الآن";
+  if (m < 60) return `${m} د`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} س`;
+  const days = Math.floor(h / 24);
+  if (days < 7) return `${days} ي`;
+  return new Date(iso).toLocaleDateString("ar");
+}
 
 function Dashboard() {
   const [loading, setLoading] = useState(true);
