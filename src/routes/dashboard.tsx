@@ -242,8 +242,11 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   async function addItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAdding(true);
-    const fd = new FormData(e.currentTarget);
     const form = e.currentTarget;
+    const fd = new FormData(form);
+    const file = (fd.get("image") as File | null);
+    let image_url: string | null = null;
+    if (file && file.size > 0) image_url = await uploadImage(file);
     const { data, error } = await supabase
       .from("menu_items")
       .insert({
@@ -252,6 +255,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
         description: String(fd.get("description") || "") || null,
         category: String(fd.get("category") || "") || null,
         price: Number(fd.get("price") || 0),
+        image_url,
       })
       .select()
       .single();
