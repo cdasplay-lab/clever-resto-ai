@@ -444,7 +444,7 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
   async function loadConvs() {
     const { data } = await supabase
       .from("conversations")
-      .select("id,channel,customer_handle,customer_name,state,last_message_at")
+      .select("id,channel,customer_handle,customer_name,state,last_message_at,is_bot_paused")
       .eq("restaurant_id", restaurantId)
       .order("last_message_at", { ascending: false })
       .limit(100);
