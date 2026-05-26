@@ -30,6 +30,8 @@ type Restaurant = {
   platform_webhook_secret: string | null;
   open_hours: OpenHours | null;
 };
+type MenuOptionChoice = { name: string; price_delta?: number };
+type MenuOptionGroup = { name: string; type: "single" | "multi"; required?: boolean; choices: MenuOptionChoice[] };
 type MenuItem = {
   id: string;
   name: string;
@@ -38,6 +40,7 @@ type MenuItem = {
   price: number;
   is_available: boolean;
   image_url: string | null;
+  options?: MenuOptionGroup[];
 };
 type Order = {
   id: string;
