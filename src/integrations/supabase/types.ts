@@ -425,6 +425,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      create_api_key: {
+        Args: { p_label?: string; p_restaurant_id: string }
+        Returns: string
+      }
       has_role: {
         Args: {
           _restaurant_id: string
@@ -432,6 +436,17 @@ export type Database = {
           _user_id: string
         }
         Returns: boolean
+      }
+      search_menu_items: {
+        Args: { p_limit?: number; p_query: string; p_restaurant_id: string }
+        Returns: {
+          category: string
+          description: string
+          id: string
+          name: string
+          price: number
+          similarity: number
+        }[]
       }
     }
     Enums: {
