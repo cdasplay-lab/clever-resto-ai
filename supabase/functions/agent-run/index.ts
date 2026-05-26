@@ -1,0 +1,423 @@
+// agent-run: core AI agent. Called by channel webhooks (telegram-webhook etc).
+// Input: { conversation_id }
+// It loads the conversation, builds messages, runs the LLM with tools in a loop,
+// persists messages, and returns the final assistant text to send to the user.
+
+import { corsHeaders, json } from "../_shared/cors.ts";
+import { admin } from "../_shared/supabase.ts";
+import { embedText } from "../_shared/embed.ts";
+
+const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
+const MAX_TOOL_ITERATIONS = 6;
+
+type CartItem = {
+  menu_item_id: string;
+  name: string;
+  qty: number;
+  unit_price: number;
+  notes?: string;
+};
+
+type Delivery = {
+  address?: string;
+  phone?: string;
+  time?: string;
+  area?: string;
+};
+
+// ---------- Tool definitions (sent to the model) ----------
+const TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "search_menu",
+      description:
+        "ابحث في منيو المطعم عن صنف يطلبه الزبون. أرجع لائحة بأقرب الأصناف. استخدمه دائماً قبل ما تضيف للسلة.",
+      parameters: {
+        type: "object",
+        properties: { query: { type: "string", description: "نص بحث (اسم الصنف أو وصف)" } },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_to_cart",
+      description: "أضف صنفاً للسلة باستخدام menu_item_id من نتائج search_menu. لا تخمن المعرف.",
+      parameters: {
+        type: "object",
+        properties: {
+          menu_item_id: { type: "string" },
+          qty: { type: "integer", minimum: 1 },
+          notes: { type: "string" },
+        },
+        required: ["menu_item_id", "qty"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "remove_from_cart",
+      description: "احذف صنف من السلة عبر menu_item_id.",
+      parameters: {
+        type: "object",
+        properties: { menu_item_id: { type: "string" } },
+        required: ["menu_item_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_cart_summary",
+      description: "أرجع السلة الحالية مع الإجمالي.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "set_delivery_info",
+      description:
+        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. تحقق من العنوان والهاتف.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string" },
+          phone: { type: "string" },
+          time: { type: "string", description: "وقت التوصيل المطلوب (نص حر)" },
+          area: { type: "string" },
+        },
+        required: ["address", "phone"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "submit_order",
+      description:
+        "احفظ الطلب نهائياً بعد ما يأكد الزبون صراحة. لا تستخدمه قبل عرض الملخص وأخذ التأكيد.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "handoff_to_human",
+      description: "حوّل المحادثة لموظف بشري لما تكون غير متأكد أو الزبون يطلب ذلك.",
+      parameters: {
+        type: "object",
+        properties: { reason: { type: "string" } },
+        required: ["reason"],
+        additionalProperties: false,
+      },
+    },
+  },
+] as const;
+
+// ---------- System prompt builder ----------
+function systemPrompt(restaurant: any, conv: any) {
+  const cartLines =
+    Array.isArray(conv.cart) && conv.cart.length
+      ? conv.cart
+          .map((i: CartItem) => `- ${i.qty} × ${i.name} (${i.unit_price} ${restaurant.currency})`)
+          .join("\n")
+      : "السلة فارغة";
+
+  return `أنت موظف استقبال طلبات لمطعم "${restaurant.name}".
+نبرة الرد: ${restaurant.tone}. اللغة: ${restaurant.language === "ar" ? "عربي عراقي بسيط" : restaurant.language}.
+
+قواعد صارمة:
+1) لا تخترع أي صنف أو سعر. استخدم أداة search_menu دائماً قبل ما تضيف للسلة.
+2) قبل ما تستدعي submit_order، اعرض ملخص الطلب (السلة + العنوان + الإجمالي) واطلب تأكيد صريح ("نعم" / "أكد").
+3) لو الزبون طلب صنف غير موجود بالمنيو، اعتذر واقترح بدائل من نتائج search_menu.
+4) الحد الأدنى للطلب: ${restaurant.min_order} ${restaurant.currency}.
+5) لا تكلم الزبون بأي موضوع خارج طلبات المطعم.
+6) لو ما فهمت أو الزبون متضايق، استخدم handoff_to_human.
+7) ردودك قصيرة ومباشرة. سؤال واحد بكل رسالة.
+
+السلة الحالية:
+${cartLines}
+
+الحالة الحالية: ${conv.state}
+معلومات التوصيل: ${JSON.stringify(conv.delivery || {})}`;
+}
+
+// ---------- Tool execution ----------
+async function runTool(
+  db: ReturnType<typeof admin>,
+  conv: any,
+  restaurant: any,
+  name: string,
+  args: any,
+): Promise<any> {
+  if (name === "search_menu") {
+    const q = String(args.query || "").trim();
+    if (!q) return { error: "empty query" };
+    // Try embedding search first
+    try {
+      const vec = await embedText(q);
+      const { data, error } = await db.rpc("search_menu_items", {
+        p_restaurant_id: restaurant.id,
+        p_query: vec,
+        p_limit: 5,
+      });
+      if (!error && data && data.length) return { results: data };
+    } catch (_) { /* fall through to text search */ }
+    const { data } = await db
+      .from("menu_items")
+      .select("id,name,description,price,is_available,category")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_available", true)
+      .ilike("name", `%${q}%`)
+      .limit(5);
+    return { results: data ?? [] };
+  }
+
+  if (name === "add_to_cart") {
+    const { data: item, error } = await db
+      .from("menu_items")
+      .select("id,name,price,is_available")
+      .eq("id", args.menu_item_id)
+      .eq("restaurant_id", restaurant.id)
+      .maybeSingle();
+    if (error || !item) return { error: "صنف غير موجود" };
+    if (!item.is_available) return { error: "هذا الصنف غير متوفر حالياً" };
+    const cart: CartItem[] = Array.isArray(conv.cart) ? [...conv.cart] : [];
+    const idx = cart.findIndex((c) => c.menu_item_id === item.id);
+    if (idx >= 0) cart[idx].qty += args.qty;
+    else
+      cart.push({
+        menu_item_id: item.id,
+        name: item.name,
+        qty: args.qty,
+        unit_price: Number(item.price),
+        notes: args.notes,
+      });
+    conv.cart = cart;
+    await db.from("conversations").update({ cart, state: "collecting_items" }).eq("id", conv.id);
+    return { ok: true, cart, total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0) };
+  }
+
+  if (name === "remove_from_cart") {
+    const cart: CartItem[] = (Array.isArray(conv.cart) ? conv.cart : []).filter(
+      (c: CartItem) => c.menu_item_id !== args.menu_item_id,
+    );
+    conv.cart = cart;
+    await db.from("conversations").update({ cart }).eq("id", conv.id);
+    return { ok: true, cart };
+  }
+
+  if (name === "get_cart_summary") {
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    const total = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    return { cart, total, currency: restaurant.currency, min_order: restaurant.min_order };
+  }
+
+  if (name === "set_delivery_info") {
+    const delivery: Delivery = {
+      address: args.address,
+      phone: args.phone,
+      time: args.time,
+      area: args.area,
+    };
+    conv.delivery = delivery;
+    await db
+      .from("conversations")
+      .update({ delivery, state: "confirm" })
+      .eq("id", conv.id);
+    return { ok: true, delivery };
+  }
+
+  if (name === "submit_order") {
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    if (!cart.length) return { error: "السلة فارغة" };
+    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    if (subtotal < Number(restaurant.min_order || 0)) {
+      return {
+        error: `الحد الأدنى للطلب ${restaurant.min_order} ${restaurant.currency}`,
+      };
+    }
+    const delivery = conv.delivery || {};
+    if (!delivery.address || !delivery.phone) {
+      return { error: "ناقص العنوان أو الهاتف" };
+    }
+    const { data: order, error } = await db
+      .from("orders")
+      .insert({
+        restaurant_id: restaurant.id,
+        conversation_id: conv.id,
+        customer_name: conv.customer_name,
+        customer_phone: delivery.phone,
+        delivery_address: delivery.address,
+        items: cart,
+        subtotal,
+        total: subtotal,
+        status: "pending",
+      })
+      .select()
+      .single();
+    if (error) return { error: error.message };
+    await db
+      .from("conversations")
+      .update({ state: "submitted", cart: [], delivery: {} })
+      .eq("id", conv.id);
+
+    // Fire-and-forget dispatch to platform webhook
+    try {
+      const baseUrl = Deno.env.get("SUPABASE_URL");
+      fetch(`${baseUrl}/functions/v1/orders-dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order_id: order.id }),
+      }).catch(() => {});
+    } catch (_) {}
+
+    return { ok: true, order_id: order.id, total: subtotal };
+  }
+
+  if (name === "handoff_to_human") {
+    await db
+      .from("conversations")
+      .update({ state: "handoff", meta: { ...(conv.meta || {}), handoff_reason: args.reason } })
+      .eq("id", conv.id);
+    return { ok: true };
+  }
+
+  return { error: "unknown tool" };
+}
+
+async function callModel(messages: any[]) {
+  const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${LOVABLE_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: MODEL,
+      messages,
+      tools: TOOLS,
+      tool_choice: "auto",
+    }),
+  });
+  if (r.status === 429) throw new Error("rate_limited");
+  if (r.status === 402) throw new Error("payment_required");
+  if (!r.ok) throw new Error(`model error ${r.status}: ${await r.text()}`);
+  return await r.json();
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  try {
+    const { conversation_id } = await req.json();
+    if (!conversation_id) return json({ error: "conversation_id required" }, 400);
+    const db = admin();
+
+    const { data: conv, error: e1 } = await db
+      .from("conversations")
+      .select("*")
+      .eq("id", conversation_id)
+      .single();
+    if (e1 || !conv) return json({ error: "conversation not found" }, 404);
+
+    const { data: restaurant, error: e2 } = await db
+      .from("restaurants")
+      .select("*")
+      .eq("id", conv.restaurant_id)
+      .single();
+    if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
+
+    // Load last 30 messages
+    const { data: history } = await db
+      .from("messages")
+      .select("role,content,tool_calls,tool_call_id,name")
+      .eq("conversation_id", conversation_id)
+      .order("created_at", { ascending: true })
+      .limit(30);
+
+    const llmMessages: any[] = [
+      { role: "system", content: systemPrompt(restaurant, conv) },
+      ...(history || []).map((m) => {
+        const base: any = { role: m.role, content: m.content };
+        if (m.tool_calls) base.tool_calls = m.tool_calls;
+        if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
+        if (m.name) base.name = m.name;
+        return base;
+      }),
+    ];
+
+    let finalText = "";
+    for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
+      const resp = await callModel(llmMessages);
+      const msg = resp.choices?.[0]?.message;
+      if (!msg) break;
+
+      // Persist assistant message
+      await db.from("messages").insert({
+        conversation_id,
+        role: "assistant",
+        content: msg.content ?? null,
+        tool_calls: msg.tool_calls ?? null,
+      });
+      llmMessages.push(msg);
+
+      if (msg.tool_calls && msg.tool_calls.length) {
+        for (const tc of msg.tool_calls) {
+          const name = tc.function?.name;
+          let args: any = {};
+          try { args = JSON.parse(tc.function?.arguments || "{}"); } catch (_) {}
+          await db.from("agent_logs").insert({
+            conversation_id,
+            restaurant_id: restaurant.id,
+            step,
+            kind: `tool_call:${name}`,
+            payload: { args },
+          });
+          const result = await runTool(db, conv, restaurant, name, args);
+          await db.from("agent_logs").insert({
+            conversation_id,
+            restaurant_id: restaurant.id,
+            step,
+            kind: `tool_result:${name}`,
+            payload: result,
+          });
+          const toolMsg = {
+            role: "tool",
+            tool_call_id: tc.id,
+            name,
+            content: JSON.stringify(result),
+          };
+          await db.from("messages").insert({
+            conversation_id,
+            role: "tool",
+            content: toolMsg.content,
+            tool_call_id: tc.id,
+            name,
+          });
+          llmMessages.push(toolMsg);
+        }
+        continue; // loop again so the model can see tool results
+      }
+
+      finalText = msg.content ?? "";
+      break;
+    }
+
+    return json({ reply: finalText, state: conv.state });
+  } catch (e: any) {
+    const msg = e?.message || "error";
+    if (msg === "rate_limited") return json({ error: "rate_limited" }, 429);
+    if (msg === "payment_required") return json({ error: "payment_required" }, 402);
+    console.error("agent-run error:", e);
+    return json({ error: msg }, 500);
+  }
+});
