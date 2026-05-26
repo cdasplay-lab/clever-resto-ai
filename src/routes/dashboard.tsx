@@ -9,7 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, BarChart3 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
 export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
@@ -28,6 +30,8 @@ type Restaurant = {
   platform_webhook_secret: string | null;
   open_hours: OpenHours | null;
 };
+type MenuOptionChoice = { name: string; price_delta?: number };
+type MenuOptionGroup = { name: string; type: "single" | "multi"; required?: boolean; choices: MenuOptionChoice[] };
 type MenuItem = {
   id: string;
   name: string;
@@ -36,6 +40,7 @@ type MenuItem = {
   price: number;
   is_available: boolean;
   image_url: string | null;
+  options?: MenuOptionGroup[];
 };
 type Order = {
   id: string;
@@ -224,6 +229,7 @@ function RestaurantManager({
             <TabsTrigger value="menu">المنيو</TabsTrigger>
             <TabsTrigger value="orders">الطلبات</TabsTrigger>
             <TabsTrigger value="conversations">المحادثات</TabsTrigger>
+            <TabsTrigger value="analytics">التحليلات</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
             <TabsTrigger value="integration">الربط مع منصتك</TabsTrigger>
           </TabsList>
@@ -231,6 +237,7 @@ function RestaurantManager({
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
           <TabsContent value="integration"><IntegrationTab restaurant={restaurant} /></TabsContent>
         </Tabs>
@@ -247,7 +254,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   async function load() {
     const { data } = await supabase
       .from("menu_items")
-      .select("id,name,description,category,price,is_available,image_url")
+      .select("id,name,description,category,price,is_available,image_url,options")
       .eq("restaurant_id", restaurantId)
       .order("category", { nullsFirst: false })
       .order("name");
@@ -352,27 +359,30 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
           ) : (
             <div className="space-y-2">
               {items.map((it) => (
-                <div key={it.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {it.image_url ? (
-                      <img src={it.image_url} alt={it.name} className="h-14 w-14 rounded object-cover" />
-                    ) : (
-                      <div className="h-14 w-14 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">لا صورة</div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}</div>
-                      {it.description && <div className="text-sm text-muted-foreground truncate">{it.description}</div>}
+                <div key={it.id} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {it.image_url ? (
+                        <img src={it.image_url} alt={it.name} className="h-14 w-14 rounded object-cover" />
+                      ) : (
+                        <div className="h-14 w-14 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">لا صورة</div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}{Array.isArray(it.options) && it.options.length > 0 && <Badge variant="outline" className="mr-2">{it.options.length} خيارات</Badge>}</div>
+                        {it.description && <div className="text-sm text-muted-foreground truncate">{it.description}</div>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-mono">{it.price}</div>
+                      <label className="cursor-pointer">
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
+                        <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
+                      </label>
+                      {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
+                      <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="font-mono">{it.price}</div>
-                    <label className="cursor-pointer">
-                      <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
-                      <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
-                    </label>
-                    {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
-                    <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+                  <OptionsEditor item={it} onSaved={load} />
                 </div>
               ))}
             </div>
@@ -383,27 +393,124 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   );
 }
 
+function OptionsEditor({ item, onSaved }: { item: MenuItem; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [groups, setGroups] = useState<MenuOptionGroup[]>(Array.isArray(item.options) ? item.options : []);
+  const [saving, setSaving] = useState(false);
+
+  function update(next: MenuOptionGroup[]) { setGroups(next); }
+  function addGroup() { update([...groups, { name: "", type: "single", required: false, choices: [{ name: "", price_delta: 0 }] }]); }
+  function removeGroup(gi: number) { update(groups.filter((_, i) => i !== gi)); }
+  function addChoice(gi: number) {
+    const next = [...groups]; next[gi] = { ...next[gi], choices: [...next[gi].choices, { name: "", price_delta: 0 }] }; update(next);
+  }
+  function removeChoice(gi: number, ci: number) {
+    const next = [...groups]; next[gi] = { ...next[gi], choices: next[gi].choices.filter((_, i) => i !== ci) }; update(next);
+  }
+
+  async function save() {
+    setSaving(true);
+    // Filter out empty groups/choices
+    const clean = groups
+      .map((g) => ({ ...g, name: g.name.trim(), choices: g.choices.filter((c) => c.name.trim()).map((c) => ({ name: c.name.trim(), price_delta: Number(c.price_delta || 0) })) }))
+      .filter((g) => g.name && g.choices.length > 0);
+    const { error } = await supabase.from("menu_items").update({ options: clean as any }).eq("id", item.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success("تم حفظ الخيارات");
+    setOpen(false);
+    onSaved();
+  }
+
+  return (
+    <div className="mt-2 border-t pt-2">
+      <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen((v) => !v)}>
+        {open ? "إخفاء الخيارات" : `الخيارات / الإضافات (${groups.length})`}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3">
+          {groups.map((g, gi) => (
+            <div key={gi} className="rounded border bg-muted/30 p-2">
+              <div className="flex items-center gap-2">
+                <Input placeholder="اسم المجموعة (مثلاً: الحجم)" value={g.name} onChange={(e) => { const n = [...groups]; n[gi] = { ...g, name: e.target.value }; update(n); }} className="h-8" />
+                <Select value={g.type} onValueChange={(v) => { const n = [...groups]; n[gi] = { ...g, type: v as any }; update(n); }}>
+                  <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">اختيار واحد</SelectItem>
+                    <SelectItem value="multi">متعدد</SelectItem>
+                  </SelectContent>
+                </Select>
+                <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                  <input type="checkbox" checked={!!g.required} onChange={(e) => { const n = [...groups]; n[gi] = { ...g, required: e.target.checked }; update(n); }} />
+                  إلزامي
+                </label>
+                <Button variant="ghost" size="icon" onClick={() => removeGroup(gi)}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+              <div className="mt-2 space-y-1">
+                {g.choices.map((c, ci) => (
+                  <div key={ci} className="flex items-center gap-2">
+                    <Input placeholder="اسم الخيار (مثلاً: كبير)" value={c.name} onChange={(e) => { const n = [...groups]; const ch = [...n[gi].choices]; ch[ci] = { ...c, name: e.target.value }; n[gi] = { ...g, choices: ch }; update(n); }} className="h-8" />
+                    <Input type="number" placeholder="فرق السعر" value={c.price_delta ?? 0} onChange={(e) => { const n = [...groups]; const ch = [...n[gi].choices]; ch[ci] = { ...c, price_delta: Number(e.target.value) }; n[gi] = { ...g, choices: ch }; update(n); }} className="h-8 w-28" />
+                    <Button variant="ghost" size="icon" onClick={() => removeChoice(gi, ci)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+                <Button variant="ghost" size="sm" onClick={() => addChoice(gi)}><Plus className="ml-1 h-3 w-3" />إضافة خيار</Button>
+              </div>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={addGroup}><Plus className="ml-1 h-3 w-3" />مجموعة جديدة</Button>
+            <Button size="sm" onClick={save} disabled={saving}>{saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "حفظ الخيارات"}</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
+const ORDER_STATUSES: { value: string; label: string }[] = [
+  { value: "pending", label: "قيد الاستلام" },
+  { value: "confirmed", label: "مؤكد" },
+  { value: "preparing", label: "قيد التحضير" },
+  { value: "out_for_delivery", label: "بالطريق" },
+  { value: "completed", label: "مكتمل" },
+  { value: "cancelled", label: "ملغى" },
+];
+
 function OrdersTab({ restaurantId }: { restaurantId: string }) {
   const [orders, setOrders] = useState<Order[]>([]);
-  useEffect(() => {
-    supabase
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  async function load() {
+    const { data } = await supabase
       .from("orders")
       .select("id,customer_name,customer_phone,delivery_address,total,status,created_at,items")
       .eq("restaurant_id", restaurantId)
       .order("created_at", { ascending: false })
-      .limit(50)
-      .then(({ data }) => setOrders((data as any) ?? []));
+      .limit(50);
+    setOrders((data as any) ?? []);
+  }
+
+  useEffect(() => {
+    load();
     const ch = supabase
       .channel(`orders-${restaurantId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${restaurantId}` }, () => {
-        supabase
-          .from("orders").select("id,customer_name,customer_phone,delivery_address,total,status,created_at,items")
-          .eq("restaurant_id", restaurantId).order("created_at", { ascending: false }).limit(50)
-          .then(({ data }) => setOrders((data as any) ?? []));
-      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${restaurantId}` }, () => load())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [restaurantId]);
+
+  async function changeStatus(orderId: string, status: string) {
+    setUpdating(orderId);
+    const { error } = await supabase.from("orders").update({ status: status as any }).eq("id", orderId);
+    if (error) { toast.error(error.message); setUpdating(null); return; }
+    // Notify customer on their channel (non-blocking)
+    supabase.functions.invoke("notify-order-status", { body: { order_id: orderId } })
+      .then(({ error: e }) => { if (e) toast.error("تم التحديث لكن فشل الإشعار: " + e.message); else toast.success("تم تحديث الحالة وإشعار الزبون"); })
+      .finally(() => setUpdating(null));
+  }
 
   return (
     <Card>
@@ -413,14 +520,27 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
           <div className="space-y-3">
             {orders.map((o) => (
               <div key={o.id} className="rounded-lg border p-3">
-                <div className="flex items-center justify-between">
-                  <div className="font-medium">{o.customer_name || "زبون"} — {o.customer_phone}</div>
-                  <Badge>{o.status}</Badge>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium min-w-0 truncate">{o.customer_name || "زبون"} — {o.customer_phone}</div>
+                  <div className="flex items-center gap-2">
+                    <Select value={o.status} onValueChange={(v) => changeStatus(o.id, v)} disabled={updating === o.id}>
+                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {ORDER_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {updating === o.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                  </div>
                 </div>
                 <div className="mt-1 text-sm text-muted-foreground">{o.delivery_address}</div>
                 <ul className="mt-2 text-sm">
                   {(Array.isArray(o.items) ? o.items : []).map((i: any, idx: number) => (
-                    <li key={idx}>{i.qty} × {i.name} — {i.unit_price}</li>
+                    <li key={idx}>
+                      {i.qty} × {i.name} — {i.unit_price}
+                      {Array.isArray(i.selected_options) && i.selected_options.length > 0 && (
+                        <span className="text-muted-foreground"> ({i.selected_options.map((s: any) => `${s.group}: ${s.choice}`).join("، ")})</span>
+                      )}
+                    </li>
                   ))}
                 </ul>
                 <div className="mt-2 text-left font-mono">الإجمالي: {o.total}</div>
@@ -430,6 +550,93 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function AnalyticsTab({ restaurantId }: { restaurantId: string }) {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<{ daily: { day: string; orders: number; revenue: number }[]; totals: { orders: number; revenue: number; convs: number; aov: number }; topItems: { name: string; qty: number }[] }>({
+    daily: [], totals: { orders: 0, revenue: 0, convs: 0, aov: 0 }, topItems: [],
+  });
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+      const [{ data: orders }, { count: convCount }] = await Promise.all([
+        supabase.from("orders").select("id,total,status,created_at,items").eq("restaurant_id", restaurantId).gte("created_at", since).limit(1000),
+        supabase.from("conversations").select("id", { count: "exact", head: true }).eq("restaurant_id", restaurantId).gte("created_at", since),
+      ]);
+      const list = (orders as any[]) || [];
+      const byDay = new Map<string, { orders: number; revenue: number }>();
+      const itemQty = new Map<string, number>();
+      let totalRev = 0;
+      for (const o of list) {
+        const day = (o.created_at as string).slice(0, 10);
+        const cur = byDay.get(day) || { orders: 0, revenue: 0 };
+        cur.orders += 1;
+        if (o.status !== "cancelled") { cur.revenue += Number(o.total || 0); totalRev += Number(o.total || 0); }
+        byDay.set(day, cur);
+        for (const it of (Array.isArray(o.items) ? o.items : [])) {
+          itemQty.set(it.name, (itemQty.get(it.name) || 0) + Number(it.qty || 0));
+        }
+      }
+      const daily = Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([day, v]) => ({ day: day.slice(5), ...v }));
+      const topItems = Array.from(itemQty.entries()).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 8);
+      const ordersCount = list.length;
+      setData({
+        daily,
+        totals: { orders: ordersCount, revenue: totalRev, convs: convCount || 0, aov: ordersCount ? Math.round(totalRev / ordersCount) : 0 },
+        topItems,
+      });
+      setLoading(false);
+    })();
+  }, [restaurantId]);
+
+  if (loading) return <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Card><CardHeader className="pb-2"><CardDescription>الطلبات (30 يوم)</CardDescription><CardTitle className="text-2xl">{data.totals.orders}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>الإيرادات</CardDescription><CardTitle className="text-2xl">{data.totals.revenue.toLocaleString()}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>المحادثات</CardDescription><CardTitle className="text-2xl">{data.totals.convs}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-2"><CardDescription>متوسط قيمة الطلب</CardDescription><CardTitle className="text-2xl">{data.totals.aov.toLocaleString()}</CardTitle></CardHeader></Card>
+      </div>
+      <Card>
+        <CardHeader><CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" />الطلبات اليومية</CardTitle></CardHeader>
+        <CardContent>
+          {data.daily.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو بيانات</p> : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart data={data.daily}>
+                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis dataKey="day" />
+                  <YAxis />
+                  <Tooltip />
+                  <Bar dataKey="orders" fill="hsl(var(--primary))" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>الأكثر طلباً</CardTitle></CardHeader>
+        <CardContent>
+          {data.topItems.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو طلبات بعد</p> : (
+            <ul className="space-y-2">
+              {data.topItems.map((i, idx) => (
+                <li key={i.name} className="flex items-center justify-between border-b pb-1 text-sm">
+                  <span>{idx + 1}. {i.name}</span>
+                  <Badge variant="secondary">{i.qty}</Badge>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 

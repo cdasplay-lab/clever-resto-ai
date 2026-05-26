@@ -17,6 +17,7 @@ type CartItem = {
   qty: number;
   unit_price: number;
   notes?: string;
+  selected_options?: { group: string; choice: string }[];
 };
 
 type Delivery = {
@@ -46,13 +47,27 @@ const TOOLS = [
     type: "function",
     function: {
       name: "add_to_cart",
-      description: "أضف صنفاً للسلة باستخدام menu_item_id من نتائج search_menu. لا تخمن المعرف.",
+      description:
+        "أضف صنفاً للسلة باستخدام menu_item_id من نتائج search_menu. لا تخمن المعرف. إذا الصنف عنده options (مجموعات خيارات/إضافات) لازم تسأل الزبون أولاً ثم مرر selected_options.",
       parameters: {
         type: "object",
         properties: {
           menu_item_id: { type: "string" },
           qty: { type: "integer", minimum: 1 },
           notes: { type: "string" },
+          selected_options: {
+            type: "array",
+            description: "اختيارات الزبون لمجموعات options. كل عنصر: { group, choice }.",
+            items: {
+              type: "object",
+              properties: {
+                group: { type: "string" },
+                choice: { type: "string" },
+              },
+              required: ["group", "choice"],
+              additionalProperties: false,
+            },
+          },
         },
         required: ["menu_item_id", "qty"],
         additionalProperties: false,
@@ -208,6 +223,7 @@ async function runTool(
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
     if (!q) return { error: "empty query" };
+    let results: any[] = [];
     // Try embedding search first
     try {
       const vec = await embedText(q);
@@ -216,42 +232,76 @@ async function runTool(
         p_query: vec,
         p_limit: 5,
       });
-      if (!error && data && data.length) return { results: data };
+      if (!error && data && data.length) results = data;
     } catch (_) { /* fall through to text search */ }
-    const { data } = await db
-      .from("menu_items")
-      .select("id,name,description,price,is_available,category")
-      .eq("restaurant_id", restaurant.id)
-      .eq("is_available", true)
-      .ilike("name", `%${q}%`)
-      .limit(5);
-    return { results: data ?? [] };
+    if (!results.length) {
+      const { data } = await db
+        .from("menu_items")
+        .select("id,name,description,price,is_available,category")
+        .eq("restaurant_id", restaurant.id)
+        .eq("is_available", true)
+        .ilike("name", `%${q}%`)
+        .limit(5);
+      results = data ?? [];
+    }
+    // Enrich with options
+    if (results.length) {
+      const ids = results.map((r: any) => r.id);
+      const { data: opts } = await db.from("menu_items").select("id,options").in("id", ids);
+      const map = new Map((opts || []).map((o: any) => [o.id, o.options]));
+      results = results.map((r: any) => ({ ...r, options: map.get(r.id) || [] }));
+    }
+    return { results };
   }
 
   if (name === "add_to_cart") {
     const { data: item, error } = await db
       .from("menu_items")
-      .select("id,name,price,is_available")
+      .select("id,name,price,is_available,options")
       .eq("id", args.menu_item_id)
       .eq("restaurant_id", restaurant.id)
       .maybeSingle();
     if (error || !item) return { error: "صنف غير موجود" };
     if (!item.is_available) return { error: "هذا الصنف غير متوفر حالياً" };
+
+    // Validate required option groups
+    const groups: any[] = Array.isArray(item.options) ? item.options : [];
+    const selected: { group: string; choice: string }[] = Array.isArray(args.selected_options) ? args.selected_options : [];
+    for (const g of groups) {
+      if (g.required) {
+        const has = selected.some((s) => s.group === g.name);
+        if (!has) return { error: `لازم تختار من مجموعة "${g.name}" قبل الإضافة`, missing_group: g.name, choices: g.choices };
+      }
+    }
+    // Compute price with deltas
+    let unitPrice = Number(item.price);
+    for (const s of selected) {
+      const g = groups.find((x: any) => x.name === s.group);
+      if (!g) return { error: `مجموعة غير معروفة: ${s.group}` };
+      const c = (g.choices || []).find((x: any) => x.name === s.choice);
+      if (!c) return { error: `خيار غير معروف: ${s.choice} في ${s.group}` };
+      unitPrice += Number(c.price_delta || 0);
+    }
     const cart: CartItem[] = Array.isArray(conv.cart) ? [...conv.cart] : [];
-    const idx = cart.findIndex((c) => c.menu_item_id === item.id);
+    // Treat items with different selected_options as distinct lines
+    const sigOf = (sel?: { group: string; choice: string }[]) => (sel || []).map((s) => `${s.group}=${s.choice}`).sort().join("|");
+    const sig = sigOf(selected);
+    const idx = cart.findIndex((c) => c.menu_item_id === item.id && sigOf(c.selected_options) === sig);
     if (idx >= 0) cart[idx].qty += args.qty;
     else
       cart.push({
         menu_item_id: item.id,
         name: item.name,
         qty: args.qty,
-        unit_price: Number(item.price),
+        unit_price: unitPrice,
         notes: args.notes,
+        selected_options: selected.length ? selected : undefined,
       });
     conv.cart = cart;
     await db.from("conversations").update({ cart, state: "collecting_items" }).eq("id", conv.id);
     return { ok: true, cart, total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0) };
   }
+
 
   if (name === "remove_from_cart") {
     const cart: CartItem[] = (Array.isArray(conv.cart) ? conv.cart : []).filter(
