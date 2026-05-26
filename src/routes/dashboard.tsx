@@ -393,6 +393,83 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   );
 }
 
+function OptionsEditor({ item, onSaved }: { item: MenuItem; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [groups, setGroups] = useState<MenuOptionGroup[]>(Array.isArray(item.options) ? item.options : []);
+  const [saving, setSaving] = useState(false);
+
+  function update(next: MenuOptionGroup[]) { setGroups(next); }
+  function addGroup() { update([...groups, { name: "", type: "single", required: false, choices: [{ name: "", price_delta: 0 }] }]); }
+  function removeGroup(gi: number) { update(groups.filter((_, i) => i !== gi)); }
+  function addChoice(gi: number) {
+    const next = [...groups]; next[gi] = { ...next[gi], choices: [...next[gi].choices, { name: "", price_delta: 0 }] }; update(next);
+  }
+  function removeChoice(gi: number, ci: number) {
+    const next = [...groups]; next[gi] = { ...next[gi], choices: next[gi].choices.filter((_, i) => i !== ci) }; update(next);
+  }
+
+  async function save() {
+    setSaving(true);
+    // Filter out empty groups/choices
+    const clean = groups
+      .map((g) => ({ ...g, name: g.name.trim(), choices: g.choices.filter((c) => c.name.trim()).map((c) => ({ name: c.name.trim(), price_delta: Number(c.price_delta || 0) })) }))
+      .filter((g) => g.name && g.choices.length > 0);
+    const { error } = await supabase.from("menu_items").update({ options: clean as any }).eq("id", item.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success("تم حفظ الخيارات");
+    setOpen(false);
+    onSaved();
+  }
+
+  return (
+    <div className="mt-2 border-t pt-2">
+      <button type="button" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setOpen((v) => !v)}>
+        {open ? "إخفاء الخيارات" : `الخيارات / الإضافات (${groups.length})`}
+      </button>
+      {open && (
+        <div className="mt-2 space-y-3">
+          {groups.map((g, gi) => (
+            <div key={gi} className="rounded border bg-muted/30 p-2">
+              <div className="flex items-center gap-2">
+                <Input placeholder="اسم المجموعة (مثلاً: الحجم)" value={g.name} onChange={(e) => { const n = [...groups]; n[gi] = { ...g, name: e.target.value }; update(n); }} className="h-8" />
+                <Select value={g.type} onValueChange={(v) => { const n = [...groups]; n[gi] = { ...g, type: v as any }; update(n); }}>
+                  <SelectTrigger className="h-8 w-28"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="single">اختيار واحد</SelectItem>
+                    <SelectItem value="multi">متعدد</SelectItem>
+                  </SelectContent>
+                </Select>
+                <label className="flex items-center gap-1 text-xs whitespace-nowrap">
+                  <input type="checkbox" checked={!!g.required} onChange={(e) => { const n = [...groups]; n[gi] = { ...g, required: e.target.checked }; update(n); }} />
+                  إلزامي
+                </label>
+                <Button variant="ghost" size="icon" onClick={() => removeGroup(gi)}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+              <div className="mt-2 space-y-1">
+                {g.choices.map((c, ci) => (
+                  <div key={ci} className="flex items-center gap-2">
+                    <Input placeholder="اسم الخيار (مثلاً: كبير)" value={c.name} onChange={(e) => { const n = [...groups]; const ch = [...n[gi].choices]; ch[ci] = { ...c, name: e.target.value }; n[gi] = { ...g, choices: ch }; update(n); }} className="h-8" />
+                    <Input type="number" placeholder="فرق السعر" value={c.price_delta ?? 0} onChange={(e) => { const n = [...groups]; const ch = [...n[gi].choices]; ch[ci] = { ...c, price_delta: Number(e.target.value) }; n[gi] = { ...g, choices: ch }; update(n); }} className="h-8 w-28" />
+                    <Button variant="ghost" size="icon" onClick={() => removeChoice(gi, ci)}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+                <Button variant="ghost" size="sm" onClick={() => addChoice(gi)}><Plus className="ml-1 h-3 w-3" />إضافة خيار</Button>
+              </div>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={addGroup}><Plus className="ml-1 h-3 w-3" />مجموعة جديدة</Button>
+            <Button size="sm" onClick={save} disabled={saving}>{saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "حفظ الخيارات"}</Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+
 const ORDER_STATUSES: { value: string; label: string }[] = [
   { value: "pending", label: "قيد الاستلام" },
   { value: "confirmed", label: "مؤكد" },
