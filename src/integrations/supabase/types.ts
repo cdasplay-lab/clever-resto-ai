@@ -99,6 +99,7 @@ export type Database = {
       }
       conversations: {
         Row: {
+          assigned_to: string | null
           cart: Json
           channel: Database["public"]["Enums"]["channel_type"]
           created_at: string
@@ -107,12 +108,14 @@ export type Database = {
           delivery: Json
           external_chat_id: string
           id: string
+          is_bot_paused: boolean
           last_message_at: string
           meta: Json
           restaurant_id: string
           state: Database["public"]["Enums"]["conversation_state"]
         }
         Insert: {
+          assigned_to?: string | null
           cart?: Json
           channel: Database["public"]["Enums"]["channel_type"]
           created_at?: string
@@ -121,12 +124,14 @@ export type Database = {
           delivery?: Json
           external_chat_id: string
           id?: string
+          is_bot_paused?: boolean
           last_message_at?: string
           meta?: Json
           restaurant_id: string
           state?: Database["public"]["Enums"]["conversation_state"]
         }
         Update: {
+          assigned_to?: string | null
           cart?: Json
           channel?: Database["public"]["Enums"]["channel_type"]
           created_at?: string
@@ -135,6 +140,7 @@ export type Database = {
           delivery?: Json
           external_chat_id?: string
           id?: string
+          is_bot_paused?: boolean
           last_message_at?: string
           meta?: Json
           restaurant_id?: string

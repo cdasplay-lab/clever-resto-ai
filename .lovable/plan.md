@@ -1,99 +1,123 @@
-# خطة: AI Agent مال المطاعم — يأخذ طلبات بدون "تخبيص"
 
-## الفكرة الأساسية
-نبني **Agent مستقل** (Headless) يشتغل على Lovable Cloud + Lovable AI Gateway، يتعامل مع محادثات الزباين ويحول كلامهم إلى **طلب رسمي منظم**. منصتك الحالية تتصل بيه عبر **REST API + Webhooks**. نبدأ بـ Telegram، ونفس الـ core نضيف عليه Meta وTikTok لاحقاً كـ adapters.
 
-## ليش الإصدارات السابقة كانت "تتخبيص" — وشلون نمنعها
-السبب الشائع: الـ AI يخمن (يهلوس) أصناف وأسعار، أو ينسى السياق، أو ما عنده أدوات حقيقية يستعملها. الحل:
+اخترت 8 مميزات. راح أقسّمها على 4 مراحل، كل مرحلة تنفذ لحالها وتنختبر قبل ما ننتقل للي بعدها — حتى نضمن إنه الوكيل يبقى يرد بدون خربطة.
 
-1. **Tool-calling إجباري** — الـ Agent ما يكدر "يخترع" صنف؛ لازم يستدعي `search_menu` و`create_order` كأدوات بـ JSON Schema صارم.
-2. **Grounding بالمنيو الحقيقي** — كل رد يعتمد على بيانات قاعدة البيانات (RAG على المنيو + embeddings).
-3. **State machine للطلب** — مراحل واضحة: `greeting → collecting_items → address → confirm → submitted`. ما يكدر يقفز.
-4. **Confirmation gate** — قبل ما يحفظ الطلب، يعرض ملخص ويطلب تأكيد صريح.
-5. **Confidence threshold** — إذا غير متأكد → يسأل أو يحول للموظف (handoff).
-6. **Idempotency + Memory** — كل محادثة لها `conversation_id`، والرسائل محفوظة كاملة وتنرسل للنموذج بكل طلب.
-7. **Guardrails** — system prompt مقفل، ما يتكلم بمواضيع خارج المطعم، ما يخمن أسعار.
+## مبدأ مهم لحماية الوكيل
+- **ما أمس** نظام الـ tools/الـ system prompt الحالي إلا للضرورة. كل ميزة جديدة تضاف كـ **tool منفصلة** أو **حقل سياق إضافي** بحيث لو فشلت الميزة، الوكيل يظل يشتغل كالمعتاد.
+- **كل قناة جديدة** عندها webhook منفصل، بس كلها تنتهي عند نفس `agent-run` بدون تغيير منطقه.
+- **التدخل البشري** يوقف الوكيل لتلك المحادثة فقط (state=handoff موجود أصلاً)، ما يأثر على باقي المحادثات.
 
-## المعمارية
+---
+
+## المرحلة 1 — ربط متعدد القنوات (WhatsApp + Instagram + Facebook)
+
+**قاعدة البيانات**
+- جدول `channel_integrations` (restaurant_id, channel, config jsonb, webhook_secret, is_active). يخزن توكنات WhatsApp Business Cloud API و Facebook Page Access Token و Instagram Graph token.
+- إضافة `bot_username` و `external_account_id` للجدول حتى نوجّه الرسالة الواردة للمطعم الصحيح.
+
+**Edge functions جديدة** (كل وحدة معزولة)
+- `whatsapp-webhook` — يستقبل من Meta Cloud API، يتحقق من التوقيع، يحفظ في `messages`، يستدعي `agent-run`.
+- `messenger-webhook` — Facebook Page Messenger.
+- `instagram-webhook` — Instagram DM (نفس Graph API لـ Meta).
+- كلها تستخدم نفس `tgSendMedia`/`tgSend` pattern لكن بـ API الخاص بكل منصة. أحط الدوال بـ `_shared/channels/`.
+
+**Dashboard**
+- تبويب **القنوات**: المستخدم يدخل بيانات Meta (Page ID, Access Token, Verify Token) ويشوف الـ webhook URL يدزها لـ Meta.
+- خانة المحادثات الموجودة أصلاً تعرض كل القنوات (هذا سويناه).
+
+**ما أمس**
+- `agent-run` يبقى كما هو 100%. القنوات تتعامل معه عبر `conversation_id` فقط.
+
+**الأسرار المطلوبة** (راح أطلبها لما نوصل): `META_APP_SECRET` للتحقق من توقيع Meta webhooks.
+
+---
+
+## المرحلة 2 — Inbox تفاعلي (تدخّل بشري + رد يدوي)
+
+**قاعدة البيانات**
+- إضافة `is_bot_paused boolean default false` و `assigned_to uuid` على `conversations`.
+- سياسات RLS تسمح للمالك بـ UPDATE على conversations و INSERT على messages.
+
+**Backend**
+- Edge function `send-manual-message` — تأخذ `conversation_id` + `text`، تكتشف القناة، تدز عبر الـ API المناسب (Telegram/WhatsApp/IG/FB)، وتحفظ الرسالة في `messages` بـ role=assistant و name='human'.
+- في `agent-run`: في بداية الدالة، إذا `is_bot_paused=true` → يرجع بدون استدعاء LLM. سطرين فقط، ما يمس منطق الـ tools.
+
+**Dashboard**
+- في الـ thread: زر **"تولّى المحادثة"** (يوقف البوت)، حقل كتابة رد، زر **"رجّع للبوت"**.
+- مؤشر بصري إذا المحادثة تحت تدخّل بشري.
+
+---
+
+## المرحلة 3 — إدارة الطلبات + خيارات الأصناف + التحليلات
+
+**أ. إدارة الطلبات + إشعار الزبون**
+- في `OrdersTab`: dropdown لتغيير حالة الطلب (pending → preparing → on_the_way → delivered → cancelled).
+- Trigger في DB: عند تغيير `orders.status`، استدعاء edge function `notify-order-status` تدز رسالة للزبون على نفس قناته:
+  - preparing: "طلبك قيد التحضير 👨‍🍳"
+  - on_the_way: "طلبك بالطريق 🛵"
+  - delivered: "تم التسليم. صحتين! 🙏"
+
+**ب. خيارات الأصناف (variants/extras)**
+- العمود `options jsonb` موجود في `menu_items`. هيكل مقترح:
+  ```json
+  [
+    {"name":"الحجم","type":"single","required":true,"choices":[{"label":"عادي","price":0},{"label":"كبير","price":1000}]},
+    {"name":"إضافات","type":"multi","choices":[{"label":"جبن","price":500},{"label":"بطاطا","price":750}]}
+  ]
+  ```
+- في Dashboard: محرر options لكل صنف.
+- في `agent-run`: tool جديدة `get_item_options(menu_item_id)` يستدعيها الوكيل لو الصنف الو options قبل ما يضيفه للسلة. ما أمس `add_to_cart` الموجودة، بس أضيف parameter اختياري `selected_options` يتخزن مع الـ cart item ويتحسب بالـ price.
+
+**ج. تحليلات و KPIs**
+- Edge function `analytics-summary` — رجع: عدد المحادثات/الطلبات اليوم/الأسبوع/الشهر، معدل التحويل (محادثات أنتجت طلبات)، AOV، top 5 أصناف مبيعاً، توزيع الطلبات بالساعات، توزيع القنوات.
+- تبويب جديد **التحليلات** في Dashboard مع كروت أرقام + chart بسيط (recharts).
+
+---
+
+## المرحلة 4 — Landing + Onboarding + Paddle
+
+**أ. صفحة هبوط (`/` index route)**
+- استبدال الصفحة الحالية بـ landing عربي: hero، 3-4 features، أسعار، شهادات، CTA. SEO meta كاملة.
+- لوحة التحكم تنتقل لـ `/dashboard` (الحالة الحالية).
+
+**ب. Onboarding 3 خطوات** (`/onboarding`)
+- خطوة 1: اسم المطعم + اللغة + العملة.
+- خطوة 2: رفع منيو (CSV/Excel parse في الفرونت أو إدخال يدوي سريع).
+- خطوة 3: ربط قناة (يختار Telegram/WhatsApp ويتبع التعليمات).
+- بعد الإكمال → `/dashboard`.
+
+**ج. Paddle**
+- استخدام `enable_paddle_payments` (مش `enable_stripe` لأنه SaaS رقمي عالمي).
+- جدول `subscriptions` + جدول `plans` (Free/Pro/Business مع limits).
+- middleware في `agent-run`: تحقق من الحد الشهري قبل الرد. إذا تجاوز → الوكيل يعتذر للزبون ويرسل تنبيه للمالك.
+- صفحة `/billing` للترقية وعرض الاستخدام.
+
+**د. إشعارات المالك (bonus)**
+- عند طلب جديد، Telegram message للمالك (يدخل chat_id الشخصي في الإعدادات).
+
+---
+
+## الترتيب المقترح للتنفيذ
+
+أوصي نبدأ بـ **المرحلة 2** (Inbox تفاعلي) أولاً لأنها:
+- أصغر تغيير
+- ما تحتاج توكنات خارجية
+- تنطي قيمة فورية (تتدخل لو البوت غلط)
+- ما تمس الوكيل عملياً (سطرين فقط)
+
+ثم المرحلة 1 (قنوات)، ثم 3، ثم 4.
 
 ```text
-┌─────────────┐    webhook    ┌──────────────────────┐
-│  Telegram   │ ────────────▶ │  Edge Function:      │
-│  (لاحقاً     │               │  channel-webhook     │
-│  Meta/TikTok)│              └──────────┬───────────┘
-└─────────────┘                          │
-                                         ▼
-                              ┌──────────────────────┐
-                              │  Agent Core          │
-                              │  (Lovable AI Gateway)│
-                              │  - tools             │
-                              │  - state machine     │
-                              │  - menu RAG          │
-                              └──────────┬───────────┘
-                                         │
-                       ┌─────────────────┼─────────────────┐
-                       ▼                 ▼                 ▼
-                ┌───────────┐    ┌───────────┐     ┌──────────────┐
-                │ Postgres  │    │ Orders    │     │ Your SaaS    │
-                │ (menu,    │    │ webhook   │────▶│ Platform     │
-                │ convos,   │    │ outbound  │     │ (REST API)   │
-                │ orders)   │    └───────────┘     └──────────────┘
-                └───────────┘
+المرحلة 2  ──►  المرحلة 1  ──►  المرحلة 3  ──►  المرحلة 4
+(يومين)        (3-4 أيام)     (3 أيام)        (4-5 أيام)
+inbox          channels       ops+analytics   landing+billing
 ```
 
-## قاعدة البيانات (Lovable Cloud)
-- `restaurants` — كل مطعم وإعداداته (لهجة الرد، ساعات العمل، منطقة التوصيل، webhook_url لمنصتك).
-- `menu_items` — أصناف + سعر + توفر + `embedding` للبحث الدلالي.
-- `conversations` — `id, restaurant_id, channel, customer_handle, state, context_json`.
-- `messages` — كل الرسائل (in/out) لكل محادثة.
-- `orders` — الطلبات المُنشأة بصيغة منظمة + `status`.
-- `agent_logs` — كل استدعاء أداة ونتيجته (للـ debugging).
-- `api_keys` — مفاتيح لمنصتك تتصل بالـ Agent API.
+---
 
-## Edge Functions
-1. `telegram-webhook` — يستقبل رسائل Telegram، يحفظها، ويشغل Agent.
-2. `agent-run` — قلب الـ Agent: يبني الـ messages، يستدعي Gemini/GPT مع tools، ينفذ الأدوات بحلقة، يرجع الرد.
-3. `menu-embed` — يولد embeddings للمنيو عند الإضافة/التعديل.
-4. `orders-dispatch` — يرسل الطلب المؤكد إلى webhook منصتك (مع retry).
-5. `platform-api` — REST endpoints لمنصتك: ضبط المنيو، جلب المحادثات، إعدادات المطعم.
+## شنو رأيك؟
 
-## أدوات الـ Agent (Tool-calling)
-- `search_menu(query)` — بحث دلالي بالمنيو.
-- `check_availability(item_id)` — توفر الصنف الآن.
-- `add_to_cart(item_id, qty, notes)` — يضيف للسلة الحالية.
-- `get_cart_summary()` — ملخص + سعر إجمالي.
-- `set_delivery_info(address, phone, time)` — مع فحص منطقة التوصيل.
-- `submit_order()` — يحفظ الطلب نهائياً (يتطلب تأكيد العميل).
-- `handoff_to_human(reason)` — يحول للموظف.
+- نمشي بالترتيب اللي اقترحته (2 → 1 → 3 → 4)؟
+- أو تحب نبدأ بمرحلة معينة بالأول؟
+- أو نضغط مرحلتين سوا بنفس الجلسة؟
 
-## اختيار النموذج
-- **افتراضي**: `google/gemini-3-flash-preview` — سريع، رخيص، ممتاز بالعربي وبالـ tool-calling.
-- **fallback للحالات المعقدة**: `openai/gpt-5.4` مع reasoning effort = medium.
-- نقدر نضيف لاحقاً نموذج للصور (لو الزبون يرسل صورة منيو/منتج).
-
-## API للربط مع منصتك
-- `POST /platform-api/restaurants` — إنشاء/تحديث مطعم.
-- `POST /platform-api/menu` — رفع منيو (bulk).
-- `GET /platform-api/conversations` — قراءة المحادثات.
-- `GET /platform-api/orders` — الطلبات الجديدة.
-- `POST /platform-api/webhook-config` — تسجيل webhook منصتك لاستقبال الطلبات.
-- مصادقة: API key بهيدر `X-API-Key`.
-
-## خطة التسليم
-1. تفعيل Lovable Cloud + Lovable AI + ربط Telegram connector.
-2. إنشاء جداول قاعدة البيانات + RLS + grants.
-3. Edge function لتوليد embeddings للمنيو.
-4. Edge function `agent-run` بكل الأدوات + state machine.
-5. `telegram-webhook` لاستقبال الرسائل.
-6. `orders-dispatch` لإرسال الطلبات لمنصتك.
-7. `platform-api` للربط مع منصتك الحالية.
-8. لوحة تحكم بسيطة (اختياري لاحقاً) لمراقبة المحادثات والـ agent logs.
-9. اختبار end-to-end من Telegram → طلب → webhook منصتك.
-
-## ملاحظات تقنية
-- كل رسالة وكل tool call تنحفظ بـ `agent_logs` — هذا أهم شي للديباغ.
-- Webhook منصتك يستلم الطلب بصيغة JSON ثابتة (نوثقها).
-- ما نخزن مفاتيح Telegram يدوياً — نستخدم Telegram connector.
-- Meta وTikTok نضيفهم كـ adapters جدد على نفس `agent-run` بدون إعادة كتابة المنطق.
-
-هل تمشي بهذي الخطة؟ بعد موافقتك أبدأ بالتنفيذ خطوة خطوة.
