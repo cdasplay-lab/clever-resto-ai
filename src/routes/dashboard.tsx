@@ -54,6 +54,7 @@ type Conversation = {
   customer_name: string | null;
   state: string;
   last_message_at: string;
+  is_bot_paused?: boolean;
   last_message?: string | null;
 };
 
