@@ -359,27 +359,30 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
           ) : (
             <div className="space-y-2">
               {items.map((it) => (
-                <div key={it.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {it.image_url ? (
-                      <img src={it.image_url} alt={it.name} className="h-14 w-14 rounded object-cover" />
-                    ) : (
-                      <div className="h-14 w-14 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">لا صورة</div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}</div>
-                      {it.description && <div className="text-sm text-muted-foreground truncate">{it.description}</div>}
+                <div key={it.id} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {it.image_url ? (
+                        <img src={it.image_url} alt={it.name} className="h-14 w-14 rounded object-cover" />
+                      ) : (
+                        <div className="h-14 w-14 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">لا صورة</div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}{Array.isArray(it.options) && it.options.length > 0 && <Badge variant="outline" className="mr-2">{it.options.length} خيارات</Badge>}</div>
+                        {it.description && <div className="text-sm text-muted-foreground truncate">{it.description}</div>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="font-mono">{it.price}</div>
+                      <label className="cursor-pointer">
+                        <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
+                        <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
+                      </label>
+                      {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
+                      <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <div className="font-mono">{it.price}</div>
-                    <label className="cursor-pointer">
-                      <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
-                      <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
-                    </label>
-                    {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
-                    <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
-                  </div>
+                  <OptionsEditor item={it} onSaved={load} />
                 </div>
               ))}
             </div>
