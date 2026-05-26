@@ -585,6 +585,7 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
                       <div className="mt-1.5 flex items-center gap-1">
                         <Badge variant="outline" className={`text-[10px] ${m.color}`}>{m.label}</Badge>
                         <Badge variant="outline" className="text-[10px]">{c.state}</Badge>
+                        {c.is_bot_paused && <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">موظف</Badge>}
                       </div>
                     </button>
                   </li>
