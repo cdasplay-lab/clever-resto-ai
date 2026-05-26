@@ -121,7 +121,25 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "show_menu",
+      description:
+        "اعرض المنيو كاملاً (أو حسب صنف معين) للزبون مع الصور. استخدمه لما الزبون يطلب 'المنيو' أو 'شنو عندكم' أو يسأل عن أصناف فئة معينة. سيدز الصور مباشرة للزبون.",
+      parameters: {
+        type: "object",
+        properties: {
+          category: { type: "string", description: "اختياري: اسم فئة محددة (مثلاً: ساندويش، مشروبات)" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
+
+// Media to deliver via the channel (filled by show_menu tool)
+type MediaItem = { photo_url: string; caption: string };
 
 // ---------- System prompt builder ----------
 function systemPrompt(restaurant: any, conv: any) {
