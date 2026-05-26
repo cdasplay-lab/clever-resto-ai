@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth")({
@@ -16,6 +18,7 @@ function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState<"google" | "apple" | null>(null);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -41,6 +44,25 @@ function AuthPage() {
     }
   }
 
+  async function oauth(provider: "google" | "apple") {
+    setOauthLoading(provider);
+    try {
+      const result = await lovable.auth.signInWithOAuth(provider, {
+        redirect_uri: window.location.origin + "/dashboard",
+      });
+      if (result.error) {
+        toast.error(result.error.message ?? "فشل تسجيل الدخول");
+        setOauthLoading(null);
+        return;
+      }
+      if (result.redirected) return; // browser will redirect
+      window.location.href = "/dashboard";
+    } catch (e: any) {
+      toast.error(e.message ?? "خطأ");
+      setOauthLoading(null);
+    }
+  }
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4" dir="rtl">
       <Card className="w-full max-w-md">
@@ -48,7 +70,34 @@ function AuthPage() {
           <CardTitle>{mode === "signin" ? "تسجيل دخول" : "حساب جديد"}</CardTitle>
           <CardDescription>منصة AI Agent مال المطاعم</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <div className="grid gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => oauth("google")}
+              disabled={oauthLoading !== null}
+            >
+              {oauthLoading === "google" ? "..." : "متابعة بحساب Google"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => oauth("apple")}
+              disabled={oauthLoading !== null}
+            >
+              {oauthLoading === "apple" ? "..." : "متابعة بحساب Apple"}
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Separator className="flex-1" />
+            <span className="text-xs text-muted-foreground">أو</span>
+            <Separator className="flex-1" />
+          </div>
+
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">الإيميل</Label>
