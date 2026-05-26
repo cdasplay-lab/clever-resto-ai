@@ -176,6 +176,7 @@ async function runTool(
   restaurant: any,
   name: string,
   args: any,
+  media: MediaItem[],
 ): Promise<any> {
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
