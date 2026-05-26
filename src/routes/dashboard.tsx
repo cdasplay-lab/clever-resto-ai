@@ -599,28 +599,107 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
       <Card className="lg:col-span-3 flex flex-col max-h-[75vh]">
         <CardHeader className="pb-3">
           {selectedConv ? (
-            <div className="flex items-center gap-3">
-              {(() => { const m = channelMeta(selectedConv.channel); const Icon = m.icon; return (
-                <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${m.color}`}><Icon className="h-5 w-5" /></div>
-              ); })()}
-              <div>
-                <CardTitle className="text-base">{selectedConv.customer_name || selectedConv.customer_handle || "زبون"}</CardTitle>
-                <CardDescription className="text-xs">{selectedConv.customer_handle} · {channelMeta(selectedConv.channel).label}</CardDescription>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {(() => { const m = channelMeta(selectedConv.channel); const Icon = m.icon; return (
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${m.color}`}><Icon className="h-5 w-5" /></div>
+                ); })()}
+                <div className="min-w-0">
+                  <CardTitle className="text-base truncate">{selectedConv.customer_name || selectedConv.customer_handle || "زبون"}</CardTitle>
+                  <CardDescription className="text-xs truncate">{selectedConv.customer_handle} · {channelMeta(selectedConv.channel).label}</CardDescription>
+                </div>
               </div>
+              <HandoffControls conv={selectedConv} onChange={loadConvs} />
             </div>
           ) : <CardTitle>الرسائل</CardTitle>}
         </CardHeader>
         <CardContent className="flex-1 space-y-2 overflow-y-auto">
-          {!selected ? <p className="text-sm text-muted-foreground">اختر محادثة من القائمة</p> : messages.length === 0 ? <p className="text-sm text-muted-foreground">لا رسائل</p> : messages.map((m) => (
-            <div key={m.id} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
-              <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "bg-accent" : m.role === "assistant" ? "bg-primary text-primary-foreground" : "bg-muted text-xs font-mono"}`}>
-                <div className="mb-0.5 text-[10px] opacity-70">{m.role === "user" ? "عميل" : m.role === "assistant" ? "بوت" : m.role}{m.name ? ` · ${m.name}` : ""}</div>
-                <div className="whitespace-pre-wrap break-words">{m.content}</div>
+          {!selected ? <p className="text-sm text-muted-foreground">اختر محادثة من القائمة</p> : messages.length === 0 ? <p className="text-sm text-muted-foreground">لا رسائل</p> : messages.map((m) => {
+            const isHuman = m.role === "assistant" && m.name === "human";
+            return (
+              <div key={m.id} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
+                <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "bg-accent" : isHuman ? "bg-emerald-600 text-white" : m.role === "assistant" ? "bg-primary text-primary-foreground" : "bg-muted text-xs font-mono"}`}>
+                  <div className="mb-0.5 text-[10px] opacity-70">{m.role === "user" ? "عميل" : isHuman ? "موظف" : m.role === "assistant" ? "بوت" : m.role}</div>
+                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
+        {selectedConv && (
+          <Composer conversationId={selectedConv.id} disabled={!selectedConv.is_bot_paused} onSent={() => {/* realtime will refresh */}} />
+        )}
       </Card>
+    </div>
+  );
+}
+
+function HandoffControls({ conv, onChange }: { conv: Conversation; onChange: () => void }) {
+  const [busy, setBusy] = useState(false);
+  async function toggle() {
+    setBusy(true);
+    const { error } = await supabase
+      .from("conversations")
+      .update({ is_bot_paused: !conv.is_bot_paused })
+      .eq("id", conv.id);
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success(conv.is_bot_paused ? "تم تشغيل البوت" : "تم إيقاف البوت — تكدر ترد يدوياً");
+    onChange();
+  }
+  return (
+    <Button size="sm" variant={conv.is_bot_paused ? "default" : "outline"} disabled={busy} onClick={toggle}>
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : conv.is_bot_paused ? "رجّع للبوت" : "تولّى المحادثة"}
+    </Button>
+  );
+}
+
+function Composer({ conversationId, disabled, onSent }: { conversationId: string; disabled: boolean; onSent: () => void }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  async function send() {
+    const t = text.trim();
+    if (!t) return;
+    setSending(true);
+    const { data: sess } = await supabase.auth.getSession();
+    const token = sess.session?.access_token;
+    try {
+      const r = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/send-manual-message`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+        },
+        body: JSON.stringify({ conversation_id: conversationId, text: t }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || "فشل الإرسال");
+      setText("");
+      onSent();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSending(false);
+    }
+  }
+  return (
+    <div className="border-t p-3">
+      {disabled && (
+        <p className="mb-2 text-xs text-muted-foreground">البوت شغّال. اضغط "تولّى المحادثة" حتى ترد يدوياً.</p>
+      )}
+      <div className="flex gap-2">
+        <Input
+          placeholder="اكتب ردك…"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
+          disabled={disabled || sending}
+        />
+        <Button onClick={send} disabled={disabled || sending || !text.trim()}>
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+        </Button>
+      </div>
     </div>
   );
 }
