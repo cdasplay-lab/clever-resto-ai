@@ -461,7 +461,7 @@ Deno.serve(async (req) => {
       break;
     }
 
-    return json({ reply: finalText, state: conv.state });
+    return json({ reply: finalText, state: conv.state, media });
   } catch (e: any) {
     const msg = e?.message || "error";
     if (msg === "rate_limited") return json({ error: "rate_limited" }, 429);
