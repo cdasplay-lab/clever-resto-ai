@@ -1,1 +1,16 @@
 project_id = "bxebeiadccrbnaqsniko"
+
+[functions.telegram-webhook]
+verify_jwt = false
+
+[functions.platform-api]
+verify_jwt = false
+
+[functions.agent-run]
+verify_jwt = false
+
+[functions.menu-embed]
+verify_jwt = false
+
+[functions.orders-dispatch]
+verify_jwt = false
