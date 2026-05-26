@@ -431,7 +431,7 @@ Deno.serve(async (req) => {
             kind: `tool_call:${name}`,
             payload: { args },
           });
-          const result = await runTool(db, conv, restaurant, name, args);
+          const result = await runTool(db, conv, restaurant, name, args, media);
           await db.from("agent_logs").insert({
             conversation_id,
             restaurant_id: restaurant.id,
