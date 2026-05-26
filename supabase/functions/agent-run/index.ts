@@ -311,6 +311,35 @@ async function runTool(
     return { ok: true };
   }
 
+  if (name === "show_menu") {
+    let q = db
+      .from("menu_items")
+      .select("id,name,description,price,category,image_url,is_available")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_available", true)
+      .order("category", { nullsFirst: false })
+      .order("name");
+    if (args.category) q = q.ilike("category", `%${args.category}%`);
+    const { data: items } = await q;
+    const list = items ?? [];
+    // Queue media for the channel
+    for (const it of list) {
+      if (it.image_url) {
+        const caption = `${it.name}${it.category ? ` — ${it.category}` : ""}\n${it.price} ${restaurant.currency}${it.description ? `\n${it.description}` : ""}`;
+        media.push({ photo_url: it.image_url, caption });
+      }
+    }
+    return {
+      ok: true,
+      count: list.length,
+      with_images: media.length,
+      items: list.map((i) => ({ id: i.id, name: i.name, price: i.price, category: i.category })),
+      note: media.length
+        ? "تم تجهيز صور المنيو وستُرسل للزبون مع ردك. اكتفِ بجملة قصيرة مثل 'تفضل المنيو 👇' ولا تكرر الأسعار."
+        : "لا توجد صور للأصناف. اعرض المنيو نصياً.",
+    };
+  }
+
   return { error: "unknown tool" };
 }
 
