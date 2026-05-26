@@ -288,11 +288,12 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
           <CardTitle>إضافة صنف</CardTitle>
         </CardHeader>
         <CardContent>
-          <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-5">
+          <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-6">
             <Input name="name" placeholder="اسم الصنف" required />
             <Input name="category" placeholder="الصنف (مثلاً: ساندويش)" />
             <Input name="price" placeholder="السعر" type="number" required />
-            <Input name="description" placeholder="وصف مختصر" className="md:col-span-1" />
+            <Input name="description" placeholder="وصف مختصر" />
+            <Input name="image" type="file" accept="image/*" />
             <Button type="submit" disabled={adding}>
               {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Plus className="ml-1 h-4 w-4" />إضافة</>}
             </Button>
