@@ -520,6 +520,23 @@ Deno.serve(async (req) => {
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
+      const hasToolCalls = !!(msg.tool_calls && msg.tool_calls.length);
+      const hasContent = typeof msg.content === "string" && msg.content.trim().length > 0;
+
+      // Skip empty assistant turns (no text + no tool calls) — don't persist, retry once
+      if (!hasToolCalls && !hasContent) {
+        await db.from("agent_logs").insert({
+          conversation_id, restaurant_id: restaurant.id, step,
+          kind: "guardrail:empty_response", payload: { raw: msg ?? null },
+        });
+        // Nudge the model with a tiny user-side hint and retry on next iteration
+        llmMessages.push({
+          role: "system",
+          content: "ردك السابق كان فارغ. لازم ترد على الزبون بنص واضح أو تستخدم أداة. لا ترجع رد فارغ.",
+        });
+        continue;
+      }
+
       // Persist assistant message
       await db.from("messages").insert({
         conversation_id,
@@ -528,6 +545,7 @@ Deno.serve(async (req) => {
         tool_calls: msg.tool_calls ?? null,
       });
       llmMessages.push(msg);
+
 
       if (msg.tool_calls && msg.tool_calls.length) {
         consecutiveToolSteps++;
@@ -602,6 +620,16 @@ Deno.serve(async (req) => {
       break;
     }
 
+    if (!finalText || !finalText.trim()) {
+      finalText = "هلا والله 👋 شلون أكدر أساعدك؟";
+      await db.from("messages").insert({
+        conversation_id, role: "assistant", content: finalText,
+      });
+      await db.from("agent_logs").insert({
+        conversation_id, restaurant_id: restaurant.id, step: -1,
+        kind: "guardrail:final_fallback", payload: {},
+      });
+    }
     return json({ reply: finalText, state: conv.state, media });
   } catch (e: any) {
     const msg = e?.message || "error";
