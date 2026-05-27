@@ -480,17 +480,29 @@ Deno.serve(async (req) => {
       .single();
     if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
 
-    // Load last 30 messages
+    // Load latest 30 messages, then restore chronological order for the model.
+    // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
       .from("messages")
       .select("role,content,tool_calls,tool_call_id,name")
       .eq("conversation_id", conversation_id)
-      .order("created_at", { ascending: true })
+      .order("created_at", { ascending: false })
       .limit(30);
+
+    const cleanHistory = (history || [])
+      .slice()
+      .reverse()
+      .filter((m) => {
+        const hasContent = typeof m.content === "string" && m.content.trim().length > 0;
+        const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
+        if (m.role === "assistant") return hasContent || hasToolCalls;
+        if (m.role === "tool") return hasContent && !!m.tool_call_id;
+        return hasContent;
+      });
 
     const llmMessages: any[] = [
       { role: "system", content: systemPrompt(restaurant, conv) },
-      ...(history || []).map((m) => {
+      ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
         if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
