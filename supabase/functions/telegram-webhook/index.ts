@@ -149,15 +149,15 @@ Deno.serve(async (req) => {
   await db.from("messages").insert({
     conversation_id: convId,
     role: "user",
-    content: text,
+    content: userText,
   });
 
-  // Call agent
+  // Call agent (pass image_url for Vision when present)
   const baseUrl = Deno.env.get("SUPABASE_URL");
   const r = await fetch(`${baseUrl}/functions/v1/agent-run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ conversation_id: convId }),
+    body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
   });
   const data = await r.json().catch(() => ({}));
 
