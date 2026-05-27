@@ -501,7 +501,21 @@ Deno.serve(async (req) => {
 
     const media: MediaItem[] = [];
     let finalText = "";
+    const loopStartedAt = Date.now();
+    // Guardrails: dedup identical consecutive tool calls + loop breaker
+    const toolCallCache = new Map<string, any>(); // key: name+args -> last result
+    let consecutiveToolSteps = 0;
+
     for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
+      if (Date.now() - loopStartedAt > TOTAL_LOOP_TIMEOUT_MS) {
+        await db.from("agent_logs").insert({
+          conversation_id, restaurant_id: restaurant.id, step,
+          kind: "guardrail:total_timeout", payload: { ms: Date.now() - loopStartedAt },
+        });
+        finalText = finalText || "عذراً، صار تأخير. ممكن تعيد طلبك بشكل أبسط؟";
+        break;
+      }
+
       const resp = await callModel(llmMessages);
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
@@ -516,25 +530,54 @@ Deno.serve(async (req) => {
       llmMessages.push(msg);
 
       if (msg.tool_calls && msg.tool_calls.length) {
+        consecutiveToolSteps++;
+        // Loop breaker: too many tool steps without producing user-facing text
+        if (consecutiveToolSteps > MAX_CONSECUTIVE_TOOL_STEPS) {
+          await db.from("agent_logs").insert({
+            conversation_id, restaurant_id: restaurant.id, step,
+            kind: "guardrail:loop_break", payload: { consecutiveToolSteps },
+          });
+          finalText = "خلني أتأكد من شي وأرجعلك بعد لحظة 🙏";
+          break;
+        }
+
         for (const tc of msg.tool_calls) {
           const name = tc.function?.name;
           let args: any = {};
           try { args = JSON.parse(tc.function?.arguments || "{}"); } catch (_) {}
-          await db.from("agent_logs").insert({
-            conversation_id,
-            restaurant_id: restaurant.id,
-            step,
-            kind: `tool_call:${name}`,
-            payload: { args },
-          });
-          const result = await runTool(db, conv, restaurant, name, args, media);
-          await db.from("agent_logs").insert({
-            conversation_id,
-            restaurant_id: restaurant.id,
-            step,
-            kind: `tool_result:${name}`,
-            payload: result,
-          });
+
+          // Dedup: same tool + same args called again -> return cached result
+          const cacheKey = `${name}:${JSON.stringify(args)}`;
+          let result: any;
+          let fromCache = false;
+          if (toolCallCache.has(cacheKey)) {
+            result = toolCallCache.get(cacheKey);
+            fromCache = true;
+            await db.from("agent_logs").insert({
+              conversation_id, restaurant_id: restaurant.id, step,
+              kind: `guardrail:dedup:${name}`, payload: { args },
+            });
+          } else {
+            await db.from("agent_logs").insert({
+              conversation_id, restaurant_id: restaurant.id, step,
+              kind: `tool_call:${name}`, payload: { args },
+            });
+            try {
+              result = await withTimeout(
+                runTool(db, conv, restaurant, name, args, media),
+                PER_TOOL_TIMEOUT_MS,
+                name,
+              );
+            } catch (err: any) {
+              result = { error: err?.message || "tool_failed" };
+            }
+            toolCallCache.set(cacheKey, result);
+            await db.from("agent_logs").insert({
+              conversation_id, restaurant_id: restaurant.id, step,
+              kind: `tool_result:${name}`, payload: { ...result, _cached: fromCache },
+            });
+          }
+
           const toolMsg = {
             role: "tool",
             tool_call_id: tc.id,
@@ -553,6 +596,8 @@ Deno.serve(async (req) => {
         continue; // loop again so the model can see tool results
       }
 
+      // Model produced a text reply -> reset counter and finish
+      consecutiveToolSteps = 0;
       finalText = msg.content ?? "";
       break;
     }
