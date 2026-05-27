@@ -604,16 +604,6 @@ Deno.serve(async (req) => {
       break;
     }
 
-    if (!finalText || !finalText.trim()) {
-      finalText = "هلا والله 👋 شلون أكدر أساعدك؟";
-      await db.from("messages").insert({
-        conversation_id, role: "assistant", content: finalText,
-      });
-      await db.from("agent_logs").insert({
-        conversation_id, restaurant_id: restaurant.id, step: -1,
-        kind: "guardrail:final_fallback", payload: {},
-      });
-    }
     return json({ reply: finalText, state: conv.state, media });
   } catch (e: any) {
     const msg = e?.message || "error";
