@@ -511,6 +511,21 @@ Deno.serve(async (req) => {
       }),
     ];
 
+    // Vision: if an image came with this turn, attach it to the latest user message
+    if (image_url && typeof image_url === "string") {
+      for (let i = llmMessages.length - 1; i >= 0; i--) {
+        const m = llmMessages[i];
+        if (m.role === "user") {
+          const txt = typeof m.content === "string" ? m.content : "";
+          m.content = [
+            { type: "text", text: txt || "صورة من الزبون — افحصها وردّ عليه." },
+            { type: "image_url", image_url: { url: image_url } },
+          ];
+          break;
+        }
+      }
+    }
+
     const media: MediaItem[] = [];
     let finalText = "";
     const loopStartedAt = Date.now();
