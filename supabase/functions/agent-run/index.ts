@@ -457,7 +457,7 @@ async function callModel(messages: any[]) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const { conversation_id } = await req.json();
+    const { conversation_id, image_url } = await req.json();
     if (!conversation_id) return json({ error: "conversation_id required" }, 400);
     const db = admin();
 
