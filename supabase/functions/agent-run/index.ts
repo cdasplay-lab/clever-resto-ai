@@ -10,6 +10,20 @@ import { embedText } from "../_shared/embed.ts";
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
 const MAX_TOOL_ITERATIONS = 6;
+const TOTAL_LOOP_TIMEOUT_MS = 25_000;
+const PER_TOOL_TIMEOUT_MS = 15_000;
+const MAX_CONSECUTIVE_TOOL_STEPS = 4; // bdoun nass mn al-model
+
+// Promise timeout wrapper - safe utility, doesn't mutate anything
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timeout:${label}:${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
 
 type CartItem = {
   menu_item_id: string;
