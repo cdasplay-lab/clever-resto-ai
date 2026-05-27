@@ -457,7 +457,7 @@ async function callModel(messages: any[]) {
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
-    const { conversation_id } = await req.json();
+    const { conversation_id, image_url } = await req.json();
     if (!conversation_id) return json({ error: "conversation_id required" }, 400);
     const db = admin();
 
@@ -510,6 +510,21 @@ Deno.serve(async (req) => {
         return base;
       }),
     ];
+
+    // Vision: if an image came with this turn, attach it to the latest user message
+    if (image_url && typeof image_url === "string") {
+      for (let i = llmMessages.length - 1; i >= 0; i--) {
+        const m = llmMessages[i];
+        if (m.role === "user") {
+          const txt = typeof m.content === "string" ? m.content : "";
+          m.content = [
+            { type: "text", text: txt || "صورة من الزبون — افحصها وردّ عليه." },
+            { type: "image_url", image_url: { url: image_url } },
+          ];
+          break;
+        }
+      }
+    }
 
     const media: MediaItem[] = [];
     let finalText = "";

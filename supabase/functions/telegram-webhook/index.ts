@@ -67,8 +67,35 @@ Deno.serve(async (req) => {
   const update = await req.json();
   const message = update.message ?? update.edited_message;
   const chatId = message?.chat?.id;
-  const text = message?.text;
-  if (!chatId || !text) return json({ ok: true, ignored: true });
+  const text: string | undefined = message?.text;
+  const caption: string | undefined = message?.caption;
+  const photos: any[] | undefined = message?.photo;
+  // Largest photo size is the last element
+  const photo = Array.isArray(photos) && photos.length ? photos[photos.length - 1] : null;
+
+  if (!chatId || (!text && !photo)) return json({ ok: true, ignored: true });
+
+  // If photo: fetch via Telegram getFile + download to data URL (Vision support)
+  let imageDataUrl: string | null = null;
+  if (photo?.file_id) {
+    try {
+      const r = await tgCall("getFile", { file_id: photo.file_id });
+      const j = await r.json();
+      const filePath = j?.result?.file_path;
+      if (filePath) {
+        const dl = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_API_KEY}/${filePath}`);
+        if (dl.ok) {
+          const buf = new Uint8Array(await dl.arrayBuffer());
+          const ct = dl.headers.get("content-type") || "image/jpeg";
+          let bin = "";
+          for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+          imageDataUrl = `data:${ct};base64,${btoa(bin)}`;
+        }
+      }
+    } catch (_) { /* ignore, fall back to text-only */ }
+  }
+
+  const userText = (text ?? caption ?? (imageDataUrl ? "[صورة من الزبون]" : "")).toString();
 
   const db = admin();
 
@@ -122,15 +149,15 @@ Deno.serve(async (req) => {
   await db.from("messages").insert({
     conversation_id: convId,
     role: "user",
-    content: text,
+    content: userText,
   });
 
-  // Call agent
+  // Call agent (pass image_url for Vision when present)
   const baseUrl = Deno.env.get("SUPABASE_URL");
   const r = await fetch(`${baseUrl}/functions/v1/agent-run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ conversation_id: convId }),
+    body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
   });
   const data = await r.json().catch(() => ({}));
 
