@@ -165,6 +165,22 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "resolve_branch",
+      description:
+        "حدد أنسب فرع للزبون بناءً على عنوانه أو منطقته. استدعِ هذه الأداة قبل set_delivery_info لما المطعم يكون عنده أكثر من فرع. ترجع الفرع المختار + أوقاته + الحد الأدنى.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string", description: "العنوان أو اسم المنطقة اللي قاله الزبون" },
+        },
+        required: ["address"],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
 
 // Media to deliver via the channel (filled by show_menu tool)
