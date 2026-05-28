@@ -15,6 +15,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { BranchesTab } from "@/components/branches-tab";
+import { SubscriptionTab } from "@/components/subscription-tab";
 
 export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
@@ -241,6 +242,7 @@ function RestaurantManager({
             <TabsTrigger value="conversations">المحادثات</TabsTrigger>
             <TabsTrigger value="channels">القنوات</TabsTrigger>
             <TabsTrigger value="analytics">التحليلات</TabsTrigger>
+            <TabsTrigger value="subscription">الاشتراك</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
 
@@ -250,6 +252,7 @@ function RestaurantManager({
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="subscription"><SubscriptionTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
         </Tabs>
       </div>

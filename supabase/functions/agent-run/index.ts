@@ -435,6 +435,18 @@ async function runTool(
       .select()
       .single();
     if (error) return { error: error.message };
+
+    // Consume confirmed_order quota. If denied, cancel the order and tell the user.
+    const { data: orderQuota } = await db.rpc("consume_quota", {
+      _restaurant_id: restaurant.id,
+      _kind: "confirmed_order",
+      _ref: order.id,
+    });
+    if (orderQuota && (orderQuota as any).allowed === false) {
+      await db.from("orders").update({ status: "cancelled", notes: "quota_exceeded" }).eq("id", order.id);
+      return { error: "عذراً، المطعم وصل لحدّه الشهري من الطلبات. حاول لاحقاً." };
+    }
+
     await db
       .from("conversations")
       .update({ state: "submitted", cart: [], delivery: {} })
@@ -560,6 +572,21 @@ Deno.serve(async (req) => {
       .eq("id", conv.restaurant_id)
       .single();
     if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
+
+    // ===== Quota gate: check subscription + consume one AI reply =====
+    const { data: quotaRes, error: quotaErr } = await db.rpc("consume_quota", {
+      _restaurant_id: restaurant.id,
+      _kind: "ai_reply",
+      _ref: conversation_id,
+    });
+    if (quotaErr) {
+      console.error("consume_quota error:", quotaErr);
+    } else if (quotaRes && (quotaRes as any).allowed === false) {
+      const reason = (quotaRes as any).reason;
+      console.log("Bot blocked for restaurant", restaurant.id, "reason:", reason);
+      // Bot stops responding. Owner sees this in dashboard.
+      return json({ reply: "", state: conv.state, media: [], skipped: "quota_blocked", reason });
+    }
 
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
