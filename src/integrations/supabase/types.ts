@@ -382,6 +382,57 @@ export type Database = {
           },
         ]
       }
+      plans: {
+        Row: {
+          code: string
+          created_at: string
+          features: Json
+          id: string
+          is_active: boolean
+          is_custom: boolean
+          max_ai_replies: number
+          max_branches: number
+          max_confirmed_orders: number
+          name_ar: string
+          name_en: string | null
+          price_iqd: number
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          features?: Json
+          id?: string
+          is_active?: boolean
+          is_custom?: boolean
+          max_ai_replies?: number
+          max_branches?: number
+          max_confirmed_orders?: number
+          name_ar: string
+          name_en?: string | null
+          price_iqd?: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          features?: Json
+          id?: string
+          is_active?: boolean
+          is_custom?: boolean
+          max_ai_replies?: number
+          max_branches?: number
+          max_confirmed_orders?: number
+          name_ar?: string
+          name_en?: string | null
+          price_iqd?: number
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -402,6 +453,53 @@ export type Database = {
           id?: string
         }
         Relationships: []
+      }
+      restaurant_subscriptions: {
+        Row: {
+          activated_by: string | null
+          created_at: string
+          id: string
+          notes: string | null
+          period_end: string
+          period_start: string
+          plan_id: string
+          restaurant_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          activated_by?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          period_end: string
+          period_start?: string
+          plan_id: string
+          restaurant_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          activated_by?: string | null
+          created_at?: string
+          id?: string
+          notes?: string | null
+          period_end?: string
+          period_start?: string
+          plan_id?: string
+          restaurant_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "restaurant_subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       restaurants: {
         Row: {
@@ -469,6 +567,57 @@ export type Database = {
         }
         Relationships: []
       }
+      usage_counters: {
+        Row: {
+          ai_replies_used: number
+          confirmed_orders_used: number
+          id: string
+          period_start: string
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          ai_replies_used?: number
+          confirmed_orders_used?: number
+          id?: string
+          period_start: string
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          ai_replies_used?: number
+          confirmed_orders_used?: number
+          id?: string
+          period_start?: string
+          restaurant_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      usage_events: {
+        Row: {
+          created_at: string
+          id: string
+          kind: string
+          ref_id: string | null
+          restaurant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          kind: string
+          ref_id?: string | null
+          restaurant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          kind?: string
+          ref_id?: string | null
+          restaurant_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -503,10 +652,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_subscription: {
+        Args: { _months?: number; _plan_code: string; _restaurant_id: string }
+        Returns: string
+      }
+      consume_quota: {
+        Args: { _kind: string; _ref?: string; _restaurant_id: string }
+        Returns: Json
+      }
       create_api_key: {
         Args: { p_label?: string; p_restaurant_id: string }
         Returns: string
       }
+      get_my_subscription: { Args: { _restaurant_id: string }; Returns: Json }
       has_role: {
         Args: {
           _restaurant_id: string
@@ -515,6 +673,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
       search_menu_items: {
         Args: { p_limit?: number; p_query: string; p_restaurant_id: string }
         Returns: {
@@ -526,9 +685,13 @@ export type Database = {
           similarity: number
         }[]
       }
+      set_subscription_status: {
+        Args: { _status: string; _sub_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
-      app_role: "admin" | "owner" | "staff"
+      app_role: "admin" | "owner" | "staff" | "platform_admin"
       channel_type: "telegram" | "instagram" | "facebook" | "tiktok" | "web"
       conversation_state:
         | "greeting"
@@ -672,7 +835,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["admin", "owner", "staff"],
+      app_role: ["admin", "owner", "staff", "platform_admin"],
       channel_type: ["telegram", "instagram", "facebook", "tiktok", "web"],
       conversation_state: [
         "greeting",
