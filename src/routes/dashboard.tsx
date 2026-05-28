@@ -328,11 +328,58 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
     else toast.success("تمت إعادة الفهرسة");
   }
 
+  const [aiUploading, setAiUploading] = useState(false);
+  async function aiUploadMenu(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setAiUploading(true);
+    const tid = toast.loading(`جاري قراءة ${files.length} صورة بالذكاء الاصطناعي ...`);
+    try {
+      const images: string[] = [];
+      for (const f of Array.from(files)) {
+        const b64 = await new Promise<string>((resolve, reject) => {
+          const r = new FileReader();
+          r.onload = () => resolve(String(r.result));
+          r.onerror = reject;
+          r.readAsDataURL(f);
+        });
+        images.push(b64);
+      }
+      const { data, error } = await supabase.functions.invoke("menu-extract", {
+        body: { restaurant_id: restaurantId, images },
+      });
+      toast.dismiss(tid);
+      if (error) return toast.error(error.message);
+      if ((data as any)?.error) return toast.error((data as any).error);
+      const n = (data as any)?.inserted ?? 0;
+      if (n === 0) toast.warning("ما تم استخراج أي صنف، جرب صورة أوضح");
+      else toast.success(`تمت إضافة ${n} صنف من الصورة 🎉`);
+      load();
+    } catch (e: any) {
+      toast.dismiss(tid);
+      toast.error(e?.message || "فشل الرفع");
+    } finally {
+      setAiUploading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>إضافة صنف</CardTitle>
+          <label className={`cursor-pointer ${aiUploading ? "opacity-60 pointer-events-none" : ""}`}>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => { aiUploadMenu(e.target.files); e.currentTarget.value = ""; }}
+            />
+            <span className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90">
+              {aiUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              رفع منيو بالذكاء الاصطناعي
+            </span>
+          </label>
         </CardHeader>
         <CardContent>
           <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-6">
