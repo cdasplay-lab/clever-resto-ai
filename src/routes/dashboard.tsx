@@ -1126,73 +1126,112 @@ type ChannelKey = "telegram" | "whatsapp" | "instagram" | "facebook";
 
 function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook`;
-  const [botHandle, setBotHandle] = useState<string>("");
-  const [saving, setSaving] = useState(false);
-  const [tgConnected, setTgConnected] = useState<boolean>(false);
+  const [values, setValues] = useState<Record<ChannelKey, string>>({
+    telegram: "",
+    whatsapp: "",
+    instagram: "",
+    facebook: "",
+  });
+  const [saved, setSaved] = useState<Record<ChannelKey, boolean>>({
+    telegram: false,
+    whatsapp: false,
+    instagram: false,
+    facebook: false,
+  });
+  const [savingKey, setSavingKey] = useState<ChannelKey | null>(null);
+
+  const COL: Record<ChannelKey, string> = {
+    telegram: "telegram_bot_username",
+    whatsapp: "whatsapp_number",
+    instagram: "instagram_handle",
+    facebook: "facebook_page",
+  };
 
   useEffect(() => {
     (async () => {
       const { data } = await supabase
         .from("restaurants")
-        .select("telegram_bot_username")
+        .select("telegram_bot_username, whatsapp_number, instagram_handle, facebook_page")
         .eq("id", restaurant.id)
         .maybeSingle();
-      if (data?.telegram_bot_username) {
-        setBotHandle(data.telegram_bot_username);
-        setTgConnected(true);
-      }
+      if (!data) return;
+      const next: Record<ChannelKey, string> = {
+        telegram: data.telegram_bot_username || "",
+        whatsapp: (data as any).whatsapp_number || "",
+        instagram: (data as any).instagram_handle || "",
+        facebook: (data as any).facebook_page || "",
+      };
+      setValues(next);
+      setSaved({
+        telegram: !!next.telegram,
+        whatsapp: !!next.whatsapp,
+        instagram: !!next.instagram,
+        facebook: !!next.facebook,
+      });
     })();
   }, [restaurant.id]);
 
-  async function saveTelegram() {
-    const clean = botHandle.trim().replace(/^@/, "");
-    if (!clean) return toast.error("ادخل اسم البوت");
-    setSaving(true);
-    const { error } = await supabase
-      .from("restaurants")
-      .update({ telegram_bot_username: clean })
-      .eq("id", restaurant.id);
-    setSaving(false);
-    if (error) return toast.error(error.message);
-    setTgConnected(true);
-    toast.success("تم ربط Telegram");
+  function clean(key: ChannelKey, v: string) {
+    const t = v.trim();
+    if (key === "whatsapp") return t.replace(/[^\d+]/g, "");
+    if (key === "telegram" || key === "instagram") return t.replace(/^@/, "");
+    return t;
   }
 
-  async function disconnectTelegram() {
+  async function save(key: ChannelKey) {
+    const v = clean(key, values[key]);
+    if (!v) return toast.error("ادخل القيمة أولاً");
+    setSavingKey(key);
     const { error } = await supabase
       .from("restaurants")
-      .update({ telegram_bot_username: null })
+      .update({ [COL[key]]: v })
+      .eq("id", restaurant.id);
+    setSavingKey(null);
+    if (error) return toast.error(error.message);
+    setValues((s) => ({ ...s, [key]: v }));
+    setSaved((s) => ({ ...s, [key]: true }));
+    toast.success("تم الربط");
+  }
+
+  async function disconnect(key: ChannelKey) {
+    const { error } = await supabase
+      .from("restaurants")
+      .update({ [COL[key]]: null })
       .eq("id", restaurant.id);
     if (error) return toast.error(error.message);
-    setBotHandle("");
-    setTgConnected(false);
-    toast.success("تم فصل Telegram");
+    setValues((s) => ({ ...s, [key]: "" }));
+    setSaved((s) => ({ ...s, [key]: false }));
+    toast.success("تم الفصل");
   }
 
   function copy(t: string) { navigator.clipboard.writeText(t); toast.success("نسخ الرابط"); }
 
-  const channels: { key: ChannelKey; status: "connected" | "available" | "soon"; }[] = [
-    { key: "telegram", status: tgConnected ? "connected" : "available" },
-    { key: "whatsapp", status: "soon" },
-    { key: "instagram", status: "soon" },
-    { key: "facebook", status: "soon" },
-  ];
+  const FIELDS: Record<ChannelKey, { label: string; placeholder: string; hint?: string }> = {
+    telegram: { label: "اسم البوت (Bot Username)", placeholder: "my_restaurant_bot", hint: "بدون @" },
+    whatsapp: { label: "رقم الواتساب (مع كود الدولة)", placeholder: "+9647712345678" },
+    instagram: { label: "حساب إنستغرام", placeholder: "my_restaurant", hint: "بدون @" },
+    facebook: { label: "اسم صفحة فيسبوك أو رابطها", placeholder: "MyRestaurantPage" },
+  };
+
+  const channels: ChannelKey[] = ["telegram", "whatsapp", "instagram", "facebook"];
 
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Radio className="h-5 w-5" /> القنوات</CardTitle>
-          <CardDescription>اربط قنوات مطعمك بضغطة وحدة. الوكيل يرد تلقائياً على رسائل الزبائن.</CardDescription>
+          <CardDescription>اربط قنوات مطعمك بضغطة وحدة. ادخل المعرّف واضغط ربط.</CardDescription>
         </CardHeader>
       </Card>
 
       <div className="grid gap-3 sm:grid-cols-2">
-        {channels.map((c) => {
-          const meta = channelMeta(c.key);
+        {channels.map((key) => {
+          const meta = channelMeta(key);
           const Icon = meta.icon;
+          const f = FIELDS[key];
+          const isConnected = saved[key];
           return (
-            <Card key={c.key} className="overflow-hidden">
+            <Card key={key} className="overflow-hidden">
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <div className="flex items-center gap-3">
                   <div className={`flex h-10 w-10 items-center justify-center rounded-lg border ${meta.color}`}>
@@ -1201,61 +1240,50 @@ function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
                   <div>
                     <CardTitle className="text-base">{meta.label}</CardTitle>
                     <CardDescription className="text-xs">
-                      {c.status === "connected" ? "متصل ويعمل" : c.status === "soon" ? "قريباً" : "غير متصل"}
+                      {isConnected ? "متصل" : "غير متصل"}
                     </CardDescription>
                   </div>
                 </div>
-                {c.status === "connected" && (
+                {isConnected && (
                   <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
                     <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
                   </Badge>
                 )}
-                {c.status === "soon" && <Badge variant="outline">قريباً</Badge>}
               </CardHeader>
 
-              {c.key === "telegram" && (
-                <CardContent className="space-y-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs">اسم البوت (Bot Username)</Label>
-                    <div className="flex gap-2">
-                      <Input
-                        placeholder="my_restaurant_bot"
-                        value={botHandle}
-                        onChange={(e) => setBotHandle(e.target.value)}
-                        dir="ltr"
-                      />
-                      {tgConnected ? (
-                        <Button variant="outline" onClick={disconnectTelegram}>فصل</Button>
-                      ) : (
-                        <Button onClick={saveTelegram} disabled={saving}>
-                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> ربط</>)}
-                        </Button>
-                      )}
-                    </div>
+              <CardContent className="space-y-3">
+                <div className="space-y-2">
+                  <Label className="text-xs">{f.label}</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder={f.placeholder}
+                      value={values[key]}
+                      onChange={(e) => setValues((s) => ({ ...s, [key]: e.target.value }))}
+                      dir="ltr"
+                    />
+                    {isConnected ? (
+                      <Button variant="outline" onClick={() => disconnect(key)}>فصل</Button>
+                    ) : (
+                      <Button onClick={() => save(key)} disabled={savingKey === key}>
+                        {savingKey === key ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> ربط</>)}
+                      </Button>
+                    )}
                   </div>
+                  {f.hint && <p className="text-[11px] text-muted-foreground">{f.hint}</p>}
+                </div>
+
+                {key === "telegram" && (
                   <details className="text-xs text-muted-foreground">
-                    <summary className="cursor-pointer hover:text-foreground">تعليمات الربط</summary>
-                    <div className="mt-2 space-y-2">
-                      <p>1. سجّل البوت مال webhook على هذا الرابط:</p>
-                      <div className="flex items-center gap-2 rounded bg-muted p-2 font-mono text-[11px] break-all">
-                        <span className="flex-1">{webhookUrl}</span>
-                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copy(webhookUrl)}>
-                          <Copy className="h-3 w-3" />
-                        </Button>
-                      </div>
-                      <p>2. ادخل اسم البوت بدون @ واضغط ربط.</p>
+                    <summary className="cursor-pointer hover:text-foreground">رابط الـ Webhook</summary>
+                    <div className="mt-2 flex items-center gap-2 rounded bg-muted p-2 font-mono text-[11px] break-all">
+                      <span className="flex-1">{webhookUrl}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copy(webhookUrl)}>
+                        <Copy className="h-3 w-3" />
+                      </Button>
                     </div>
                   </details>
-                </CardContent>
-              )}
-
-              {c.status === "soon" && (
-                <CardContent>
-                  <Button variant="outline" className="w-full" disabled>
-                    <Link2 className="h-4 w-4 ml-1" /> قريباً
-                  </Button>
-                </CardContent>
-              )}
+                )}
+              </CardContent>
             </Card>
           );
         })}
