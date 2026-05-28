@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, BarChart3 } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, BarChart3, Link2, CheckCircle2, Radio } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -229,6 +229,7 @@ function RestaurantManager({
             <TabsTrigger value="menu">المنيو</TabsTrigger>
             <TabsTrigger value="orders">الطلبات</TabsTrigger>
             <TabsTrigger value="conversations">المحادثات</TabsTrigger>
+            <TabsTrigger value="channels">القنوات</TabsTrigger>
             <TabsTrigger value="analytics">التحليلات</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
             <TabsTrigger value="integration">الربط مع منصتك</TabsTrigger>
@@ -237,6 +238,7 @@ function RestaurantManager({
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
           <TabsContent value="integration"><IntegrationTab restaurant={restaurant} /></TabsContent>
@@ -1116,6 +1118,148 @@ function Endpoint({ method, url, desc }: { method: string; url: string; desc: st
       <Badge variant="outline">{method}</Badge>
       <span className="flex-1 break-all">{url}</span>
       <span className="text-muted-foreground font-sans">{desc}</span>
+    </div>
+  );
+}
+
+type ChannelKey = "telegram" | "whatsapp" | "instagram" | "facebook";
+
+function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
+  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook`;
+  const [botHandle, setBotHandle] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [tgConnected, setTgConnected] = useState<boolean>(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("restaurants")
+        .select("telegram_bot_username")
+        .eq("id", restaurant.id)
+        .maybeSingle();
+      if (data?.telegram_bot_username) {
+        setBotHandle(data.telegram_bot_username);
+        setTgConnected(true);
+      }
+    })();
+  }, [restaurant.id]);
+
+  async function saveTelegram() {
+    const clean = botHandle.trim().replace(/^@/, "");
+    if (!clean) return toast.error("ادخل اسم البوت");
+    setSaving(true);
+    const { error } = await supabase
+      .from("restaurants")
+      .update({ telegram_bot_username: clean })
+      .eq("id", restaurant.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    setTgConnected(true);
+    toast.success("تم ربط Telegram");
+  }
+
+  async function disconnectTelegram() {
+    const { error } = await supabase
+      .from("restaurants")
+      .update({ telegram_bot_username: null })
+      .eq("id", restaurant.id);
+    if (error) return toast.error(error.message);
+    setBotHandle("");
+    setTgConnected(false);
+    toast.success("تم فصل Telegram");
+  }
+
+  function copy(t: string) { navigator.clipboard.writeText(t); toast.success("نسخ الرابط"); }
+
+  const channels: { key: ChannelKey; status: "connected" | "available" | "soon"; }[] = [
+    { key: "telegram", status: tgConnected ? "connected" : "available" },
+    { key: "whatsapp", status: "soon" },
+    { key: "instagram", status: "soon" },
+    { key: "facebook", status: "soon" },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><Radio className="h-5 w-5" /> القنوات</CardTitle>
+          <CardDescription>اربط قنوات مطعمك بضغطة وحدة. الوكيل يرد تلقائياً على رسائل الزبائن.</CardDescription>
+        </CardHeader>
+      </Card>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        {channels.map((c) => {
+          const meta = channelMeta(c.key);
+          const Icon = meta.icon;
+          return (
+            <Card key={c.key} className="overflow-hidden">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <div className="flex items-center gap-3">
+                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg border ${meta.color}`}>
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">{meta.label}</CardTitle>
+                    <CardDescription className="text-xs">
+                      {c.status === "connected" ? "متصل ويعمل" : c.status === "soon" ? "قريباً" : "غير متصل"}
+                    </CardDescription>
+                  </div>
+                </div>
+                {c.status === "connected" && (
+                  <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+                    <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
+                  </Badge>
+                )}
+                {c.status === "soon" && <Badge variant="outline">قريباً</Badge>}
+              </CardHeader>
+
+              {c.key === "telegram" && (
+                <CardContent className="space-y-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs">اسم البوت (Bot Username)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="my_restaurant_bot"
+                        value={botHandle}
+                        onChange={(e) => setBotHandle(e.target.value)}
+                        dir="ltr"
+                      />
+                      {tgConnected ? (
+                        <Button variant="outline" onClick={disconnectTelegram}>فصل</Button>
+                      ) : (
+                        <Button onClick={saveTelegram} disabled={saving}>
+                          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> ربط</>)}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer hover:text-foreground">تعليمات الربط</summary>
+                    <div className="mt-2 space-y-2">
+                      <p>1. سجّل البوت مال webhook على هذا الرابط:</p>
+                      <div className="flex items-center gap-2 rounded bg-muted p-2 font-mono text-[11px] break-all">
+                        <span className="flex-1">{webhookUrl}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copy(webhookUrl)}>
+                          <Copy className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <p>2. ادخل اسم البوت بدون @ واضغط ربط.</p>
+                    </div>
+                  </details>
+                </CardContent>
+              )}
+
+              {c.status === "soon" && (
+                <CardContent>
+                  <Button variant="outline" className="w-full" disabled>
+                    <Link2 className="h-4 w-4 ml-1" /> قريباً
+                  </Button>
+                </CardContent>
+              )}
+            </Card>
+          );
+        })}
+      </div>
     </div>
   );
 }
