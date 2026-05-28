@@ -561,8 +561,10 @@ Deno.serve(async (req) => {
         const m = llmMessages[i];
         if (m.role === "user") {
           const txt = typeof m.content === "string" ? m.content : "";
+          const visionInstruction =
+            "صورة من الزبون. افحصها بدقة واستخرج: رقم الطلب إن وُجد، الأصناف والكميات والإضافات، العنوان/الهاتف/الاسم إن ظهروا. طابق الأصناف عبر search_menu قبل add_to_cart. لخّص ما فهمت بسطر واحد ثم اطلب توضيحاً واحداً فقط للمعلومة الناقصة الأهم (مثلاً العنوان أو التأكيد). لا تسأل أكثر من سؤال واحد.";
           m.content = [
-            { type: "text", text: txt || "صورة من الزبون — افحصها وردّ عليه." },
+            { type: "text", text: txt ? `${txt}\n\n[${visionInstruction}]` : visionInstruction },
             { type: "image_url", image_url: { url: image_url } },
           ];
           break;
