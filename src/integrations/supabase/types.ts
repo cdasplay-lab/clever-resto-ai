@@ -346,7 +346,9 @@ export type Database = {
           currency: string
           delivery_areas: Json
           description: string | null
+          facebook_page: string | null
           id: string
+          instagram_handle: string | null
           is_active: boolean
           language: string
           min_order: number
@@ -358,13 +360,16 @@ export type Database = {
           telegram_bot_username: string | null
           tone: string
           updated_at: string
+          whatsapp_number: string | null
         }
         Insert: {
           created_at?: string
           currency?: string
           delivery_areas?: Json
           description?: string | null
+          facebook_page?: string | null
           id?: string
+          instagram_handle?: string | null
           is_active?: boolean
           language?: string
           min_order?: number
@@ -376,13 +381,16 @@ export type Database = {
           telegram_bot_username?: string | null
           tone?: string
           updated_at?: string
+          whatsapp_number?: string | null
         }
         Update: {
           created_at?: string
           currency?: string
           delivery_areas?: Json
           description?: string | null
+          facebook_page?: string | null
           id?: string
+          instagram_handle?: string | null
           is_active?: boolean
           language?: string
           min_order?: number
@@ -394,6 +402,7 @@ export type Database = {
           telegram_bot_username?: string | null
           tone?: string
           updated_at?: string
+          whatsapp_number?: string | null
         }
         Relationships: []
       }
