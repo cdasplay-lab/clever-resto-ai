@@ -165,6 +165,22 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "resolve_branch",
+      description:
+        "حدد أنسب فرع للزبون بناءً على عنوانه أو منطقته. استدعِ هذه الأداة قبل set_delivery_info لما المطعم يكون عنده أكثر من فرع. ترجع الفرع المختار + أوقاته + الحد الأدنى.",
+      parameters: {
+        type: "object",
+        properties: {
+          address: { type: "string", description: "العنوان أو اسم المنطقة اللي قاله الزبون" },
+        },
+        required: ["address"],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
 
 // Media to deliver via the channel (filled by show_menu tool)
@@ -195,7 +211,7 @@ function openHoursStatus(open_hours: any): string {
   return `${status}\nجدول الأسبوع: ${lines}`;
 }
 
-function systemPrompt(restaurant: any, conv: any) {
+function systemPrompt(restaurant: any, conv: any, branches: any[]) {
   const cartLines =
     Array.isArray(conv.cart) && conv.cart.length
       ? conv.cart
@@ -205,11 +221,37 @@ function systemPrompt(restaurant: any, conv: any) {
 
   const lang = restaurant.language === "ar" ? "عربي عراقي بسيط ومحكي" : restaurant.language;
 
+  // Resolve current branch (if delivery info has branch_id stored in meta)
+  const selectedBranchId = conv.meta?.branch_id;
+  const selectedBranch = selectedBranchId ? branches.find((b: any) => b.id === selectedBranchId) : null;
+  const effectiveHours = selectedBranch?.open_hours && Object.keys(selectedBranch.open_hours).length
+    ? selectedBranch.open_hours
+    : restaurant.open_hours;
+  const effectiveMinOrder = selectedBranch?.min_order ?? restaurant.min_order;
+
+  const activeBranches = branches.filter((b: any) => b.is_active);
+  const branchesBlock = activeBranches.length === 0
+    ? "هذا المطعم بدون فروع مسجلة."
+    : activeBranches.length === 1
+    ? `الفرع الوحيد: ${activeBranches[0].name}${activeBranches[0].address ? ` — ${activeBranches[0].address}` : ""}`
+    : `الفروع المتاحة (${activeBranches.length}):\n${activeBranches.map((b: any) => {
+        const areas = Array.isArray(b.delivery_areas) && b.delivery_areas.length ? b.delivery_areas.join("، ") : "—";
+        return `- ${b.name}${b.address ? ` (${b.address})` : ""} | مناطق التوصيل: ${areas}`;
+      }).join("\n")}`;
+
+  const branchRule = activeBranches.length > 1
+    ? `8) المطعم عنده عدة فروع. لازم تستدعي resolve_branch(address) أول ما الزبون يعطي عنوانه/منطقته، قبل set_delivery_info و submit_order. إذا منطقته ما مخدومة من أي فرع، اعتذر بلطف واذكر المناطق المخدومة.`
+    : `8) المطعم عنده فرع واحد فقط.`;
+
   return `# الهوية (Identity)
 أنت موظف استقبال طلبات لمطعم "${restaurant.name}". شغلتك الوحيدة: تساعد الزبون يطلب أكل بسرعة وبدون لف.
 - نبرة: ${restaurant.tone}
 - لغة الرد: ${lang}
-- ${openHoursStatus(restaurant.open_hours)}
+- ${openHoursStatus(effectiveHours)}
+
+# الفروع (Branches)
+${branchesBlock}
+${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.name}` : ""}
 
 # الأسلوب (Style)
 - ردود قصيرة جداً (سطر أو سطرين). بدون مقدمات طويلة.
@@ -220,46 +262,17 @@ function systemPrompt(restaurant: any, conv: any) {
 
 # قواعد صارمة (Rules)
 1) ممنوع تخترع صنف أو سعر — استدعِ search_menu قبل أي add_to_cart.
-2) قبل submit_order: اعرض ملخص (الأصناف + العنوان + الإجمالي) واطلب تأكيد صريح ("نعم" أو "أكد").
+2) قبل submit_order: اعرض ملخص (الأصناف + العنوان + الفرع + الإجمالي) واطلب تأكيد صريح ("نعم" أو "أكد").
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
-4) الحد الأدنى للطلب: ${restaurant.min_order} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
+4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
 6) لو ما فهمت قصده بعد محاولتين، أو الزبون متضايق/زعلان، استخدم handoff_to_human فوراً.
 7) المطعم مغلق؟ اعتذر واذكر وقت الافتتاح. ما تأخذ طلب نهائي إلا إذا الزبون يطلب جدولة ضمن الدوام.
-8) معالجة الصور (Vision) — مهمة:
-   • افحص الصورة بدقّة واستخرج منها أكبر قدر من المعلومات قبل ما تسأل أي شي:
-     - رقم الطلب (Order ID / رقم الفاتورة) إذا موجود → استخدمه مباشرة مع get_order_status أو لمتابعة الطلب.
-     - أسماء الأصناف + الكميات + الإضافات → استدعِ search_menu لكل صنف وحاول تطابقه (حتى لو الاسم مكتوب بخط اليد أو بلهجة مختلفة، استخدم أقرب تطابق).
-     - العنوان / رقم الهاتف / اسم الزبون → خزّنها بالـ delivery.
-     - الإجمالي / السعر المكتوب → للمقارنة فقط، لا تعتمد عليه (السعر الرسمي من المنيو).
-   • بعد الاستخراج: لخّص للزبون شنو فهمت من الصورة بسطر واحد ("فهمت من الصورة: 2 برغر دجاج + بيبسي، صح؟").
-   • اطلب توضيح **واحد فقط** للمعلومة الناقصة الأهم (مثلاً العنوان أو التأكيد) — ممنوع تسأل أكثر من سؤال واحد بنفس الرسالة.
-   • إذا الصورة غير واضحة كلياً أو ما تخص الطعام/الطلب → اعتذر بلطف واطلب من الزبون يكتب طلبه نصاً.
-   • ممنوع تتجاهل الصورة أو ترد "ما أكدر أشوف الصورة".
-
-# أمثلة (Few-shot)
-
-مثال 1 — طلب مباشر:
-زبون: "أريد برغر دجاج وبيبسي"
-أنت: [استدعاء search_menu("برغر دجاج")] ثم [search_menu("بيبسي")] ثم [add_to_cart × 2]
-ثم: "تمام ✅ أضفت برغر دجاج وبيبسي. تحب تزيد شي ثاني لو نكمل الطلب؟"
-
-مثال 2 — صنف غير موجود:
-زبون: "عندكم شاورما لحم؟"
-أنت: [search_menu("شاورما لحم")] — ما طلعت نتيجة.
-أنت: "للأسف ما عندنا شاورما لحم 🙏 بس عندنا شاورما دجاج وبرغر لحم. تحب أحدهم؟"
-
-مثال 3 — تأكيد الطلب:
-أنت: "ملخص طلبك:
-- 1 × برغر دجاج (5000)
-- 1 × بيبسي (1000)
-العنوان: الكرادة، شارع 52
-الإجمالي: 6000 IQD
-أأكد الطلب؟ (نعم/لا)"
-
-مثال 4 — خارج الموضوع:
-زبون: "شو رأيك بالطقس اليوم؟"
-أنت: "ما أكدر أساعدك بهالموضوع 😅 بس أكدر أساعدك تطلب أكل — تحب تشوف المنيو؟"
+${branchRule}
+9) معالجة الصور (Vision):
+   • افحص الصورة بدقّة واستخرج: رقم الطلب، الأصناف والكميات والإضافات، العنوان/الهاتف/الاسم.
+   • طابق الأصناف عبر search_menu قبل add_to_cart.
+   • لخّص ما فهمت بسطر واحد ثم اطلب توضيحاً واحداً فقط للمعلومة الناقصة الأهم.
 
 # السياق الحالي (Context)
 السلة:
@@ -404,11 +417,13 @@ async function runTool(
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
+    const branchId = conv.meta?.branch_id || null;
     const { data: order, error } = await db
       .from("orders")
       .insert({
         restaurant_id: restaurant.id,
         conversation_id: conv.id,
+        branch_id: branchId,
         customer_name: conv.customer_name,
         customer_phone: delivery.phone,
         delivery_address: delivery.address,
@@ -436,6 +451,28 @@ async function runTool(
     } catch (_) {}
 
     return { ok: true, order_id: order.id, total: subtotal };
+  }
+
+  if (name === "resolve_branch") {
+    const addr = String(args.address || "").trim().toLowerCase();
+    const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
+    if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
+    if (branches.length === 1) {
+      const b = branches[0];
+      await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: b.id } }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), branch_id: b.id };
+      return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
+    }
+    // Match by delivery_areas
+    const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
+    if (matches.length === 0) {
+      const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
+      return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas };
+    }
+    const chosen = matches[0];
+    await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: chosen.id } }).eq("id", conv.id);
+    conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
+    return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
   }
 
   if (name === "handoff_to_human") {
@@ -524,6 +561,14 @@ Deno.serve(async (req) => {
       .single();
     if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
 
+    // Load branches for this restaurant (used by resolve_branch tool + system prompt)
+    const { data: branchesData } = await db
+      .from("branches")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active")
+      .eq("restaurant_id", restaurant.id);
+    const branches = branchesData ?? [];
+    (restaurant as any).__branches = branches;
+
     // Load latest 30 messages, then restore chronological order for the model.
     // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
@@ -545,7 +590,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;

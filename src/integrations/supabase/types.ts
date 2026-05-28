@@ -97,6 +97,59 @@ export type Database = {
           },
         ]
       }
+      branches: {
+        Row: {
+          address: string | null
+          created_at: string
+          delivery_areas: Json
+          id: string
+          is_active: boolean
+          min_order: number
+          name: string
+          open_hours: Json
+          phone: string | null
+          restaurant_id: string
+          telegram_chat_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          created_at?: string
+          delivery_areas?: Json
+          id?: string
+          is_active?: boolean
+          min_order?: number
+          name: string
+          open_hours?: Json
+          phone?: string | null
+          restaurant_id: string
+          telegram_chat_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          created_at?: string
+          delivery_areas?: Json
+          id?: string
+          is_active?: boolean
+          min_order?: number
+          name?: string
+          open_hours?: Json
+          phone?: string | null
+          restaurant_id?: string
+          telegram_chat_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "branches_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           assigned_to: string | null
@@ -252,6 +305,7 @@ export type Database = {
       }
       orders: {
         Row: {
+          branch_id: string | null
           conversation_id: string | null
           created_at: string
           customer_name: string | null
@@ -269,6 +323,7 @@ export type Database = {
           total: number
         }
         Insert: {
+          branch_id?: string | null
           conversation_id?: string | null
           created_at?: string
           customer_name?: string | null
@@ -286,6 +341,7 @@ export type Database = {
           total?: number
         }
         Update: {
+          branch_id?: string | null
           conversation_id?: string | null
           created_at?: string
           customer_name?: string | null
@@ -303,6 +359,13 @@ export type Database = {
           total?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "orders_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "orders_conversation_id_fkey"
             columns: ["conversation_id"]
