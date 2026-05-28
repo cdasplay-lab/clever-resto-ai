@@ -286,6 +286,18 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
     load();
   }
 
+  async function toggleAvailable(item: MenuItem) {
+    const next = !item.is_available;
+    setItems((arr) => arr.map((x) => x.id === item.id ? { ...x, is_available: next } : x));
+    const { error } = await supabase.from("menu_items").update({ is_available: next }).eq("id", item.id);
+    if (error) {
+      toast.error(error.message);
+      setItems((arr) => arr.map((x) => x.id === item.id ? { ...x, is_available: item.is_available } : x));
+      return;
+    }
+    toast.success(next ? "الصنف متوفر الآن" : "الصنف خلصان — الوكيل ما راح يبيعه");
+  }
+
   async function addItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAdding(true);
@@ -421,6 +433,15 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
                     </div>
                     <div className="flex items-center gap-2">
                       <div className="font-mono">{it.price}</div>
+                      {!it.is_available && <Badge variant="destructive">خلصان</Badge>}
+                      <Button
+                        variant={it.is_available ? "outline" : "default"}
+                        size="sm"
+                        onClick={() => toggleAvailable(it)}
+                        title={it.is_available ? "ضع كخلصان" : "أعد توفيره"}
+                      >
+                        {it.is_available ? "خلصان" : "متوفر"}
+                      </Button>
                       <label className="cursor-pointer">
                         <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
                         <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
