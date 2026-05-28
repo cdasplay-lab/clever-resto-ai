@@ -417,11 +417,13 @@ async function runTool(
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
+    const branchId = conv.meta?.branch_id || null;
     const { data: order, error } = await db
       .from("orders")
       .insert({
         restaurant_id: restaurant.id,
         conversation_id: conv.id,
+        branch_id: branchId,
         customer_name: conv.customer_name,
         customer_phone: delivery.phone,
         delivery_address: delivery.address,
