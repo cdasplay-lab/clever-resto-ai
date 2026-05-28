@@ -621,13 +621,19 @@ const ORDER_STATUSES: { value: string; label: string }[] = [
 ];
 
 function OrdersTab({ restaurantId }: { restaurantId: string }) {
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<(Order & { branch_id?: string | null })[]>([]);
   const [updating, setUpdating] = useState<string | null>(null);
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
+  const [filter, setFilter] = useState<string>("all");
 
+  async function loadBranches() {
+    const { data } = await supabase.from("branches").select("id,name").eq("restaurant_id", restaurantId).order("created_at");
+    setBranches((data as any) ?? []);
+  }
   async function load() {
     const { data } = await supabase
       .from("orders")
-      .select("id,customer_name,customer_phone,delivery_address,total,status,created_at,items")
+      .select("id,customer_name,customer_phone,delivery_address,total,status,created_at,items,branch_id")
       .eq("restaurant_id", restaurantId)
       .order("created_at", { ascending: false })
       .limit(50);
@@ -635,6 +641,7 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
   }
 
   useEffect(() => {
+    loadBranches();
     load();
     const ch = supabase
       .channel(`orders-${restaurantId}`)
@@ -647,50 +654,97 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
     setUpdating(orderId);
     const { error } = await supabase.from("orders").update({ status: status as any }).eq("id", orderId);
     if (error) { toast.error(error.message); setUpdating(null); return; }
-    // Notify customer on their channel (non-blocking)
     supabase.functions.invoke("notify-order-status", { body: { order_id: orderId } })
       .then(({ error: e }) => { if (e) toast.error("تم التحديث لكن فشل الإشعار: " + e.message); else toast.success("تم تحديث الحالة وإشعار الزبون"); })
       .finally(() => setUpdating(null));
   }
 
+  const branchName = (id: string | null | undefined) => branches.find((b) => b.id === id)?.name;
+  const filtered = filter === "all" ? orders : filter === "none" ? orders.filter((o) => !o.branch_id) : orders.filter((o) => o.branch_id === filter);
+
+  // Overview per branch
+  const overview = (() => {
+    const map = new Map<string, { name: string; orders: number; revenue: number }>();
+    for (const b of branches) map.set(b.id, { name: b.name, orders: 0, revenue: 0 });
+    map.set("__none__", { name: "بدون فرع", orders: 0, revenue: 0 });
+    for (const o of orders) {
+      const key = o.branch_id || "__none__";
+      const cur = map.get(key) || { name: branchName(o.branch_id) || "—", orders: 0, revenue: 0 };
+      cur.orders += 1;
+      if (o.status !== "cancelled") cur.revenue += Number(o.total || 0);
+      map.set(key, cur);
+    }
+    return Array.from(map.values()).filter((x) => x.orders > 0);
+  })();
+
   return (
-    <Card>
-      <CardHeader><CardTitle>الطلبات الواردة</CardTitle></CardHeader>
-      <CardContent>
-        {orders.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو طلبات بعد</p> : (
-          <div className="space-y-3">
-            {orders.map((o) => (
-              <div key={o.id} className="rounded-lg border p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="font-medium min-w-0 truncate">{o.customer_name || "زبون"} — {o.customer_phone}</div>
-                  <div className="flex items-center gap-2">
-                    <Select value={o.status} onValueChange={(v) => changeStatus(o.id, v)} disabled={updating === o.id}>
-                      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {ORDER_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    {updating === o.id && <Loader2 className="h-4 w-4 animate-spin" />}
+    <div className="space-y-4">
+      {branches.length > 1 && overview.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {overview.map((o) => (
+            <Card key={o.name}>
+              <CardHeader className="pb-2">
+                <CardDescription className="truncate">{o.name}</CardDescription>
+                <CardTitle className="text-xl">{o.orders} <span className="text-xs text-muted-foreground">طلب</span></CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 text-xs text-muted-foreground">{o.revenue.toLocaleString()}</CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle>الطلبات الواردة</CardTitle>
+          {branches.length > 0 && (
+            <Select value={filter} onValueChange={setFilter}>
+              <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">كل الفروع</SelectItem>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                <SelectItem value="none">بدون فرع</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </CardHeader>
+        <CardContent>
+          {filtered.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو طلبات بعد</p> : (
+            <div className="space-y-3">
+              {filtered.map((o) => (
+                <div key={o.id} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="font-medium min-w-0 truncate flex items-center gap-2">
+                      {o.customer_name || "زبون"} — {o.customer_phone}
+                      {o.branch_id && <Badge variant="outline" className="text-[10px]">{branchName(o.branch_id) || "فرع"}</Badge>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Select value={o.status} onValueChange={(v) => changeStatus(o.id, v)} disabled={updating === o.id}>
+                        <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {ORDER_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                      {updating === o.id && <Loader2 className="h-4 w-4 animate-spin" />}
+                    </div>
                   </div>
+                  <div className="mt-1 text-sm text-muted-foreground">{o.delivery_address}</div>
+                  <ul className="mt-2 text-sm">
+                    {(Array.isArray(o.items) ? o.items : []).map((i: any, idx: number) => (
+                      <li key={idx}>
+                        {i.qty} × {i.name} — {i.unit_price}
+                        {Array.isArray(i.selected_options) && i.selected_options.length > 0 && (
+                          <span className="text-muted-foreground"> ({i.selected_options.map((s: any) => `${s.group}: ${s.choice}`).join("، ")})</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-2 text-left font-mono">الإجمالي: {o.total}</div>
                 </div>
-                <div className="mt-1 text-sm text-muted-foreground">{o.delivery_address}</div>
-                <ul className="mt-2 text-sm">
-                  {(Array.isArray(o.items) ? o.items : []).map((i: any, idx: number) => (
-                    <li key={idx}>
-                      {i.qty} × {i.name} — {i.unit_price}
-                      {Array.isArray(i.selected_options) && i.selected_options.length > 0 && (
-                        <span className="text-muted-foreground"> ({i.selected_options.map((s: any) => `${s.group}: ${s.choice}`).join("، ")})</span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-2 text-left font-mono">الإجمالي: {o.total}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
