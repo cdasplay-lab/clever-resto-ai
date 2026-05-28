@@ -457,6 +457,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
                         <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
                       </label>
                       {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
+                      <EditItemDialog item={it} onSaved={load} />
                       <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </div>
