@@ -240,7 +240,7 @@ function RestaurantManager({
             <TabsTrigger value="channels">القنوات</TabsTrigger>
             <TabsTrigger value="analytics">التحليلات</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
-            <TabsTrigger value="integration">الربط مع منصتك</TabsTrigger>
+            
           </TabsList>
 
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
@@ -249,7 +249,7 @@ function RestaurantManager({
           <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
-          <TabsContent value="integration"><IntegrationTab restaurant={restaurant} /></TabsContent>
+          
         </Tabs>
       </div>
     </div>
