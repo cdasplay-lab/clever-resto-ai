@@ -561,6 +561,14 @@ Deno.serve(async (req) => {
       .single();
     if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
 
+    // Load branches for this restaurant (used by resolve_branch tool + system prompt)
+    const { data: branchesData } = await db
+      .from("branches")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active")
+      .eq("restaurant_id", restaurant.id);
+    const branches = branchesData ?? [];
+    (restaurant as any).__branches = branches;
+
     // Load latest 30 messages, then restore chronological order for the model.
     // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
@@ -582,7 +590,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
