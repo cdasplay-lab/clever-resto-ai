@@ -229,6 +229,7 @@ function RestaurantManager({
             <TabsTrigger value="menu">المنيو</TabsTrigger>
             <TabsTrigger value="orders">الطلبات</TabsTrigger>
             <TabsTrigger value="conversations">المحادثات</TabsTrigger>
+            <TabsTrigger value="channels">القنوات</TabsTrigger>
             <TabsTrigger value="analytics">التحليلات</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
             <TabsTrigger value="integration">الربط مع منصتك</TabsTrigger>
@@ -237,6 +238,7 @@ function RestaurantManager({
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
           <TabsContent value="integration"><IntegrationTab restaurant={restaurant} /></TabsContent>
