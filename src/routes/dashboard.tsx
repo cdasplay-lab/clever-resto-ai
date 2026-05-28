@@ -236,21 +236,21 @@ function RestaurantManager({
         <Tabs defaultValue="menu" dir="rtl">
           <TabsList className="mb-4">
             <TabsTrigger value="menu">المنيو</TabsTrigger>
+            <TabsTrigger value="branches">الفروع</TabsTrigger>
             <TabsTrigger value="orders">الطلبات</TabsTrigger>
             <TabsTrigger value="conversations">المحادثات</TabsTrigger>
             <TabsTrigger value="channels">القنوات</TabsTrigger>
             <TabsTrigger value="analytics">التحليلات</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
-            
           </TabsList>
 
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="branches"><BranchesTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
-          
         </Tabs>
       </div>
     </div>
