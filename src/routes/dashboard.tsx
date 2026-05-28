@@ -1196,7 +1196,7 @@ function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
   async function disconnect(key: ChannelKey) {
     const { error } = await supabase
       .from("restaurants")
-      .update({ [COL[key]]: null })
+      .update({ [COL[key]]: null } as any)
       .eq("id", restaurant.id);
     if (error) return toast.error(error.message);
     setValues((s) => ({ ...s, [key]: "" }));
