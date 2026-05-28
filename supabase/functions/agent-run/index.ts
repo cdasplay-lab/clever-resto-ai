@@ -561,6 +561,21 @@ Deno.serve(async (req) => {
       .single();
     if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
 
+    // ===== Quota gate: check subscription + consume one AI reply =====
+    const { data: quotaRes, error: quotaErr } = await db.rpc("consume_quota", {
+      _restaurant_id: restaurant.id,
+      _kind: "ai_reply",
+      _ref: conversation_id,
+    });
+    if (quotaErr) {
+      console.error("consume_quota error:", quotaErr);
+    } else if (quotaRes && (quotaRes as any).allowed === false) {
+      const reason = (quotaRes as any).reason;
+      console.log("Bot blocked for restaurant", restaurant.id, "reason:", reason);
+      // Bot stops responding. Owner sees this in dashboard.
+      return json({ reply: "", state: conv.state, media: [], skipped: "quota_blocked", reason });
+    }
+
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
