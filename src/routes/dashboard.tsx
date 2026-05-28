@@ -548,6 +548,67 @@ function OptionsEditor({ item, onSaved }: { item: MenuItem; onSaved: () => void 
 }
 
 
+function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(item.name);
+  const [category, setCategory] = useState(item.category ?? "");
+  const [price, setPrice] = useState<number>(Number(item.price) || 0);
+  const [description, setDescription] = useState(item.description ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (open) {
+      setName(item.name);
+      setCategory(item.category ?? "");
+      setPrice(Number(item.price) || 0);
+      setDescription(item.description ?? "");
+    }
+  }, [open, item]);
+
+  async function save() {
+    if (!name.trim()) return toast.error("الاسم مطلوب");
+    setSaving(true);
+    const { error } = await supabase
+      .from("menu_items")
+      .update({
+        name: name.trim(),
+        category: category.trim() || null,
+        price: Number(price) || 0,
+        description: description.trim() || null,
+      })
+      .eq("id", item.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    toast.success("تم التعديل");
+    supabase.functions.invoke("menu-embed", { body: { menu_item_id: item.id } }).catch(() => {});
+    setOpen(false);
+    onSaved();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} title="تعديل">
+        <Pencil className="h-4 w-4" />
+      </Button>
+      <DialogContent>
+        <DialogHeader><DialogTitle>تعديل الصنف</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1"><Label>الاسم</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
+          <div className="space-y-1"><Label>الصنف</Label><Input value={category} onChange={(e) => setCategory(e.target.value)} /></div>
+          <div className="space-y-1"><Label>السعر</Label><Input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} /></div>
+          <div className="space-y-1"><Label>الوصف</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>إلغاء</Button>
+          <Button onClick={save} disabled={saving}>{saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "حفظ"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+
 
 const ORDER_STATUSES: { value: string; label: string }[] = [
   { value: "pending", label: "قيد الاستلام" },
