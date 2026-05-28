@@ -19,6 +19,27 @@ function AuthPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState<"google" | "apple" | null>(null);
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [forgotLoading, setForgotLoading] = useState(false);
+
+  async function sendReset(e: React.FormEvent) {
+    e.preventDefault();
+    setForgotLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+      toast.success("تم إرسال رابط تغيير كلمة السر للإيميل");
+      setForgotOpen(false);
+      setForgotEmail("");
+    } catch (e: any) {
+      toast.error(e.message ?? "خطأ");
+    } finally {
+      setForgotLoading(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -110,6 +131,18 @@ function AuthPage() {
             <Button type="submit" className="w-full" disabled={loading}>
               {loading ? "..." : mode === "signin" ? "دخول" : "إنشاء حساب"}
             </Button>
+            {mode === "signin" && (
+              <button
+                type="button"
+                className="w-full text-sm text-primary hover:underline"
+                onClick={() => {
+                  setForgotEmail(email);
+                  setForgotOpen(true);
+                }}
+              >
+                نسيت كلمة السر؟
+              </button>
+            )}
             <button
               type="button"
               className="w-full text-sm text-muted-foreground hover:underline"
@@ -118,6 +151,30 @@ function AuthPage() {
               {mode === "signin" ? "ما عندك حساب؟ سوي حساب" : "عندك حساب؟ سجل دخول"}
             </button>
           </form>
+
+          {forgotOpen && (
+            <form onSubmit={sendReset} className="space-y-3 rounded-lg border p-4">
+              <div className="space-y-1">
+                <Label htmlFor="forgot-email">إيميلك</Label>
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  required
+                  placeholder="ندزلك رابط تغيير كلمة السر"
+                />
+              </div>
+              <div className="flex gap-2">
+                <Button type="submit" className="flex-1" disabled={forgotLoading}>
+                  {forgotLoading ? "..." : "إرسال الرابط"}
+                </Button>
+                <Button type="button" variant="outline" onClick={() => setForgotOpen(false)}>
+                  إلغاء
+                </Button>
+              </div>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>
