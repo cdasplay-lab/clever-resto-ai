@@ -435,6 +435,18 @@ async function runTool(
       .select()
       .single();
     if (error) return { error: error.message };
+
+    // Consume confirmed_order quota. If denied, cancel the order and tell the user.
+    const { data: orderQuota } = await db.rpc("consume_quota", {
+      _restaurant_id: restaurant.id,
+      _kind: "confirmed_order",
+      _ref: order.id,
+    });
+    if (orderQuota && (orderQuota as any).allowed === false) {
+      await db.from("orders").update({ status: "cancelled", notes: "quota_exceeded" }).eq("id", order.id);
+      return { error: "عذراً، المطعم وصل لحدّه الشهري من الطلبات. حاول لاحقاً." };
+    }
+
     await db
       .from("conversations")
       .update({ state: "submitted", cart: [], delivery: {} })
