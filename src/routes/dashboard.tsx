@@ -1184,7 +1184,7 @@ function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
     setSavingKey(key);
     const { error } = await supabase
       .from("restaurants")
-      .update({ [COL[key]]: v })
+      .update({ [COL[key]]: v } as any)
       .eq("id", restaurant.id);
     setSavingKey(null);
     if (error) return toast.error(error.message);
