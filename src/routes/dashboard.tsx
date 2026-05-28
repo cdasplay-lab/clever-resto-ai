@@ -365,8 +365,21 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>إضافة صنف</CardTitle>
+          <label className={`cursor-pointer ${aiUploading ? "opacity-60 pointer-events-none" : ""}`}>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => { aiUploadMenu(e.target.files); e.currentTarget.value = ""; }}
+            />
+            <span className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:opacity-90">
+              {aiUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              رفع منيو بالذكاء الاصطناعي
+            </span>
+          </label>
         </CardHeader>
         <CardContent>
           <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-6">
