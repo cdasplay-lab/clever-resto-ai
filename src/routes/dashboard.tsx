@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, BarChart3, Link2, CheckCircle2, Radio } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 
@@ -141,7 +142,10 @@ function Dashboard() {
         <div className="mx-auto max-w-2xl">
           <div className="mb-6 flex items-center justify-between">
             <h1 className="text-2xl font-bold">إعداد المطعم</h1>
-            <Button variant="ghost" onClick={logout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <Button variant="ghost" onClick={logout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
+            </div>
           </div>
           <Card>
             <CardHeader>
@@ -221,7 +225,10 @@ function RestaurantManager({
             <h1 className="text-2xl font-bold">{restaurant.name}</h1>
             <p className="text-sm text-muted-foreground">لوحة إدارة الـ AI Agent</p>
           </div>
-          <Button variant="ghost" onClick={onLogout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <Button variant="ghost" onClick={onLogout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
+          </div>
         </div>
 
         <Tabs defaultValue="menu" dir="rtl">
