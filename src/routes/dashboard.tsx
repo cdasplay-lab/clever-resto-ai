@@ -286,6 +286,18 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
     load();
   }
 
+  async function toggleAvailable(item: MenuItem) {
+    const next = !item.is_available;
+    setItems((arr) => arr.map((x) => x.id === item.id ? { ...x, is_available: next } : x));
+    const { error } = await supabase.from("menu_items").update({ is_available: next }).eq("id", item.id);
+    if (error) {
+      toast.error(error.message);
+      setItems((arr) => arr.map((x) => x.id === item.id ? { ...x, is_available: item.is_available } : x));
+      return;
+    }
+    toast.success(next ? "الصنف متوفر الآن" : "الصنف خلصان — الوكيل ما راح يبيعه");
+  }
+
   async function addItem(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setAdding(true);
