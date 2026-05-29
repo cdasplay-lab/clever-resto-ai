@@ -18,29 +18,44 @@ export type Database = {
         Row: {
           conversation_id: string | null
           created_at: string
+          error: string | null
           id: string
           kind: string
+          latency_ms: number | null
+          model: string | null
           payload: Json | null
           restaurant_id: string | null
           step: number
+          tokens_used: number | null
+          tool_name: string | null
         }
         Insert: {
           conversation_id?: string | null
           created_at?: string
+          error?: string | null
           id?: string
           kind: string
+          latency_ms?: number | null
+          model?: string | null
           payload?: Json | null
           restaurant_id?: string | null
           step?: number
+          tokens_used?: number | null
+          tool_name?: string | null
         }
         Update: {
           conversation_id?: string | null
           created_at?: string
+          error?: string | null
           id?: string
           kind?: string
+          latency_ms?: number | null
+          model?: string | null
           payload?: Json | null
           restaurant_id?: string | null
           step?: number
+          tokens_used?: number | null
+          tool_name?: string | null
         }
         Relationships: [
           {
@@ -508,6 +523,7 @@ export type Database = {
           delivery_areas: Json
           description: string | null
           facebook_page: string | null
+          feature_flags: Json
           id: string
           instagram_handle: string | null
           is_active: boolean
@@ -529,6 +545,7 @@ export type Database = {
           delivery_areas?: Json
           description?: string | null
           facebook_page?: string | null
+          feature_flags?: Json
           id?: string
           instagram_handle?: string | null
           is_active?: boolean
@@ -550,6 +567,7 @@ export type Database = {
           delivery_areas?: Json
           description?: string | null
           facebook_page?: string | null
+          feature_flags?: Json
           id?: string
           instagram_handle?: string | null
           is_active?: boolean
@@ -664,6 +682,7 @@ export type Database = {
         Args: { p_label?: string; p_restaurant_id: string }
         Returns: string
       }
+      get_bot_health: { Args: { _restaurant_id: string }; Returns: Json }
       get_my_subscription: { Args: { _restaurant_id: string }; Returns: Json }
       has_role: {
         Args: {
