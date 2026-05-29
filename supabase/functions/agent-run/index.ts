@@ -549,10 +549,15 @@ async function callModel(messages: any[]) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  const runStartedAt = Date.now();
+  let runRestaurantId: string | null = null;
+  let runConversationId: string | null = null;
   try {
     const { conversation_id, image_url } = await req.json();
     if (!conversation_id) return json({ error: "conversation_id required" }, 400);
+    runConversationId = conversation_id;
     const db = admin();
+
 
     const { data: conv, error: e1 } = await db
       .from("conversations")
@@ -572,6 +577,8 @@ Deno.serve(async (req) => {
       .eq("id", conv.restaurant_id)
       .single();
     if (e2 || !restaurant) return json({ error: "restaurant not found" }, 404);
+    runRestaurantId = restaurant.id;
+
 
     // ===== Quota gate: check subscription + consume one AI reply =====
     const { data: quotaRes, error: quotaErr } = await db.rpc("consume_quota", {
@@ -749,12 +756,41 @@ Deno.serve(async (req) => {
       break;
     }
 
+    // Phase 1 observability: log overall run summary (additive — does not affect behavior)
+    try {
+      await db.from("agent_logs").insert({
+        conversation_id: runConversationId,
+        restaurant_id: runRestaurantId,
+        step: 0,
+        kind: "run",
+        latency_ms: Date.now() - runStartedAt,
+        model: MODEL,
+        payload: { reply_len: finalText.length, media_count: media.length },
+      });
+    } catch (_) { /* logging must never break the run */ }
+
     return json({ reply: finalText, state: conv.state, media });
   } catch (e: any) {
     const msg = e?.message || "error";
+    // Phase 1: log error to agent_logs for the owner's bot-health view
+    if (runRestaurantId) {
+      try {
+        const db = admin();
+        await db.from("agent_logs").insert({
+          conversation_id: runConversationId,
+          restaurant_id: runRestaurantId,
+          step: 0,
+          kind: "run",
+          latency_ms: Date.now() - runStartedAt,
+          model: MODEL,
+          error: msg,
+        });
+      } catch (_) { /* swallow */ }
+    }
     if (msg === "rate_limited") return json({ error: "rate_limited" }, 429);
     if (msg === "payment_required") return json({ error: "payment_required" }, 402);
     console.error("agent-run error:", e);
     return json({ error: msg }, 500);
   }
 });
+
