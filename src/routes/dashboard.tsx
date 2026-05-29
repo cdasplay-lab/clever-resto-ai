@@ -16,6 +16,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { BranchesTab } from "@/components/branches-tab";
 import { SubscriptionTab } from "@/components/subscription-tab";
+import { BotHealthTab } from "@/components/bot-health-tab";
+
 
 export const Route = createFileRoute("/dashboard")({
   component: Dashboard,
@@ -243,6 +245,7 @@ function RestaurantManager({
             <TabsTrigger value="channels">القنوات</TabsTrigger>
             <TabsTrigger value="analytics">التحليلات</TabsTrigger>
             <TabsTrigger value="subscription">الاشتراك</TabsTrigger>
+            <TabsTrigger value="health">صحة البوت</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
 
@@ -253,7 +256,9 @@ function RestaurantManager({
           <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="subscription"><SubscriptionTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="health"><BotHealthTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
+
         </Tabs>
       </div>
     </div>
