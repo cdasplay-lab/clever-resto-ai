@@ -534,8 +534,19 @@ async function runTool(
     };
   }
 
+  if (name === "recall_customer") {
+    try {
+      const { data, error } = await db.rpc("recall_customer", { _conversation_id: conv.id });
+      if (error) return { found: false, error: error.message };
+      return data ?? { found: false };
+    } catch (err: any) {
+      return { found: false, error: err?.message || "recall_failed" };
+    }
+  }
+
   return { error: "unknown tool" };
 }
+
 
 async function callModel(messages: any[]) {
   const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
