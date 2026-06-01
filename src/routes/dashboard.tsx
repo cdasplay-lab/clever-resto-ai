@@ -17,6 +17,8 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { BranchesTab } from "@/components/branches-tab";
 import { SubscriptionTab } from "@/components/subscription-tab";
 import { BotHealthTab } from "@/components/bot-health-tab";
+import { CustomersTab } from "@/components/customers-tab";
+
 
 
 export const Route = createFileRoute("/dashboard")({
