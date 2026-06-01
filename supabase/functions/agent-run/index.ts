@@ -181,7 +181,17 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "recall_customer",
+      description:
+        "اجلب ذاكرة هذا الزبون (اسمه، عدد طلباته السابقة، آخر عنوان وهاتف، تفضيلاته، ملاحظات المالك). استدعِها مرة واحدة في بداية المحادثة لو ما عندك معلومات عنه، واستفد منها لتخصيص الترحيب وتسريع الطلب. read-only.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
 ] as const;
+
 
 // Media to deliver via the channel (filled by show_menu tool)
 type MediaItem = { photo_url: string; caption: string };
@@ -524,10 +534,21 @@ async function runTool(
     };
   }
 
+  if (name === "recall_customer") {
+    try {
+      const { data, error } = await db.rpc("recall_customer", { _conversation_id: conv.id });
+      if (error) return { found: false, error: error.message };
+      return data ?? { found: false };
+    } catch (err: any) {
+      return { found: false, error: err?.message || "recall_failed" };
+    }
+  }
+
   return { error: "unknown tool" };
 }
 
-async function callModel(messages: any[]) {
+
+async function callModel(messages: any[], tools: any) {
   const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -537,10 +558,11 @@ async function callModel(messages: any[]) {
     body: JSON.stringify({
       model: MODEL,
       messages,
-      tools: TOOLS,
+      tools,
       tool_choice: "auto",
     }),
   });
+
   if (r.status === 429) throw new Error("rate_limited");
   if (r.status === 402) throw new Error("payment_required");
   if (!r.ok) throw new Error(`model error ${r.status}: ${await r.text()}`);
@@ -603,6 +625,12 @@ Deno.serve(async (req) => {
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
 
+    // Phase 2: feature-flag gated tools. recall_customer is opt-in per restaurant.
+    const flags = (restaurant.feature_flags && typeof restaurant.feature_flags === "object") ? restaurant.feature_flags : {};
+    const memoryEnabled = flags.customer_memory_enabled === true;
+    const activeTools = memoryEnabled ? TOOLS : (TOOLS as readonly any[]).filter((t: any) => t.function?.name !== "recall_customer");
+
+
     // Load latest 30 messages, then restore chronological order for the model.
     // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
@@ -624,7 +652,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches) + (memoryEnabled ? "\n\n# ذاكرة الزبون\nاستدعِ recall_customer مرة واحدة في بداية المحادثة لتعرف هل الزبون قديم. إذا found=true، رحّب باسمه واقترح عليه آخر عنوان/هاتف بدل ما تسأله من جديد. لا تكشف ملاحظات المالك (notes) للزبون." : "") },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
@@ -668,7 +696,7 @@ Deno.serve(async (req) => {
         break;
       }
 
-      const resp = await callModel(llmMessages);
+      const resp = await callModel(llmMessages, activeTools);
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
