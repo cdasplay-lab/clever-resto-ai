@@ -548,7 +548,7 @@ async function runTool(
 }
 
 
-async function callModel(messages: any[]) {
+async function callModel(messages: any[], tools: any) {
   const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -558,10 +558,11 @@ async function callModel(messages: any[]) {
     body: JSON.stringify({
       model: MODEL,
       messages,
-      tools: TOOLS,
+      tools,
       tool_choice: "auto",
     }),
   });
+
   if (r.status === 429) throw new Error("rate_limited");
   if (r.status === 402) throw new Error("payment_required");
   if (!r.ok) throw new Error(`model error ${r.status}: ${await r.text()}`);
