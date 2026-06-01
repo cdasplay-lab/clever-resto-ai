@@ -696,7 +696,7 @@ Deno.serve(async (req) => {
         break;
       }
 
-      const resp = await callModel(llmMessages);
+      const resp = await callModel(llmMessages, activeTools);
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
