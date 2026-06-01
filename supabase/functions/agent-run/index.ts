@@ -625,6 +625,12 @@ Deno.serve(async (req) => {
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
 
+    // Phase 2: feature-flag gated tools. recall_customer is opt-in per restaurant.
+    const flags = (restaurant.feature_flags && typeof restaurant.feature_flags === "object") ? restaurant.feature_flags : {};
+    const memoryEnabled = flags.customer_memory_enabled === true;
+    const activeTools = memoryEnabled ? TOOLS : (TOOLS as readonly any[]).filter((t: any) => t.function?.name !== "recall_customer");
+
+
     // Load latest 30 messages, then restore chronological order for the model.
     // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
