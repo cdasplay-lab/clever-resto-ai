@@ -261,6 +261,8 @@ function RestaurantManager({
           <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="subscription"><SubscriptionTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="health"><BotHealthTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="customers"><CustomersTab restaurantId={restaurant.id} /></TabsContent>
+
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
         </Tabs>
