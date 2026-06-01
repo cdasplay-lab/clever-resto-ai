@@ -652,7 +652,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches) + (memoryEnabled ? "\n\n# ذاكرة الزبون\nاستدعِ recall_customer مرة واحدة في بداية المحادثة لتعرف هل الزبون قديم. إذا found=true، رحّب باسمه واقترح عليه آخر عنوان/هاتف بدل ما تسأله من جديد. لا تكشف ملاحظات المالك (notes) للزبون." : "") },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
