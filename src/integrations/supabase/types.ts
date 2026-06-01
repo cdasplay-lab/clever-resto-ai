@@ -224,6 +224,57 @@ export type Database = {
           },
         ]
       }
+      customer_memory: {
+        Row: {
+          channel: string
+          created_at: string
+          customer_handle: string
+          customer_name: string | null
+          id: string
+          last_address: string | null
+          last_order_at: string | null
+          last_phone: string | null
+          lifetime_value: number
+          notes: string | null
+          preferences: string | null
+          restaurant_id: string
+          total_orders: number
+          updated_at: string
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          customer_handle: string
+          customer_name?: string | null
+          id?: string
+          last_address?: string | null
+          last_order_at?: string | null
+          last_phone?: string | null
+          lifetime_value?: number
+          notes?: string | null
+          preferences?: string | null
+          restaurant_id: string
+          total_orders?: number
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          customer_handle?: string
+          customer_name?: string | null
+          id?: string
+          last_address?: string | null
+          last_order_at?: string | null
+          last_phone?: string | null
+          lifetime_value?: number
+          notes?: string | null
+          preferences?: string | null
+          restaurant_id?: string
+          total_orders?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       menu_items: {
         Row: {
           category: string | null
@@ -693,6 +744,7 @@ export type Database = {
         Returns: boolean
       }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      recall_customer: { Args: { _conversation_id: string }; Returns: Json }
       search_menu_items: {
         Args: { p_limit?: number; p_query: string; p_restaurant_id: string }
         Returns: {
