@@ -181,7 +181,17 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "recall_customer",
+      description:
+        "اجلب ذاكرة هذا الزبون (اسمه، عدد طلباته السابقة، آخر عنوان وهاتف، تفضيلاته، ملاحظات المالك). استدعِها مرة واحدة في بداية المحادثة لو ما عندك معلومات عنه، واستفد منها لتخصيص الترحيب وتسريع الطلب. read-only.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
 ] as const;
+
 
 // Media to deliver via the channel (filled by show_menu tool)
 type MediaItem = { photo_url: string; caption: string };
