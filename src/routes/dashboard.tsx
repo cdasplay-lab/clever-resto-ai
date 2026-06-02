@@ -1113,7 +1113,26 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2"><Label>الاسم</Label><Input value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} /></div>
             <div className="space-y-2"><Label>اللغة</Label><Input value={r.language} onChange={(e) => setR({ ...r, language: e.target.value })} /></div>
-            <div className="space-y-2 md:col-span-2"><Label>نبرة الرد</Label><Input value={r.tone} onChange={(e) => setR({ ...r, tone: e.target.value })} /></div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>نبرة الرد</Label>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { v: "ودود ومحترف", label: "ودود ومحترف" },
+                  { v: "رسمي وموجز", label: "رسمي وموجز" },
+                  { v: "مرح وعفوي", label: "مرح وعفوي" },
+                ].map((opt) => (
+                  <Button
+                    key={opt.v}
+                    type="button"
+                    variant={r.tone === opt.v ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setR({ ...r, tone: opt.v })}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+            </div>
             <div className="space-y-2 md:col-span-2"><Label>الوصف</Label><Textarea value={r.description ?? ""} onChange={(e) => setR({ ...r, description: e.target.value })} /></div>
             <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
             <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
