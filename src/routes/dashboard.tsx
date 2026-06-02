@@ -9,12 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, BarChart3, Link2, CheckCircle2, Radio, Pencil } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { BranchesTab } from "@/components/branches-tab";
 import { SubscriptionTab } from "@/components/subscription-tab";
 import { BotHealthTab } from "@/components/bot-health-tab";
@@ -22,6 +21,7 @@ import { CustomersTab } from "@/components/customers-tab";
 import { SocialTab } from "@/components/social-tab";
 import { MarketingTab } from "@/components/marketing-tab";
 import { CombosTab } from "@/components/combos-tab";
+import { AnalyticsTab } from "@/components/analytics-tab";
 
 
 
@@ -810,92 +810,6 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
   );
 }
 
-function AnalyticsTab({ restaurantId }: { restaurantId: string }) {
-  const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<{ daily: { day: string; orders: number; revenue: number }[]; totals: { orders: number; revenue: number; convs: number; aov: number }; topItems: { name: string; qty: number }[] }>({
-    daily: [], totals: { orders: 0, revenue: 0, convs: 0, aov: 0 }, topItems: [],
-  });
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-      const [{ data: orders }, { count: convCount }] = await Promise.all([
-        supabase.from("orders").select("id,total,status,created_at,items").eq("restaurant_id", restaurantId).gte("created_at", since).limit(1000),
-        supabase.from("conversations").select("id", { count: "exact", head: true }).eq("restaurant_id", restaurantId).gte("created_at", since),
-      ]);
-      const list = (orders as any[]) || [];
-      const byDay = new Map<string, { orders: number; revenue: number }>();
-      const itemQty = new Map<string, number>();
-      let totalRev = 0;
-      for (const o of list) {
-        const day = (o.created_at as string).slice(0, 10);
-        const cur = byDay.get(day) || { orders: 0, revenue: 0 };
-        cur.orders += 1;
-        if (o.status !== "cancelled") { cur.revenue += Number(o.total || 0); totalRev += Number(o.total || 0); }
-        byDay.set(day, cur);
-        for (const it of (Array.isArray(o.items) ? o.items : [])) {
-          itemQty.set(it.name, (itemQty.get(it.name) || 0) + Number(it.qty || 0));
-        }
-      }
-      const daily = Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([day, v]) => ({ day: day.slice(5), ...v }));
-      const topItems = Array.from(itemQty.entries()).map(([name, qty]) => ({ name, qty })).sort((a, b) => b.qty - a.qty).slice(0, 8);
-      const ordersCount = list.length;
-      setData({
-        daily,
-        totals: { orders: ordersCount, revenue: totalRev, convs: convCount || 0, aov: ordersCount ? Math.round(totalRev / ordersCount) : 0 },
-        topItems,
-      });
-      setLoading(false);
-    })();
-  }, [restaurantId]);
-
-  if (loading) return <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></div>;
-
-  return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Card><CardHeader className="pb-2"><CardDescription>الطلبات (30 يوم)</CardDescription><CardTitle className="text-2xl">{data.totals.orders}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>الإيرادات</CardDescription><CardTitle className="text-2xl">{data.totals.revenue.toLocaleString()}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>المحادثات</CardDescription><CardTitle className="text-2xl">{data.totals.convs}</CardTitle></CardHeader></Card>
-        <Card><CardHeader className="pb-2"><CardDescription>متوسط قيمة الطلب</CardDescription><CardTitle className="text-2xl">{data.totals.aov.toLocaleString()}</CardTitle></CardHeader></Card>
-      </div>
-      <Card>
-        <CardHeader><CardTitle className="flex items-center gap-2"><BarChart3 className="h-4 w-4" />الطلبات اليومية</CardTitle></CardHeader>
-        <CardContent>
-          {data.daily.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو بيانات</p> : (
-            <div style={{ width: "100%", height: 260 }}>
-              <ResponsiveContainer>
-                <BarChart data={data.daily}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="day" />
-                  <YAxis />
-                  <Tooltip />
-                  <Bar dataKey="orders" fill="hsl(var(--primary))" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader><CardTitle>الأكثر طلباً</CardTitle></CardHeader>
-        <CardContent>
-          {data.topItems.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو طلبات بعد</p> : (
-            <ul className="space-y-2">
-              {data.topItems.map((i, idx) => (
-                <li key={i.name} className="flex items-center justify-between border-b pb-1 text-sm">
-                  <span>{idx + 1}. {i.name}</span>
-                  <Badge variant="secondary">{i.qty}</Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
 
 function ConversationsTab({ restaurantId }: { restaurantId: string }) {
   const [convs, setConvs] = useState<Conversation[]>([]);
