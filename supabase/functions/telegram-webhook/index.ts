@@ -3,6 +3,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 
 const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
+const TG_MAX_LEN = 3900; // Telegram hard limit is 4096; leave a small safety margin
 
 async function deriveSecret(apiKey: string): Promise<string> {
   const data = new TextEncoder().encode(`telegram-webhook:${apiKey}`);
@@ -32,13 +33,58 @@ async function tgCall(method: string, body: any) {
   });
 }
 
-async function tgSend(chatId: number, text: string) {
-  await tgCall("sendMessage", { chat_id: chatId, text });
+// Split long messages on paragraph/line/word boundaries (telegram limit)
+function splitText(text: string, max = TG_MAX_LEN): string[] {
+  if (text.length <= max) return [text];
+  const parts: string[] = [];
+  let rest = text;
+  while (rest.length > max) {
+    let cut = rest.lastIndexOf("\n\n", max);
+    if (cut < max * 0.5) cut = rest.lastIndexOf("\n", max);
+    if (cut < max * 0.5) cut = rest.lastIndexOf(" ", max);
+    if (cut < max * 0.5) cut = max;
+    parts.push(rest.slice(0, cut).trim());
+    rest = rest.slice(cut).trim();
+  }
+  if (rest) parts.push(rest);
+  return parts;
+}
+
+function buildKeyboard(replies: string[]) {
+  if (!Array.isArray(replies) || !replies.length) return undefined;
+  // 2 columns layout
+  const rows: { text: string; callback_data: string }[][] = [];
+  for (let i = 0; i < replies.length; i += 2) {
+    rows.push(
+      replies.slice(i, i + 2).map((t) => ({
+        text: t,
+        callback_data: t.slice(0, 60), // telegram callback_data limit is 64 bytes
+      })),
+    );
+  }
+  return { inline_keyboard: rows };
+}
+
+async function tgSend(chatId: number, text: string, replies?: string[]) {
+  const chunks = splitText(text);
+  const kb = buildKeyboard(replies || []);
+  for (let i = 0; i < chunks.length; i++) {
+    const body: any = { chat_id: chatId, text: chunks[i] };
+    // Attach keyboard only on the last chunk
+    if (i === chunks.length - 1 && kb) body.reply_markup = kb;
+    await tgCall("sendMessage", body);
+  }
+}
+
+async function tgSendTyping(chatId: number) {
+  try { await tgCall("sendChatAction", { chat_id: chatId, action: "typing" }); } catch (_) {}
+}
+
+async function tgAnswerCallback(callbackId: string) {
+  try { await tgCall("answerCallbackQuery", { callback_query_id: callbackId }); } catch (_) {}
 }
 
 async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]) {
-  // Telegram sendMediaGroup: 2-10 items per group, only first caption shows under album
-  // We'll send in chunks of 10 with a caption per photo (some clients show all)
   for (let i = 0; i < items.length; i += 10) {
     const chunk = items.slice(i, i + 10);
     if (chunk.length === 1) {
@@ -59,21 +105,38 @@ Deno.serve(async (req) => {
   const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
   if (!TELEGRAM_API_KEY) return json({ error: "TELEGRAM_API_KEY missing" }, 500);
 
-  // Verify secret token
   const expected = await deriveSecret(TELEGRAM_API_KEY);
   const got = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
   if (!safeEqual(got, expected)) return new Response("Unauthorized", { status: 401 });
 
   const update = await req.json();
+
+  // === Callback (inline keyboard button press) ===
+  const cb = update.callback_query;
+  if (cb) {
+    await tgAnswerCallback(cb.id);
+    const chatId = cb.message?.chat?.id;
+    const data: string = cb.data || "";
+    if (!chatId || !data) return json({ ok: true });
+    // Reuse the standard message flow by synthesizing a "message" event
+    update.message = {
+      chat: cb.message.chat,
+      from: cb.from,
+      text: data,
+    };
+  }
+
   const message = update.message ?? update.edited_message;
   const chatId = message?.chat?.id;
   const text: string | undefined = message?.text;
   const caption: string | undefined = message?.caption;
   const photos: any[] | undefined = message?.photo;
-  // Largest photo size is the last element
   const photo = Array.isArray(photos) && photos.length ? photos[photos.length - 1] : null;
 
   if (!chatId || (!text && !photo)) return json({ ok: true, ignored: true });
+
+  // Show typing immediately so the user feels the bot is responsive
+  await tgSendTyping(chatId);
 
   // If photo: fetch via Telegram getFile + download to data URL (Vision support)
   let imageDataUrl: string | null = null;
@@ -99,8 +162,6 @@ Deno.serve(async (req) => {
 
   const db = admin();
 
-  // For now, pick the first active restaurant. Multi-bot routing comes later
-  // (mapping bot username -> restaurant_id).
   const { data: restaurant } = await db
     .from("restaurants")
     .select("id")
@@ -117,7 +178,6 @@ Deno.serve(async (req) => {
   const handle = message?.from?.username ? `@${message.from.username}` : String(message?.from?.id ?? "");
   const customerName = [message?.from?.first_name, message?.from?.last_name].filter(Boolean).join(" ");
 
-  // Upsert conversation
   let convId: string;
   const { data: existing } = await db
     .from("conversations")
@@ -145,20 +205,23 @@ Deno.serve(async (req) => {
     convId = created.id;
   }
 
-  // Save user message
   await db.from("messages").insert({
     conversation_id: convId,
     role: "user",
     content: userText,
   });
 
-  // Call agent (pass image_url for Vision when present)
+  // Keep typing visible during agent call (refresh every ~4s)
+  let typingTimer: number | undefined;
+  typingTimer = setInterval(() => { void tgSendTyping(chatId); }, 4000) as unknown as number;
+
   const baseUrl = Deno.env.get("SUPABASE_URL");
   const r = await fetch(`${baseUrl}/functions/v1/agent-run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
   });
+  if (typingTimer !== undefined) clearInterval(typingTimer);
   const data = await r.json().catch(() => ({}));
 
   if (!r.ok) {
@@ -174,6 +237,6 @@ Deno.serve(async (req) => {
   if (Array.isArray(data.media) && data.media.length) {
     await tgSendMedia(chatId, data.media);
   }
-  if (data.reply) await tgSend(chatId, data.reply);
+  if (data.reply) await tgSend(chatId, data.reply, data.quick_replies);
   return json({ ok: true });
 });
