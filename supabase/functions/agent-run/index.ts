@@ -1407,16 +1407,11 @@ Deno.serve(async (req) => {
             } else if ((name === "submit_order" || name === "schedule_order") && result.order_id) {
               quickReplies = [];
             } else if (name === "add_to_cart" || name === "add_combo_to_cart" || name === "get_cart_summary") {
-              quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];
+              quickReplies = [];
             } else if (name === "show_menu" || name === "show_combos") {
-              // لو المنيو صور فقط، لا نعرض أزرار سفلية حتى ما تطلع تحت الصور
-              if (result.mode === "image_only") {
-                quickReplies = [];
-              } else {
-                quickReplies = [];
-              }
+              quickReplies = [];
             } else if (name === "suggest_upsell" && Array.isArray(result.suggestions) && result.suggestions.length) {
-              quickReplies = ["✅ أضف", "لا شكراً", "🧾 معاينة الطلب"];
+              quickReplies = ["✅ أضف", "لا شكراً"];
             }
           }
 
