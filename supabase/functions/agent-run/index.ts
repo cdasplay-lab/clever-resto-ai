@@ -25,6 +25,26 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function cartFingerprint(cart: any[], delivery: any, branchId: string | null): string {
+  const norm = {
+    cart: (cart || []).map((c) => ({
+      id: c.menu_item_id, q: c.qty, p: c.unit_price,
+      o: (c.selected_options || []).map((s: any) => `${s.group}=${s.choice}`).sort().join("|"),
+      n: c.notes || "",
+    })),
+    d: { a: delivery?.address || "", p: delivery?.phone || "", t: delivery?.time || "" },
+    b: branchId || "",
+  };
+  return JSON.stringify(norm);
+}
+
+const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
+
 type CartItem = {
   menu_item_id: string;
   name: string;
