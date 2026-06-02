@@ -25,6 +25,26 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function cartFingerprint(cart: any[], delivery: any, branchId: string | null): string {
+  const norm = {
+    cart: (cart || []).map((c) => ({
+      id: c.menu_item_id, q: c.qty, p: c.unit_price,
+      o: (c.selected_options || []).map((s: any) => `${s.group}=${s.choice}`).sort().join("|"),
+      n: c.notes || "",
+    })),
+    d: { a: delivery?.address || "", p: delivery?.phone || "", t: delivery?.time || "" },
+    b: branchId || "",
+  };
+  return JSON.stringify(norm);
+}
+
+const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
+
 type CartItem = {
   menu_item_id: string;
   name: string;
@@ -131,10 +151,27 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "preview_order",
+      description:
+        "اعرض ملخّص الطلب النهائي على الزبون قبل الإرسال (الأصناف + الفرع + العنوان + الهاتف + الإجمالي). يرجع لك confirmation_token ونص ملخّص جاهز. لازم تستخدمه قبل submit_order. اعرض الملخّص للزبون واسأله بصراحة: 'أأكد الطلب؟ (نعم/لا)'.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "submit_order",
       description:
-        "احفظ الطلب نهائياً بعد ما يأكد الزبون صراحة. لا تستخدمه قبل عرض الملخص وأخذ التأكيد.",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+        "أرسل الطلب نهائياً للنظام. ممنوع استدعاؤه إلا بعد: (1) preview_order، و(2) موافقة صريحة من الزبون بكلمة مثل 'نعم/أكد/تمام/أوكي'. مرّر confirmation_token اللي رجع من preview_order ونص موافقة الزبون كما كتبها في user_confirmation_text.",
+      parameters: {
+        type: "object",
+        properties: {
+          confirmation_token: { type: "string", description: "التوكن اللي رجع من preview_order" },
+          user_confirmation_text: { type: "string", description: "نص موافقة الزبون الحرفي (مثلاً: نعم، أكد، تمام)" },
+        },
+        required: ["confirmation_token", "user_confirmation_text"],
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -272,7 +309,10 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 
 # قواعد صارمة (Rules)
 1) ممنوع تخترع صنف أو سعر — استدعِ search_menu قبل أي add_to_cart.
-2) قبل submit_order: اعرض ملخص (الأصناف + العنوان + الفرع + الإجمالي) واطلب تأكيد صريح ("نعم" أو "أكد").
+2) تأكيد الطلب (إلزامي وبخطوتين):
+   أ) بعد ما تتجمع: السلة + العنوان + الهاتف (+ الفرع لو متعدد) — استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
+   ب) لا تستدعِ submit_order إلا بعد ما الزبون يرد بصراحة بـ نعم/أكد/تمام/أوكي. عند الاستدعاء مرّر confirmation_token كما هو ونص موافقة الزبون الحرفي في user_confirmation_text.
+   ج) لو الزبون عدّل السلة أو العنوان بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
 4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
@@ -414,20 +454,76 @@ async function runTool(
     return { ok: true, delivery };
   }
 
-  if (name === "submit_order") {
+  if (name === "preview_order") {
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     if (!cart.length) return { error: "السلة فارغة" };
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    if (subtotal < Number(restaurant.min_order || 0)) {
-      return {
-        error: `الحد الأدنى للطلب ${restaurant.min_order} ${restaurant.currency}`,
-      };
+    const delivery = conv.delivery || {};
+    if (!delivery.address || !delivery.phone) {
+      return { error: "ناقص العنوان أو الهاتف — استدعِ set_delivery_info أولاً" };
+    }
+    const branchId = conv.meta?.branch_id || null;
+    const branches: any[] = (restaurant as any).__branches || [];
+    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
+    if (subtotal < effectiveMin) {
+      return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
+    }
+    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const token = `ord_${fp.slice(0, 16)}`;
+    await db.from("conversations").update({
+      meta: { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } },
+      state: "confirm",
+    }).eq("id", conv.id);
+    conv.meta = { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } };
+
+    const lines = cart.map((c) => {
+      const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
+      return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
+    }).join("\n");
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    return {
+      ok: true,
+      confirmation_token: token,
+      summary,
+      total: subtotal,
+      currency: restaurant.currency,
+      instruction: "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
+    };
+  }
+
+  if (name === "submit_order") {
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    if (!cart.length) return { error: "السلة فارغة" };
+
+    // === Confirmation gate ===
+    const pending = conv.meta?.pending_confirmation;
+    if (!pending?.token || !pending?.fp) {
+      return { error: "لازم تستدعي preview_order أولاً وتعرض الملخّص للزبون قبل الإرسال." };
+    }
+    if (!args.confirmation_token || args.confirmation_token !== pending.token) {
+      return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
     const delivery = conv.delivery || {};
+    const branchId = conv.meta?.branch_id || null;
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    if (currentFp !== pending.fp) {
+      // Cart or delivery changed since preview — force a new preview
+      await db.from("conversations").update({
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
+      return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
+    }
+    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
+    if (!userOk) {
+      return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم' أو 'أكد' بصراحة ثم أعد المحاولة." };
+    }
+
+    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
-    const branchId = conv.meta?.branch_id || null;
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -459,7 +555,12 @@ async function runTool(
 
     await db
       .from("conversations")
-      .update({ state: "submitted", cart: [], delivery: {} })
+      .update({
+        state: "submitted",
+        cart: [],
+        delivery: {},
+        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
+      })
       .eq("id", conv.id);
 
     // Fire-and-forget dispatch to platform webhook
@@ -472,7 +573,7 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
-    return { ok: true, order_id: order.id, total: subtotal };
+    return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
   if (name === "resolve_branch") {
