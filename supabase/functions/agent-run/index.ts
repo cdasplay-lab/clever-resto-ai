@@ -885,23 +885,18 @@ Deno.serve(async (req) => {
             });
           }
 
-            toolCallCache.set(cacheKey, result);
-            await db.from("agent_logs").insert({
-              conversation_id, restaurant_id: restaurant.id, step,
-              kind: `tool_result:${name}`, payload: { ...result, _cached: fromCache },
-            });
-          }
-
           // Derive quick-reply buttons from successful tool results
           if (result && !result.error) {
             if (name === "preview_order" && result.confirmation_token) {
               quickReplies = ["✅ نعم، أكد", "❌ إلغاء"];
             } else if (name === "submit_order" && result.order_id) {
               quickReplies = [];
-            } else if (name === "add_to_cart" || name === "get_cart_summary") {
+            } else if (name === "add_to_cart" || name === "add_combo_to_cart" || name === "get_cart_summary") {
               quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];
-            } else if (name === "show_menu") {
+            } else if (name === "show_menu" || name === "show_combos") {
               quickReplies = ["🛒 السلة", "🧾 معاينة الطلب"];
+            } else if (name === "suggest_upsell" && Array.isArray(result.suggestions) && result.suggestions.length) {
+              quickReplies = ["✅ أضف", "لا شكراً", "🧾 معاينة الطلب"];
             }
           }
 
