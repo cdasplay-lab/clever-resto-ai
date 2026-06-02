@@ -318,6 +318,7 @@ export type Database = {
       }
       customer_memory: {
         Row: {
+          auto_preferences: Json
           channel: string
           created_at: string
           customer_handle: string
@@ -334,6 +335,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          auto_preferences?: Json
           channel: string
           created_at?: string
           customer_handle: string
@@ -350,6 +352,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          auto_preferences?: Json
           channel?: string
           created_at?: string
           customer_handle?: string
