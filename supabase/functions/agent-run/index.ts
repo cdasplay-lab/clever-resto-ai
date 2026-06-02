@@ -321,7 +321,54 @@ function openHoursStatus(open_hours: any): string {
   return `${status}\nجدول الأسبوع: ${lines}`;
 }
 
-function systemPrompt(restaurant: any, conv: any, branches: any[]) {
+function buildCustomerProfileBlock(profile: any): string {
+  if (!profile || profile.found !== true) {
+    return "# ملف الزبون\nزبون جديد — رحّب به بحرارة واطلب اسمه بأدب لو ما ذكره.";
+  }
+  const lines: string[] = ["# ملف الزبون"];
+  if (profile.name) lines.push(`- الاسم: ${profile.name}`);
+  if (profile.total_orders) lines.push(`- عدد الطلبات السابقة: ${profile.total_orders}`);
+  if (profile.last_address) lines.push(`- آخر عنوان: ${profile.last_address}`);
+  if (profile.last_phone) lines.push(`- آخر هاتف: ${profile.last_phone}`);
+
+  const ap = profile.auto_preferences || {};
+  const apParts: string[] = [];
+  if (Array.isArray(ap.dislikes) && ap.dislikes.length) apParts.push(`ما يحب: ${ap.dislikes.join("، ")}`);
+  if (Array.isArray(ap.likes) && ap.likes.length) apParts.push(`يفضّل: ${ap.likes.join("، ")}`);
+  if (Array.isArray(ap.allergies) && ap.allergies.length) apParts.push(`⚠️ حساسية: ${ap.allergies.join("، ")}`);
+  if (ap.diet) apParts.push(`نظام غذائي: ${ap.diet}`);
+  if (apParts.length) lines.push(`- تفضيلات مستخرجة: ${apParts.join(" | ")}`);
+  if (profile.preferences) lines.push(`- ملاحظات الزبون: ${profile.preferences}`);
+
+  const favs = Array.isArray(profile.favorites) ? profile.favorites : [];
+  if (favs.length) {
+    lines.push(`- المفضّلات: ${favs.map((f: any) => `${f.name} (طلبها ${f.total_qty})`).join("، ")}`);
+  }
+
+  const recent = Array.isArray(profile.recent_orders) ? profile.recent_orders : [];
+  if (recent.length) {
+    const last = recent[0];
+    const items = Array.isArray(last.items) ? last.items : [];
+    const itemSummary = items.map((i: any) => `${i.qty || 1}×${i.name || ""}`).join(" + ");
+    lines.push(`- آخر طلب: ${itemSummary} — ${last.total || 0} (${new Date(last.created_at).toLocaleDateString("ar-IQ")})`);
+    if (recent.length > 1) {
+      lines.push(`- طلبات سابقة: ${recent.length} طلب محفوظ`);
+    }
+  }
+
+  lines.push("");
+  lines.push("**استفد من هذي المعلومات:**");
+  lines.push("- رحّب بالزبون باسمه (لو معروف) ولا تسأله عن اسمه من جديد.");
+  lines.push("- إذا قال 'نفس آخر مرة' أو 'كرر الطلب' → استدعِ reorder_last فوراً.");
+  lines.push("- اقترح آخر عنوان وهاتف بدل ما تسأله من جديد — أكّد فقط: 'نوصّل على نفس العنوان (…)؟'.");
+  lines.push("- احترم الحساسيات والتفضيلات — لا تقترح صنف فيه شي ما يحبه.");
+  lines.push("- لو ساكت ومحتار، اقترح عليه أحد مفضّلاته.");
+  lines.push("- ملاحظات المالك (notes) للاستئناس الداخلي فقط — لا تكشفها للزبون.");
+
+  return lines.join("\n");
+}
+
+function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any) {
   const cartLines =
     Array.isArray(conv.cart) && conv.cart.length
       ? conv.cart
