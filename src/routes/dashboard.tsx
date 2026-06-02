@@ -20,6 +20,7 @@ import { BotHealthTab } from "@/components/bot-health-tab";
 import { CustomersTab } from "@/components/customers-tab";
 import { SocialTab } from "@/components/social-tab";
 import { MarketingTab } from "@/components/marketing-tab";
+import { CombosTab } from "@/components/combos-tab";
 
 
 
