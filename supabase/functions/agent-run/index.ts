@@ -406,6 +406,9 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
 - لغة الرد: ${lang}
 - ${openHoursStatus(effectiveHours)}
 
+${buildCustomerProfileBlock(customerProfile)}
+
+
 # الفروع (Branches)
 ${branchesBlock}
 ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.name}` : ""}
