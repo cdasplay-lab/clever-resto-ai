@@ -228,6 +228,48 @@ const TOOLS = [
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "show_combos",
+      description:
+        "اعرض الكومبوهات (الوجبات المجمّعة بسعر خاص). استخدمها لما الزبون يسأل عن العروض أو الكومبوهات، أو لما تحب تقترح عرض أوفر. الصور تُرسل تلقائياً للزبون.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_combo_to_cart",
+      description:
+        "أضف كومبو كامل للسلة بسعر الكومبو (مو مجموع الأصناف). مرّر combo_id من نتائج show_combos.",
+      parameters: {
+        type: "object",
+        properties: {
+          combo_id: { type: "string" },
+          qty: { type: "integer", minimum: 1, default: 1 },
+        },
+        required: ["combo_id"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "suggest_upsell",
+      description:
+        "اقترح صنف مكمّل للسلة بشكل ذكي (مثلاً مشروب مع البرغر). استدعها مرة واحدة فقط بعد add_to_cart لصنف رئيسي. ترجع 2-3 اقتراحات لطيفة.",
+      parameters: {
+        type: "object",
+        properties: {
+          for_menu_item_id: { type: "string", description: "معرّف الصنف اللي توّه أُضيف للسلة" },
+        },
+        required: ["for_menu_item_id"],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
 
 
