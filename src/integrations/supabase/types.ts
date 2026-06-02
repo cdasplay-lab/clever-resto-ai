@@ -738,6 +738,7 @@ export type Database = {
           is_active: boolean
           language: string
           menu_image_url: string | null
+          menu_image_urls: string[]
           min_order: number
           name: string
           open_hours: Json
@@ -761,6 +762,7 @@ export type Database = {
           is_active?: boolean
           language?: string
           menu_image_url?: string | null
+          menu_image_urls?: string[]
           min_order?: number
           name: string
           open_hours?: Json
@@ -784,6 +786,7 @@ export type Database = {
           is_active?: boolean
           language?: string
           menu_image_url?: string | null
+          menu_image_urls?: string[]
           min_order?: number
           name?: string
           open_hours?: Json
