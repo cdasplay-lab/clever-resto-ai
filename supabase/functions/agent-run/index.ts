@@ -465,6 +465,9 @@ async function runTool(
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف — استدعِ set_delivery_info أولاً" };
     }
+    if (!conv.customer_name || !String(conv.customer_name).trim()) {
+      return { error: "ناقص اسم الزبون — اسأله عن اسمه ثم استدعِ set_delivery_info مع customer_name." };
+    }
     const branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
