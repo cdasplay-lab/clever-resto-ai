@@ -689,35 +689,111 @@ async function runTool(
     return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
-  if (name === "resolve_branch") {
-    const addr = String(args.address || "").trim().toLowerCase();
-    const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
-    if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
-    if (branches.length === 1) {
-      const b = branches[0];
-      await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: b.id } }).eq("id", conv.id);
-      conv.meta = { ...(conv.meta || {}), branch_id: b.id };
-      return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
+  if (name === "schedule_order") {
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    if (!cart.length) return { error: "السلة فارغة" };
+    const pending = conv.meta?.pending_confirmation;
+    if (!pending?.token || !pending?.fp) {
+      return { error: "لازم تستدعي preview_order أولاً وتعرض الملخّص للزبون قبل الجدولة." };
     }
-    // Match by delivery_areas
-    const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
-    if (matches.length === 0) {
-      const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
-      return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas };
+    if (!args.confirmation_token || args.confirmation_token !== pending.token) {
+      return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
-    const chosen = matches[0];
-    await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: chosen.id } }).eq("id", conv.id);
-    conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
-    return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
+    const delivery = conv.delivery || {};
+    const branchId = conv.meta?.branch_id || null;
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    if (currentFp !== pending.fp) {
+      await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
+      return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
+    }
+    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
+    if (!userOk) {
+      return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم/أكد/تمام' بصراحة ثم أعد المحاولة." };
+    }
+    const when = new Date(String(args.scheduled_for || ""));
+    if (isNaN(when.getTime())) return { error: "scheduled_for غير صالح. لازم ISO 8601 مع منطقة زمنية." };
+    const minMs = Date.now() + 15 * 60 * 1000;
+    const maxMs = Date.now() + 14 * 24 * 60 * 60 * 1000;
+    if (when.getTime() < minMs) return { error: "الموعد لازم يكون بعد 15 دقيقة على الأقل من الآن. اقترح وقت أبعد." };
+    if (when.getTime() > maxMs) return { error: "الموعد بعيد جداً (أقصى حد أسبوعين). اقترح وقت أقرب." };
+    if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
+
+    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    const { data: order, error } = await db
+      .from("orders")
+      .insert({
+        restaurant_id: restaurant.id,
+        conversation_id: conv.id,
+        branch_id: branchId,
+        customer_name: conv.customer_name,
+        customer_phone: delivery.phone,
+        delivery_address: delivery.address,
+        items: cart,
+        subtotal,
+        total: subtotal,
+        status: "scheduled",
+        scheduled_for: when.toISOString(),
+        notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
+      })
+      .select()
+      .single();
+    if (error) return { error: error.message };
+
+    await db
+      .from("conversations")
+      .update({
+        state: "submitted",
+        cart: [],
+        delivery: {},
+        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
+      })
+      .eq("id", conv.id);
+
+    return {
+      ok: true,
+      order_id: order.id,
+      scheduled_for: when.toISOString(),
+      scheduled_for_human: args.scheduled_for_human || when.toISOString(),
+      total: subtotal,
+      message: `تم حجز الطلب ✅ راح يوصل قبل ${args.scheduled_for_human || when.toISOString()} إن شاء الله.`,
+    };
   }
 
   if (name === "handoff_to_human") {
+    const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
     await db
       .from("conversations")
-      .update({ state: "handoff", meta: { ...(conv.meta || {}), handoff_reason: args.reason } })
+      .update({
+        state: "handoff",
+        is_bot_paused: true,
+        meta: { ...(conv.meta || {}), handoff_reason: reason, handoff_at: new Date().toISOString() },
+      })
       .eq("id", conv.id);
-    return { ok: true };
+    // Notify all active branches via Telegram
+    try {
+      const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active && b.telegram_chat_id);
+      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      if (LOVABLE_API_KEY && TELEGRAM_API_KEY && branches.length) {
+        const who = conv.customer_name || conv.customer_handle || "زبون";
+        const text = `🧑‍💼 محادثة تحتاج موظف\nالزبون: ${who}\nالسبب: ${reason}\n— البوت متوقّف بهذي المحادثة حتى يستلمها موظف من لوحة التحكم.`;
+        await Promise.all(branches.map((b) =>
+          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+              "X-Connection-Api-Key": TELEGRAM_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ chat_id: b.telegram_chat_id, text }),
+          }).catch(() => {}),
+        ));
+      }
+    } catch (_) { /* never block */ }
+    return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
   }
+
 
   if (name === "show_menu") {
     let q = db
