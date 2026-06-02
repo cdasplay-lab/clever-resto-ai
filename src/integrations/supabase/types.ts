@@ -218,6 +218,45 @@ export type Database = {
           },
         ]
       }
+      combos: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          image_url: string | null
+          is_active: boolean
+          items: Json
+          name: string
+          price: number
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean
+          items?: Json
+          name: string
+          price?: number
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          image_url?: string | null
+          is_active?: boolean
+          items?: Json
+          name?: string
+          price?: number
+          restaurant_id?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
           assigned_to: string | null
@@ -395,7 +434,10 @@ export type Database = {
           options: Json
           price: number
           restaurant_id: string
+          stock_qty: number | null
+          track_stock: boolean
           updated_at: string
+          upsell_category: string | null
         }
         Insert: {
           category?: string | null
@@ -409,7 +451,10 @@ export type Database = {
           options?: Json
           price: number
           restaurant_id: string
+          stock_qty?: number | null
+          track_stock?: boolean
           updated_at?: string
+          upsell_category?: string | null
         }
         Update: {
           category?: string | null
@@ -423,7 +468,10 @@ export type Database = {
           options?: Json
           price?: number
           restaurant_id?: string
+          stock_qty?: number | null
+          track_stock?: boolean
           updated_at?: string
+          upsell_category?: string | null
         }
         Relationships: [
           {
@@ -895,6 +943,7 @@ export type Database = {
         Args: { p_label?: string; p_restaurant_id: string }
         Returns: string
       }
+      decrement_stock: { Args: { _items: Json }; Returns: Json }
       get_bot_health: { Args: { _restaurant_id: string }; Returns: Json }
       get_my_subscription: { Args: { _restaurant_id: string }; Returns: Json }
       has_role: {
