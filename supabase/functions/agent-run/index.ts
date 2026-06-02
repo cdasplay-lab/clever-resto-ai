@@ -1215,7 +1215,7 @@ Deno.serve(async (req) => {
           if (result && !result.error) {
             if (name === "preview_order" && result.confirmation_token) {
               quickReplies = ["✅ نعم، أكد", "❌ إلغاء"];
-            } else if (name === "submit_order" && result.order_id) {
+            } else if ((name === "submit_order" || name === "schedule_order") && result.order_id) {
               quickReplies = [];
             } else if (name === "add_to_cart" || name === "add_combo_to_cart" || name === "get_cart_summary") {
               quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];
