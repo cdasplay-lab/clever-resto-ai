@@ -20,6 +20,7 @@ import { BotHealthTab } from "@/components/bot-health-tab";
 import { CustomersTab } from "@/components/customers-tab";
 import { SocialTab } from "@/components/social-tab";
 import { MarketingTab } from "@/components/marketing-tab";
+import { CombosTab } from "@/components/combos-tab";
 
 
 
@@ -51,6 +52,9 @@ type MenuItem = {
   is_available: boolean;
   image_url: string | null;
   options?: MenuOptionGroup[];
+  track_stock?: boolean;
+  stock_qty?: number | null;
+  upsell_category?: string | null;
 };
 type Order = {
   id: string;
@@ -253,6 +257,7 @@ function RestaurantManager({
             <TabsTrigger value="customers">الزبائن</TabsTrigger>
             <TabsTrigger value="social">ستوري/تعليقات</TabsTrigger>
             <TabsTrigger value="marketing">تسويق</TabsTrigger>
+            <TabsTrigger value="combos">كومبوهات</TabsTrigger>
 
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
@@ -268,6 +273,7 @@ function RestaurantManager({
           <TabsContent value="customers"><CustomersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="social"><SocialTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="marketing"><MarketingTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="combos"><CombosTab restaurantId={restaurant.id} /></TabsContent>
 
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
