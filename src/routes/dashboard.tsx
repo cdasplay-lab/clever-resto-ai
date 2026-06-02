@@ -1136,6 +1136,36 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
               </div>
             </div>
             <div className="space-y-2 md:col-span-2"><Label>الوصف</Label><Textarea value={r.description ?? ""} onChange={(e) => setR({ ...r, description: e.target.value })} /></div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>صورة المنيو (تُرسل للزبون لما يطلب المنيو)</Label>
+              {r.menu_image_url ? (
+                <div className="flex items-start gap-3">
+                  <img src={r.menu_image_url} alt="menu" className="h-32 w-32 rounded border object-cover" />
+                  <div className="flex flex-col gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setR({ ...r, menu_image_url: null })}>
+                      حذف الصورة
+                    </Button>
+                    <p className="text-xs text-muted-foreground">اضغط حفظ لتثبيت التغيير.</p>
+                  </div>
+                </div>
+              ) : (
+                <Input
+                  type="file"
+                  accept="image/*"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const ext = file.name.split(".").pop() || "jpg";
+                    const path = `${r.id}/menu-${crypto.randomUUID()}.${ext}`;
+                    const { error: upErr } = await supabase.storage.from("menu-images").upload(path, file, { upsert: false });
+                    if (upErr) return toast.error(upErr.message);
+                    const { data: pub } = supabase.storage.from("menu-images").getPublicUrl(path);
+                    setR({ ...r, menu_image_url: pub.publicUrl });
+                    toast.success("تم رفع الصورة. اضغط حفظ.");
+                  }}
+                />
+              )}
+            </div>
             <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
             <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
             <div className="space-y-2 md:col-span-2"><Label>رابط Webhook لمنصتك (يُرسل إليه الطلب المؤكد)</Label><Input value={r.platform_webhook_url ?? ""} onChange={(e) => setR({ ...r, platform_webhook_url: e.target.value })} placeholder="https://your-saas.com/api/incoming-order" /></div>
