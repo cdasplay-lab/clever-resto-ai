@@ -729,6 +729,125 @@ async function runTool(
     }
   }
 
+  if (name === "show_combos") {
+    const { data: combos } = await db
+      .from("combos")
+      .select("id,name,description,price,image_url,items")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_active", true)
+      .order("created_at", { ascending: true });
+    const list = combos ?? [];
+    for (const c of list) {
+      if (c.image_url) {
+        const caption = `🎁 ${c.name}\n${c.price} ${restaurant.currency}${c.description ? `\n${c.description}` : ""}`;
+        media.push({ photo_url: c.image_url, caption });
+      }
+    }
+    return {
+      ok: true,
+      count: list.length,
+      combos: list.map((c: any) => ({ id: c.id, name: c.name, price: c.price, description: c.description })),
+      note: list.length === 0
+        ? "ما اكو كومبوهات حالياً."
+        : (media.length ? "صور الكومبوهات تجهّزت. اكتفِ بجملة قصيرة." : "اعرض الكومبوهات نصياً مع السعر."),
+    };
+  }
+
+  if (name === "add_combo_to_cart") {
+    const { data: combo, error } = await db
+      .from("combos")
+      .select("id,name,price,items,is_active")
+      .eq("id", args.combo_id)
+      .eq("restaurant_id", restaurant.id)
+      .maybeSingle();
+    if (error || !combo) return { error: "كومبو غير موجود" };
+    if (!combo.is_active) return { error: "هذا الكومبو غير متوفر حالياً" };
+    const comboItems: { menu_item_id: string; qty: number }[] = Array.isArray(combo.items) ? combo.items : [];
+    if (!comboItems.length) return { error: "الكومبو فارغ" };
+    const qty = Math.max(1, Number(args.qty || 1));
+
+    // Fetch component items
+    const ids = comboItems.map((i) => i.menu_item_id);
+    const { data: rows } = await db
+      .from("menu_items")
+      .select("id,name,price,is_available,track_stock,stock_qty")
+      .in("id", ids);
+    const itemMap = new Map((rows || []).map((r: any) => [r.id, r]));
+
+    // Stock + availability check
+    for (const ci of comboItems) {
+      const it: any = itemMap.get(ci.menu_item_id);
+      if (!it || !it.is_available) return { error: `الصنف "${it?.name || ci.menu_item_id}" داخل الكومبو غير متوفر حالياً.` };
+      if (it.track_stock && (it.stock_qty == null || it.stock_qty < ci.qty * qty)) {
+        return { error: `المتوفر من "${it.name}" غير كافٍ للكومبو حالياً.` };
+      }
+    }
+
+    // Price allocation: distribute combo price across components proportionally to MSRP
+    const msrpTotal = comboItems.reduce((s, ci) => s + Number((itemMap.get(ci.menu_item_id) as any)?.price || 0) * ci.qty, 0) || 1;
+    const comboUnitPrice = Number(combo.price);
+    const cart: CartItem[] = Array.isArray(conv.cart) ? [...conv.cart] : [];
+    for (const ci of comboItems) {
+      const it: any = itemMap.get(ci.menu_item_id);
+      const msrp = Number(it.price) * ci.qty;
+      const allocated = (msrp / msrpTotal) * comboUnitPrice; // per single combo
+      const unit = allocated / ci.qty;
+      cart.push({
+        menu_item_id: ci.menu_item_id,
+        name: `${it.name} (ضمن كومبو: ${combo.name})`,
+        qty: ci.qty * qty,
+        unit_price: Math.round(unit),
+        notes: `combo:${combo.id}`,
+      });
+    }
+    conv.cart = cart;
+    await db.from("conversations").update({ cart, state: "collecting_items" }).eq("id", conv.id);
+    return {
+      ok: true,
+      combo: { id: combo.id, name: combo.name, price: comboUnitPrice * qty },
+      cart,
+      total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0),
+    };
+  }
+
+  if (name === "suggest_upsell") {
+    const { data: src } = await db
+      .from("menu_items")
+      .select("id,upsell_category,category")
+      .eq("id", args.for_menu_item_id)
+      .eq("restaurant_id", restaurant.id)
+      .maybeSingle();
+    const targetCat = (src as any)?.upsell_category;
+    if (!targetCat) return { ok: true, suggestions: [], note: "ما اكو فئة مقترحة لهذا الصنف." };
+
+    // Don't suggest if already in cart from same category
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    const inCartIds = new Set(cart.map((c) => c.menu_item_id));
+
+    const { data: suggestions } = await db
+      .from("menu_items")
+      .select("id,name,price,category,track_stock,stock_qty")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_available", true)
+      .ilike("category", `%${targetCat}%`)
+      .order("price", { ascending: true })
+      .limit(5);
+
+    const filtered = (suggestions ?? [])
+      .filter((s: any) => !inCartIds.has(s.id))
+      .filter((s: any) => !s.track_stock || (s.stock_qty != null && s.stock_qty > 0))
+      .slice(0, 3)
+      .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
+
+    return {
+      ok: true,
+      suggestions: filtered,
+      note: filtered.length
+        ? "اعرض اقتراحاً واحداً فقط بسطر لطيف ومختصر، مثل: 'تحب نضيفلك [اسم] بـ [سعر]؟'. لا تلحّ لو الزبون رفض."
+        : "ما اكو اقتراح مناسب الآن. كمّل الطلب بشكل طبيعي.",
+    };
+  }
+
   return { error: "unknown tool" };
 }
 
