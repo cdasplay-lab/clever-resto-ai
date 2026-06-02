@@ -995,17 +995,22 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
           ) : <CardTitle>الرسائل</CardTitle>}
         </CardHeader>
         <CardContent className="flex-1 space-y-2 overflow-y-auto">
-          {!selected ? <p className="text-sm text-muted-foreground">اختر محادثة من القائمة</p> : messages.length === 0 ? <p className="text-sm text-muted-foreground">لا رسائل</p> : messages.map((m) => {
-            const isHuman = m.role === "assistant" && m.name === "human";
-            return (
-              <div key={m.id} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "bg-accent" : isHuman ? "bg-emerald-600 text-white" : m.role === "assistant" ? "bg-primary text-primary-foreground" : "bg-muted text-xs font-mono"}`}>
-                  <div className="mb-0.5 text-[10px] opacity-70">{m.role === "user" ? "عميل" : isHuman ? "موظف" : m.role === "assistant" ? "بوت" : m.role}</div>
-                  <div className="whitespace-pre-wrap break-words">{m.content}</div>
+          {(() => {
+            if (!selected) return <p className="text-sm text-muted-foreground">اختر محادثة من القائمة</p>;
+            const visible = messages.filter((m) => m.role === "user" || m.role === "assistant");
+            if (visible.length === 0) return <p className="text-sm text-muted-foreground">لا رسائل</p>;
+            return visible.map((m) => {
+              const isHuman = m.role === "assistant" && m.name === "human";
+              return (
+                <div key={m.id} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
+                  <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "bg-accent" : isHuman ? "bg-emerald-600 text-white" : "bg-primary text-primary-foreground"}`}>
+                    <div className="mb-0.5 text-[10px] opacity-70">{m.role === "user" ? "عميل" : isHuman ? "موظف" : "بوت"}</div>
+                    <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </CardContent>
         {selectedConv && (
           <Composer conversationId={selectedConv.id} disabled={!selectedConv.is_bot_paused} onSent={() => {/* realtime will refresh */}} />
