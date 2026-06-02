@@ -918,14 +918,81 @@ async function runTool(
   }
 
   if (name === "recall_customer") {
+    // Backward-compat: profile is now injected into system prompt automatically.
     try {
-      const { data, error } = await db.rpc("recall_customer", { _conversation_id: conv.id });
-      if (error) return { found: false, error: error.message };
+      const { data } = await db.rpc("recall_customer", { _conversation_id: conv.id });
       return data ?? { found: false };
     } catch (err: any) {
       return { found: false, error: err?.message || "recall_failed" };
     }
   }
+
+  if (name === "reorder_last") {
+    try {
+      const { data: profile } = await db.rpc("recall_customer", { _conversation_id: conv.id });
+      const recent = (profile && Array.isArray((profile as any).recent_orders)) ? (profile as any).recent_orders : [];
+      if (!recent.length) return { error: "ما عندك طلبات سابقة محفوظة. عذراً، تحب تشوف المنيو؟" };
+      const last = recent[0];
+      const lastItems: any[] = Array.isArray(last.items) ? last.items : [];
+      if (!lastItems.length) return { error: "آخر طلب فارغ. هل تحب تشوف المنيو؟" };
+
+      // Validate availability + stock now
+      const ids = lastItems.map((i) => i.menu_item_id).filter(Boolean);
+      const { data: current } = await db
+        .from("menu_items")
+        .select("id,name,price,is_available,track_stock,stock_qty")
+        .in("id", ids)
+        .eq("restaurant_id", restaurant.id);
+      const byId = new Map((current || []).map((r: any) => [r.id, r]));
+
+      const newCart: CartItem[] = [];
+      const skipped: string[] = [];
+      for (const it of lastItems) {
+        const row: any = byId.get(it.menu_item_id);
+        if (!row || !row.is_available) { skipped.push(it.name || "صنف"); continue; }
+        if (row.track_stock && (row.stock_qty == null || row.stock_qty < (it.qty || 1))) {
+          skipped.push(`${row.name} (نافد)`); continue;
+        }
+        newCart.push({
+          menu_item_id: row.id,
+          name: row.name,
+          qty: Number(it.qty || 1),
+          unit_price: Number(row.price),
+          notes: it.notes || undefined,
+          selected_options: Array.isArray(it.selected_options) ? it.selected_options : undefined,
+        });
+      }
+
+      if (!newCart.length) return { error: "للأسف كل أصناف آخر طلب غير متوفرة الآن. تحب تشوف المنيو؟" };
+
+      // Restore last delivery info
+      const restoredDelivery: any = {};
+      if (last.delivery_address) restoredDelivery.address = last.delivery_address;
+      if ((profile as any).last_phone) restoredDelivery.phone = (profile as any).last_phone;
+
+      await db.from("conversations").update({
+        cart: newCart,
+        delivery: { ...(conv.delivery || {}), ...restoredDelivery },
+        state: "ordering",
+        customer_name: conv.customer_name || (profile as any).name || null,
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conv.id);
+      conv.cart = newCart;
+      conv.delivery = { ...(conv.delivery || {}), ...restoredDelivery };
+
+      return {
+        ok: true,
+        restored_items: newCart.length,
+        skipped,
+        total: newCart.reduce((s, i) => s + i.qty * i.unit_price, 0),
+        delivery: restoredDelivery,
+        note: "تم استرجاع آخر طلب للزبون. اعرض ملخّص قصير (الأصناف + المجموع + العنوان لو موجود)، اذكر الأصناف المتخطّاة إن وُجدت، ثم استدعِ preview_order للتأكيد.",
+      };
+    } catch (err: any) {
+      return { error: err?.message || "reorder failed" };
+    }
+  }
+
 
   if (name === "show_combos") {
     const { data: combos } = await db
