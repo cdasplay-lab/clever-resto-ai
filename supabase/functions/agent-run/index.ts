@@ -376,7 +376,12 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
           .join("\n")
       : "السلة فارغة";
 
-  const lang = restaurant.language === "ar" ? "عربي عراقي بسيط ومحكي" : restaurant.language;
+  const defaultLang = restaurant.language === "ar"
+    ? "عربي عراقي بسيط ومحكي"
+    : restaurant.language === "en"
+    ? "English"
+    : restaurant.language;
+  const lang = `طابق لغة الزبون تلقائياً في كل رسالة (Auto-detect & mirror the customer's language on every single reply). اكتشف لغة آخر رسالة من الزبون (عربي فصحى، عربي عراقي/خليجي/مصري/شامي/مغاربي، English، Français، Español، Deutsch، Türkçe، Kurdî، فارسی، Italiano، Português، Русский، 中文، 日本語، हिन्दी، اردو، أي لغة أخرى…) ورد بنفسها بنفس اللهجة والنبرة. إذا كانت رسالة الزبون مزيج لغات (code-switching) رد بنفس المزيج. إذا لم تستطع التحديد بثقة، استخدم: ${defaultLang}. أسماء الأصناف بالمنيو لا تُترجم — اذكرها كما هي. حافظ على نفس النبرة (${restaurant.tone}) بأي لغة.`;
 
   // Resolve current branch (if delivery info has branch_id stored in meta)
   const selectedBranchId = conv.meta?.branch_id;
