@@ -451,20 +451,76 @@ async function runTool(
     return { ok: true, delivery };
   }
 
-  if (name === "submit_order") {
+  if (name === "preview_order") {
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     if (!cart.length) return { error: "السلة فارغة" };
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    if (subtotal < Number(restaurant.min_order || 0)) {
-      return {
-        error: `الحد الأدنى للطلب ${restaurant.min_order} ${restaurant.currency}`,
-      };
+    const delivery = conv.delivery || {};
+    if (!delivery.address || !delivery.phone) {
+      return { error: "ناقص العنوان أو الهاتف — استدعِ set_delivery_info أولاً" };
+    }
+    const branchId = conv.meta?.branch_id || null;
+    const branches: any[] = (restaurant as any).__branches || [];
+    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
+    if (subtotal < effectiveMin) {
+      return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
+    }
+    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const token = `ord_${fp.slice(0, 16)}`;
+    await db.from("conversations").update({
+      meta: { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } },
+      state: "confirm",
+    }).eq("id", conv.id);
+    conv.meta = { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } };
+
+    const lines = cart.map((c) => {
+      const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
+      return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
+    }).join("\n");
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    return {
+      ok: true,
+      confirmation_token: token,
+      summary,
+      total: subtotal,
+      currency: restaurant.currency,
+      instruction: "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
+    };
+  }
+
+  if (name === "submit_order") {
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    if (!cart.length) return { error: "السلة فارغة" };
+
+    // === Confirmation gate ===
+    const pending = conv.meta?.pending_confirmation;
+    if (!pending?.token || !pending?.fp) {
+      return { error: "لازم تستدعي preview_order أولاً وتعرض الملخّص للزبون قبل الإرسال." };
+    }
+    if (!args.confirmation_token || args.confirmation_token !== pending.token) {
+      return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
     const delivery = conv.delivery || {};
+    const branchId = conv.meta?.branch_id || null;
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    if (currentFp !== pending.fp) {
+      // Cart or delivery changed since preview — force a new preview
+      await db.from("conversations").update({
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
+      return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
+    }
+    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
+    if (!userOk) {
+      return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم' أو 'أكد' بصراحة ثم أعد المحاولة." };
+    }
+
+    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
-    const branchId = conv.meta?.branch_id || null;
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -496,7 +552,12 @@ async function runTool(
 
     await db
       .from("conversations")
-      .update({ state: "submitted", cart: [], delivery: {} })
+      .update({
+        state: "submitted",
+        cart: [],
+        delivery: {},
+        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
+      })
       .eq("id", conv.id);
 
     // Fire-and-forget dispatch to platform webhook
@@ -509,7 +570,7 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
-    return { ok: true, order_id: order.id, total: subtotal };
+    return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
   if (name === "resolve_branch") {
