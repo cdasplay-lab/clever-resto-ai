@@ -739,6 +739,12 @@ async function runTool(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ order_id: order.id }),
       }).catch(() => {});
+      // Fire-and-forget preference extraction
+      fetch(`${baseUrl}/functions/v1/extract-preferences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conv.id, order_id: order.id }),
+      }).catch(() => {});
     } catch (_) {}
 
     return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
