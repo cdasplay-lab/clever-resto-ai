@@ -134,16 +134,17 @@ const TOOLS = [
     function: {
       name: "set_delivery_info",
       description:
-        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. تحقق من العنوان والهاتف.",
+        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. لازم تتضمن اسم الزبون + العنوان + الهاتف.",
       parameters: {
         type: "object",
         properties: {
+          customer_name: { type: "string", description: "اسم الزبون كما ذكره (مطلوب)" },
           address: { type: "string" },
           phone: { type: "string" },
           time: { type: "string", description: "وقت التوصيل المطلوب (نص حر)" },
           area: { type: "string" },
         },
-        required: ["address", "phone"],
+        required: ["customer_name", "address", "phone"],
         additionalProperties: false,
       },
     },
