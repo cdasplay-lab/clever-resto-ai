@@ -131,10 +131,27 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "preview_order",
+      description:
+        "اعرض ملخّص الطلب النهائي على الزبون قبل الإرسال (الأصناف + الفرع + العنوان + الهاتف + الإجمالي). يرجع لك confirmation_token ونص ملخّص جاهز. لازم تستخدمه قبل submit_order. اعرض الملخّص للزبون واسأله بصراحة: 'أأكد الطلب؟ (نعم/لا)'.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "submit_order",
       description:
-        "احفظ الطلب نهائياً بعد ما يأكد الزبون صراحة. لا تستخدمه قبل عرض الملخص وأخذ التأكيد.",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+        "أرسل الطلب نهائياً للنظام. ممنوع استدعاؤه إلا بعد: (1) preview_order، و(2) موافقة صريحة من الزبون بكلمة مثل 'نعم/أكد/تمام/أوكي'. مرّر confirmation_token اللي رجع من preview_order ونص موافقة الزبون كما كتبها في user_confirmation_text.",
+      parameters: {
+        type: "object",
+        properties: {
+          confirmation_token: { type: "string", description: "التوكن اللي رجع من preview_order" },
+          user_confirmation_text: { type: "string", description: "نص موافقة الزبون الحرفي (مثلاً: نعم، أكد، تمام)" },
+        },
+        required: ["confirmation_token", "user_confirmation_text"],
+        additionalProperties: false,
+      },
     },
   },
   {
