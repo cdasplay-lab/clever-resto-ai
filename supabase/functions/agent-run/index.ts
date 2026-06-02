@@ -409,12 +409,19 @@ async function runTool(
         .limit(5);
       results = data ?? [];
     }
-    // Enrich with options
+    // Enrich with options + stock info
     if (results.length) {
       const ids = results.map((r: any) => r.id);
-      const { data: opts } = await db.from("menu_items").select("id,options").in("id", ids);
-      const map = new Map((opts || []).map((o: any) => [o.id, o.options]));
-      results = results.map((r: any) => ({ ...r, options: map.get(r.id) || [] }));
+      const { data: extra } = await db
+        .from("menu_items")
+        .select("id,options,track_stock,stock_qty,upsell_category")
+        .in("id", ids);
+      const map = new Map((extra || []).map((o: any) => [o.id, o]));
+      results = results.map((r: any) => {
+        const e: any = map.get(r.id) || {};
+        const out_of_stock = e.track_stock && (e.stock_qty == null || e.stock_qty <= 0);
+        return { ...r, options: e.options || [], track_stock: !!e.track_stock, stock_qty: e.stock_qty, upsell_category: e.upsell_category || null, out_of_stock };
+      });
     }
     return { results };
   }
@@ -422,7 +429,7 @@ async function runTool(
   if (name === "add_to_cart") {
     const { data: item, error } = await db
       .from("menu_items")
-      .select("id,name,price,is_available,options")
+      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category")
       .eq("id", args.menu_item_id)
       .eq("restaurant_id", restaurant.id)
       .maybeSingle();
@@ -438,6 +445,21 @@ async function runTool(
         if (!has) return { error: `لازم تختار من مجموعة "${g.name}" قبل الإضافة`, missing_group: g.name, choices: g.choices };
       }
     }
+
+    // Stock check (cart-aware)
+    if (item.track_stock) {
+      const cartExisting: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+      const already = cartExisting.filter((c) => c.menu_item_id === item.id).reduce((s, c) => s + c.qty, 0);
+      const need = already + Number(args.qty || 0);
+      if (item.stock_qty == null || item.stock_qty <= 0) {
+        return { error: `للأسف "${item.name}" خلصان حالياً. اقترح بديل عبر search_menu.` };
+      }
+      if (need > item.stock_qty) {
+        const remaining = Math.max(0, item.stock_qty - already);
+        return { error: `المتوفر من "${item.name}" ${remaining} فقط. عدّل الكمية.`, available: remaining };
+      }
+    }
+
     // Compute price with deltas
     let unitPrice = Number(item.price);
     for (const s of selected) {
@@ -464,7 +486,13 @@ async function runTool(
       });
     conv.cart = cart;
     await db.from("conversations").update({ cart, state: "collecting_items" }).eq("id", conv.id);
-    return { ok: true, cart, total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0) };
+    return {
+      ok: true,
+      cart,
+      total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0),
+      upsell_category: item.upsell_category || null,
+      hint: item.upsell_category ? `استدعِ suggest_upsell بـ for_menu_item_id="${item.id}" لاقتراح إضافة لطيفة (مرة واحدة بالمحادثة فقط).` : undefined,
+    };
   }
 
 
