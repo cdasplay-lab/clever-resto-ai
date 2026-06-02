@@ -178,6 +178,25 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "schedule_order",
+      description:
+        "احجز الطلب لوقت لاحق (مو الآن). نفس شروط submit_order: لازم preview_order أولاً + موافقة صريحة من الزبون + scheduled_for بصيغة ISO 8601 (مع المنطقة الزمنية). الطلب يُخزن بحالة scheduled ويُرسل للفرع تلقائياً قبل نصف ساعة من الموعد. لا ينقص المخزون الآن.",
+      parameters: {
+        type: "object",
+        properties: {
+          confirmation_token: { type: "string", description: "التوكن اللي رجع من preview_order" },
+          user_confirmation_text: { type: "string", description: "نص موافقة الزبون الحرفي" },
+          scheduled_for: { type: "string", description: "موعد الطلب بصيغة ISO 8601 (مثلاً 2026-06-02T19:00:00+03:00 لبغداد). لازم يكون بعد 15 دقيقة على الأقل من الآن وضمن أسبوعين." },
+          scheduled_for_human: { type: "string", description: "تمثيل بشري للموعد كما تفهمه (مثلاً: اليوم الساعة 7 مساءً، بكرة الظهر)" },
+        },
+        required: ["confirmation_token", "user_confirmation_text", "scheduled_for", "scheduled_for_human"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "handoff_to_human",
       description: "حوّل المحادثة لموظف بشري لما تكون غير متأكد أو الزبون يطلب ذلك.",
       parameters: {
@@ -362,6 +381,10 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
 6) لو ما فهمت قصده بعد محاولتين، أو الزبون متضايق/زعلان، استخدم handoff_to_human فوراً.
 7) المطعم مغلق؟ اعتذر واذكر وقت الافتتاح. ما تأخذ طلب نهائي إلا إذا الزبون يطلب جدولة ضمن الدوام.
+13) الطلبات المجدولة (لوقت لاحق):
+   • إذا الزبون قال "بكرة"، "بعد ساعة"، "الساعة كذا"، "للغداء"، "للعشاء" أو أي وقت مستقبلي — اسأله عن الوقت المحدد، ثم بعد preview_order وموافقة الزبون استدعِ schedule_order بدل submit_order.
+   • مرّر scheduled_for بصيغة ISO 8601 بمنطقة بغداد (+03:00). الوقت الحالي الآن (UTC): ${new Date().toISOString()}. لازم الموعد يكون بعد 15 دقيقة على الأقل وخلال أسبوعين، وضمن دوام الفرع.
+   • مرّر scheduled_for_human بنفس الكلمات اللي قالها الزبون.
 ${branchRule}
 9) المخزون:
    • إذا add_to_cart رجع خطأ بسبب نفاد المخزون، اعتذر بسطر قصير واقترح أقرب بديل عبر search_menu فوراً.
@@ -670,6 +693,77 @@ async function runTool(
     return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
+  if (name === "schedule_order") {
+    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+    if (!cart.length) return { error: "السلة فارغة" };
+    const pending = conv.meta?.pending_confirmation;
+    if (!pending?.token || !pending?.fp) {
+      return { error: "لازم تستدعي preview_order أولاً وتعرض الملخّص للزبون قبل الجدولة." };
+    }
+    if (!args.confirmation_token || args.confirmation_token !== pending.token) {
+      return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
+    }
+    const delivery = conv.delivery || {};
+    const branchId = conv.meta?.branch_id || null;
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    if (currentFp !== pending.fp) {
+      await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
+      return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
+    }
+    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
+    if (!userOk) {
+      return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم/أكد/تمام' بصراحة ثم أعد المحاولة." };
+    }
+    const when = new Date(String(args.scheduled_for || ""));
+    if (isNaN(when.getTime())) return { error: "scheduled_for غير صالح. لازم ISO 8601 مع منطقة زمنية." };
+    const minMs = Date.now() + 15 * 60 * 1000;
+    const maxMs = Date.now() + 14 * 24 * 60 * 60 * 1000;
+    if (when.getTime() < minMs) return { error: "الموعد لازم يكون بعد 15 دقيقة على الأقل من الآن. اقترح وقت أبعد." };
+    if (when.getTime() > maxMs) return { error: "الموعد بعيد جداً (أقصى حد أسبوعين). اقترح وقت أقرب." };
+    if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
+
+    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    const { data: order, error } = await db
+      .from("orders")
+      .insert({
+        restaurant_id: restaurant.id,
+        conversation_id: conv.id,
+        branch_id: branchId,
+        customer_name: conv.customer_name,
+        customer_phone: delivery.phone,
+        delivery_address: delivery.address,
+        items: cart,
+        subtotal,
+        total: subtotal,
+        status: "scheduled",
+        scheduled_for: when.toISOString(),
+        notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
+      })
+      .select()
+      .single();
+    if (error) return { error: error.message };
+
+    await db
+      .from("conversations")
+      .update({
+        state: "submitted",
+        cart: [],
+        delivery: {},
+        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
+      })
+      .eq("id", conv.id);
+
+    return {
+      ok: true,
+      order_id: order.id,
+      scheduled_for: when.toISOString(),
+      scheduled_for_human: args.scheduled_for_human || when.toISOString(),
+      total: subtotal,
+      message: `تم حجز الطلب ✅ راح يوصل قبل ${args.scheduled_for_human || when.toISOString()} إن شاء الله.`,
+    };
+  }
+
   if (name === "resolve_branch") {
     const addr = String(args.address || "").trim().toLowerCase();
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
@@ -680,7 +774,6 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), branch_id: b.id };
       return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
     }
-    // Match by delivery_areas
     const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
     if (matches.length === 0) {
       const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
@@ -693,12 +786,39 @@ async function runTool(
   }
 
   if (name === "handoff_to_human") {
+    const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
     await db
       .from("conversations")
-      .update({ state: "handoff", meta: { ...(conv.meta || {}), handoff_reason: args.reason } })
+      .update({
+        state: "handoff",
+        is_bot_paused: true,
+        meta: { ...(conv.meta || {}), handoff_reason: reason, handoff_at: new Date().toISOString() },
+      })
       .eq("id", conv.id);
-    return { ok: true };
+    // Notify all active branches via Telegram
+    try {
+      const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active && b.telegram_chat_id);
+      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      if (LOVABLE_API_KEY && TELEGRAM_API_KEY && branches.length) {
+        const who = conv.customer_name || conv.customer_handle || "زبون";
+        const text = `🧑‍💼 محادثة تحتاج موظف\nالزبون: ${who}\nالسبب: ${reason}\n— البوت متوقّف بهذي المحادثة حتى يستلمها موظف من لوحة التحكم.`;
+        await Promise.all(branches.map((b) =>
+          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+              "X-Connection-Api-Key": TELEGRAM_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ chat_id: b.telegram_chat_id, text }),
+          }).catch(() => {}),
+        ));
+      }
+    } catch (_) { /* never block */ }
+    return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
   }
+
 
   if (name === "show_menu") {
     let q = db
@@ -1095,7 +1215,7 @@ Deno.serve(async (req) => {
           if (result && !result.error) {
             if (name === "preview_order" && result.confirmation_token) {
               quickReplies = ["✅ نعم، أكد", "❌ إلغاء"];
-            } else if (name === "submit_order" && result.order_id) {
+            } else if ((name === "submit_order" || name === "schedule_order") && result.order_id) {
               quickReplies = [];
             } else if (name === "add_to_cart" || name === "add_combo_to_cart" || name === "get_cart_summary") {
               quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];

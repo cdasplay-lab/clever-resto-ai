@@ -132,33 +132,74 @@ Deno.serve(async (req) => {
   const caption: string | undefined = message?.caption;
   const photos: any[] | undefined = message?.photo;
   const photo = Array.isArray(photos) && photos.length ? photos[photos.length - 1] : null;
+  const voice = message?.voice || message?.audio;
 
-  if (!chatId || (!text && !photo)) return json({ ok: true, ignored: true });
+  if (!chatId || (!text && !photo && !voice)) return json({ ok: true, ignored: true });
 
   // Show typing immediately so the user feels the bot is responsive
   await tgSendTyping(chatId);
 
-  // If photo: fetch via Telegram getFile + download to data URL (Vision support)
-  let imageDataUrl: string | null = null;
-  if (photo?.file_id) {
+  // Helper: download a Telegram file to data URL
+  async function downloadAsDataUrl(fileId: string, fallbackMime: string): Promise<string | null> {
     try {
-      const r = await tgCall("getFile", { file_id: photo.file_id });
+      const r = await tgCall("getFile", { file_id: fileId });
       const j = await r.json();
       const filePath = j?.result?.file_path;
-      if (filePath) {
-        const dl = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_API_KEY}/${filePath}`);
-        if (dl.ok) {
-          const buf = new Uint8Array(await dl.arrayBuffer());
-          const ct = dl.headers.get("content-type") || "image/jpeg";
-          let bin = "";
-          for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
-          imageDataUrl = `data:${ct};base64,${btoa(bin)}`;
-        }
-      }
-    } catch (_) { /* ignore, fall back to text-only */ }
+      if (!filePath) return null;
+      const dl = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_API_KEY}/${filePath}`);
+      if (!dl.ok) return null;
+      const buf = new Uint8Array(await dl.arrayBuffer());
+      const ct = dl.headers.get("content-type") || fallbackMime;
+      let bin = "";
+      for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
+      return `data:${ct};base64,${btoa(bin)}`;
+    } catch (_) { return null; }
   }
 
-  const userText = (text ?? caption ?? (imageDataUrl ? "[صورة من الزبون]" : "")).toString();
+  // If photo: fetch via Telegram getFile + download to data URL (Vision support)
+  let imageDataUrl: string | null = null;
+  if (photo?.file_id) imageDataUrl = await downloadAsDataUrl(photo.file_id, "image/jpeg");
+
+  // If voice/audio: transcribe via Lovable AI
+  let transcribedText = "";
+  if (voice?.file_id) {
+    const audioDataUrl = await downloadAsDataUrl(voice.file_id, voice.mime_type || "audio/ogg");
+    if (audioDataUrl) {
+      try {
+        const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+        const mime = audioDataUrl.match(/^data:([^;]+)/)?.[1] || "audio/ogg";
+        const fmt = mime.includes("mpeg") ? "mp3" : mime.includes("wav") ? "wav" : mime.includes("mp4") || mime.includes("m4a") ? "mp4" : "ogg";
+        const base64 = audioDataUrl.split(",")[1] || "";
+        const tr = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash",
+            messages: [{
+              role: "user",
+              content: [
+                { type: "text", text: "حوّل هذه الرسالة الصوتية لنص عربي بالضبط كما قيلت، بدون أي إضافات أو تعليقات. فقط النص المنطوق." },
+                { type: "input_audio", input_audio: { data: base64, format: fmt } },
+              ],
+            }],
+          }),
+        });
+        if (tr.ok) {
+          const tj = await tr.json();
+          transcribedText = (tj?.choices?.[0]?.message?.content ?? "").toString().trim();
+        }
+      } catch (_) { /* ignore */ }
+    }
+    if (!transcribedText) {
+      await tgSend(chatId, "ما كدرت أفهم الرسالة الصوتية 🎙️ ممكن تكتبلي النص؟");
+      return json({ ok: true });
+    }
+  }
+
+  const baseText = text ?? caption ?? "";
+  const userText = (transcribedText
+    ? `[رسالة صوتية] ${transcribedText}`
+    : (baseText || (imageDataUrl ? "[صورة من الزبون]" : ""))).toString();
 
   const db = admin();
 
