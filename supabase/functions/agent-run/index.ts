@@ -1194,10 +1194,16 @@ Deno.serve(async (req) => {
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
 
-    // Phase 2: feature-flag gated tools. recall_customer is opt-in per restaurant.
-    const flags = (restaurant.feature_flags && typeof restaurant.feature_flags === "object") ? restaurant.feature_flags : {};
-    const memoryEnabled = flags.customer_memory_enabled === true;
-    const activeTools = memoryEnabled ? TOOLS : (TOOLS as readonly any[]).filter((t: any) => t.function?.name !== "recall_customer");
+    // Customer memory is always on. Eagerly fetch the profile and inject it into the system prompt.
+    let customerProfile: any = { found: false };
+    try {
+      const { data: profileData } = await db.rpc("recall_customer", { _conversation_id: conversation_id });
+      if (profileData) customerProfile = profileData;
+    } catch (err) {
+      console.error("recall_customer eager fetch failed:", err);
+    }
+    // Drop the legacy recall_customer tool — profile is already injected. Keep reorder_last + everything else.
+    const activeTools = (TOOLS as readonly any[]).filter((t: any) => t.function?.name !== "recall_customer");
 
 
     // Load latest 30 messages, then restore chronological order for the model.
@@ -1221,7 +1227,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches) + (memoryEnabled ? "\n\n# ذاكرة الزبون\nاستدعِ recall_customer مرة واحدة في بداية المحادثة لتعرف هل الزبون قديم. إذا found=true، رحّب باسمه واقترح عليه آخر عنوان/هاتف بدل ما تسأله من جديد. لا تكشف ملاحظات المالك (notes) للزبون." : "") },
+      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
