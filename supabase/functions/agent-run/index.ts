@@ -241,12 +241,13 @@ const TOOLS = [
   {
     type: "function",
     function: {
-      name: "recall_customer",
+      name: "reorder_last",
       description:
-        "اجلب ذاكرة هذا الزبون (اسمه، عدد طلباته السابقة، آخر عنوان وهاتف، تفضيلاته، ملاحظات المالك). استدعِها مرة واحدة في بداية المحادثة لو ما عندك معلومات عنه، واستفد منها لتخصيص الترحيب وتسريع الطلب. read-only.",
+        "أعد إضافة آخر طلب للزبون كاملاً إلى السلة. استخدمها لما الزبون يقول 'نفس آخر طلب'، 'زي المرة الماضية'، 'كرر الطلب السابق'، أو 'مثل طلبتي الأخيرة'. تتحقق تلقائياً من توفر الأصناف الحالي وتتخطى أي صنف غير متوفر. بعدها استدعِ preview_order مباشرة.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
+
   {
     type: "function",
     function: {
@@ -320,7 +321,54 @@ function openHoursStatus(open_hours: any): string {
   return `${status}\nجدول الأسبوع: ${lines}`;
 }
 
-function systemPrompt(restaurant: any, conv: any, branches: any[]) {
+function buildCustomerProfileBlock(profile: any): string {
+  if (!profile || profile.found !== true) {
+    return "# ملف الزبون\nزبون جديد — رحّب به بحرارة واطلب اسمه بأدب لو ما ذكره.";
+  }
+  const lines: string[] = ["# ملف الزبون"];
+  if (profile.name) lines.push(`- الاسم: ${profile.name}`);
+  if (profile.total_orders) lines.push(`- عدد الطلبات السابقة: ${profile.total_orders}`);
+  if (profile.last_address) lines.push(`- آخر عنوان: ${profile.last_address}`);
+  if (profile.last_phone) lines.push(`- آخر هاتف: ${profile.last_phone}`);
+
+  const ap = profile.auto_preferences || {};
+  const apParts: string[] = [];
+  if (Array.isArray(ap.dislikes) && ap.dislikes.length) apParts.push(`ما يحب: ${ap.dislikes.join("، ")}`);
+  if (Array.isArray(ap.likes) && ap.likes.length) apParts.push(`يفضّل: ${ap.likes.join("، ")}`);
+  if (Array.isArray(ap.allergies) && ap.allergies.length) apParts.push(`⚠️ حساسية: ${ap.allergies.join("، ")}`);
+  if (ap.diet) apParts.push(`نظام غذائي: ${ap.diet}`);
+  if (apParts.length) lines.push(`- تفضيلات مستخرجة: ${apParts.join(" | ")}`);
+  if (profile.preferences) lines.push(`- ملاحظات الزبون: ${profile.preferences}`);
+
+  const favs = Array.isArray(profile.favorites) ? profile.favorites : [];
+  if (favs.length) {
+    lines.push(`- المفضّلات: ${favs.map((f: any) => `${f.name} (طلبها ${f.total_qty})`).join("، ")}`);
+  }
+
+  const recent = Array.isArray(profile.recent_orders) ? profile.recent_orders : [];
+  if (recent.length) {
+    const last = recent[0];
+    const items = Array.isArray(last.items) ? last.items : [];
+    const itemSummary = items.map((i: any) => `${i.qty || 1}×${i.name || ""}`).join(" + ");
+    lines.push(`- آخر طلب: ${itemSummary} — ${last.total || 0} (${new Date(last.created_at).toLocaleDateString("ar-IQ")})`);
+    if (recent.length > 1) {
+      lines.push(`- طلبات سابقة: ${recent.length} طلب محفوظ`);
+    }
+  }
+
+  lines.push("");
+  lines.push("**استفد من هذي المعلومات:**");
+  lines.push("- رحّب بالزبون باسمه (لو معروف) ولا تسأله عن اسمه من جديد.");
+  lines.push("- إذا قال 'نفس آخر مرة' أو 'كرر الطلب' → استدعِ reorder_last فوراً.");
+  lines.push("- اقترح آخر عنوان وهاتف بدل ما تسأله من جديد — أكّد فقط: 'نوصّل على نفس العنوان (…)؟'.");
+  lines.push("- احترم الحساسيات والتفضيلات — لا تقترح صنف فيه شي ما يحبه.");
+  lines.push("- لو ساكت ومحتار، اقترح عليه أحد مفضّلاته.");
+  lines.push("- ملاحظات المالك (notes) للاستئناس الداخلي فقط — لا تكشفها للزبون.");
+
+  return lines.join("\n");
+}
+
+function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any) {
   const cartLines =
     Array.isArray(conv.cart) && conv.cart.length
       ? conv.cart
@@ -358,6 +406,9 @@ function systemPrompt(restaurant: any, conv: any, branches: any[]) {
 - لغة الرد: ${lang}
 - ${openHoursStatus(effectiveHours)}
 
+${buildCustomerProfileBlock(customerProfile)}
+
+
 # الفروع (Branches)
 ${branchesBlock}
 ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.name}` : ""}
@@ -372,7 +423,7 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 # قواعد صارمة (Rules)
 1) ممنوع تخترع صنف أو سعر — استدعِ search_menu قبل أي add_to_cart.
 2) تأكيد الطلب (إلزامي وبخطوتين):
-   أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف (+ الفرع لو متعدد). إذا ما تعرف اسمه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name. إذا recall_customer رجّع اسم محفوظ، لا تعيد السؤال — أكّد فقط: "نأكّد الطلب باسم (فلان)؟".
+   أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف (+ الفرع لو متعدد). إذا الاسم محفوظ في ملف الزبون أعلاه، استعمله مباشرة بدون ما تسأل. إذا ما تعرفه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name.
    ب) بعد ما تكتمل البيانات استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
    ج) لا تستدعِ submit_order إلا بعد ما الزبون يرد بصراحة بـ نعم/أكد/تمام/أوكي. عند الاستدعاء مرّر confirmation_token كما هو ونص موافقة الزبون الحرفي في user_confirmation_text.
    د) لو الزبون عدّل السلة أو العنوان أو الاسم بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
@@ -688,6 +739,12 @@ async function runTool(
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ order_id: order.id }),
       }).catch(() => {});
+      // Fire-and-forget preference extraction
+      fetch(`${baseUrl}/functions/v1/extract-preferences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conv.id, order_id: order.id }),
+      }).catch(() => {});
     } catch (_) {}
 
     return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
@@ -753,6 +810,18 @@ async function runTool(
         meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
       })
       .eq("id", conv.id);
+
+    // Fire-and-forget preference extraction
+    try {
+      const baseUrl = Deno.env.get("SUPABASE_URL");
+      fetch(`${baseUrl}/functions/v1/extract-preferences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conv.id, order_id: order.id }),
+      }).catch(() => {});
+    } catch (_) {}
+
+
 
     return {
       ok: true,
@@ -867,14 +936,81 @@ async function runTool(
   }
 
   if (name === "recall_customer") {
+    // Backward-compat: profile is now injected into system prompt automatically.
     try {
-      const { data, error } = await db.rpc("recall_customer", { _conversation_id: conv.id });
-      if (error) return { found: false, error: error.message };
+      const { data } = await db.rpc("recall_customer", { _conversation_id: conv.id });
       return data ?? { found: false };
     } catch (err: any) {
       return { found: false, error: err?.message || "recall_failed" };
     }
   }
+
+  if (name === "reorder_last") {
+    try {
+      const { data: profile } = await db.rpc("recall_customer", { _conversation_id: conv.id });
+      const recent = (profile && Array.isArray((profile as any).recent_orders)) ? (profile as any).recent_orders : [];
+      if (!recent.length) return { error: "ما عندك طلبات سابقة محفوظة. عذراً، تحب تشوف المنيو؟" };
+      const last = recent[0];
+      const lastItems: any[] = Array.isArray(last.items) ? last.items : [];
+      if (!lastItems.length) return { error: "آخر طلب فارغ. هل تحب تشوف المنيو؟" };
+
+      // Validate availability + stock now
+      const ids = lastItems.map((i) => i.menu_item_id).filter(Boolean);
+      const { data: current } = await db
+        .from("menu_items")
+        .select("id,name,price,is_available,track_stock,stock_qty")
+        .in("id", ids)
+        .eq("restaurant_id", restaurant.id);
+      const byId = new Map((current || []).map((r: any) => [r.id, r]));
+
+      const newCart: CartItem[] = [];
+      const skipped: string[] = [];
+      for (const it of lastItems) {
+        const row: any = byId.get(it.menu_item_id);
+        if (!row || !row.is_available) { skipped.push(it.name || "صنف"); continue; }
+        if (row.track_stock && (row.stock_qty == null || row.stock_qty < (it.qty || 1))) {
+          skipped.push(`${row.name} (نافد)`); continue;
+        }
+        newCart.push({
+          menu_item_id: row.id,
+          name: row.name,
+          qty: Number(it.qty || 1),
+          unit_price: Number(row.price),
+          notes: it.notes || undefined,
+          selected_options: Array.isArray(it.selected_options) ? it.selected_options : undefined,
+        });
+      }
+
+      if (!newCart.length) return { error: "للأسف كل أصناف آخر طلب غير متوفرة الآن. تحب تشوف المنيو؟" };
+
+      // Restore last delivery info
+      const restoredDelivery: any = {};
+      if (last.delivery_address) restoredDelivery.address = last.delivery_address;
+      if ((profile as any).last_phone) restoredDelivery.phone = (profile as any).last_phone;
+
+      await db.from("conversations").update({
+        cart: newCart,
+        delivery: { ...(conv.delivery || {}), ...restoredDelivery },
+        state: "ordering",
+        customer_name: conv.customer_name || (profile as any).name || null,
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conv.id);
+      conv.cart = newCart;
+      conv.delivery = { ...(conv.delivery || {}), ...restoredDelivery };
+
+      return {
+        ok: true,
+        restored_items: newCart.length,
+        skipped,
+        total: newCart.reduce((s, i) => s + i.qty * i.unit_price, 0),
+        delivery: restoredDelivery,
+        note: "تم استرجاع آخر طلب للزبون. اعرض ملخّص قصير (الأصناف + المجموع + العنوان لو موجود)، اذكر الأصناف المتخطّاة إن وُجدت، ثم استدعِ preview_order للتأكيد.",
+      };
+    } catch (err: any) {
+      return { error: err?.message || "reorder failed" };
+    }
+  }
+
 
   if (name === "show_combos") {
     const { data: combos } = await db
@@ -1076,10 +1212,16 @@ Deno.serve(async (req) => {
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
 
-    // Phase 2: feature-flag gated tools. recall_customer is opt-in per restaurant.
-    const flags = (restaurant.feature_flags && typeof restaurant.feature_flags === "object") ? restaurant.feature_flags : {};
-    const memoryEnabled = flags.customer_memory_enabled === true;
-    const activeTools = memoryEnabled ? TOOLS : (TOOLS as readonly any[]).filter((t: any) => t.function?.name !== "recall_customer");
+    // Customer memory is always on. Eagerly fetch the profile and inject it into the system prompt.
+    let customerProfile: any = { found: false };
+    try {
+      const { data: profileData } = await db.rpc("recall_customer", { _conversation_id: conversation_id });
+      if (profileData) customerProfile = profileData;
+    } catch (err) {
+      console.error("recall_customer eager fetch failed:", err);
+    }
+    // Drop the legacy recall_customer tool — profile is already injected. Keep reorder_last + everything else.
+    const activeTools = (TOOLS as readonly any[]).filter((t: any) => t.function?.name !== "recall_customer");
 
 
     // Load latest 30 messages, then restore chronological order for the model.
@@ -1103,7 +1245,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches) + (memoryEnabled ? "\n\n# ذاكرة الزبون\nاستدعِ recall_customer مرة واحدة في بداية المحادثة لتعرف هل الزبون قديم. إذا found=true، رحّب باسمه واقترح عليه آخر عنوان/هاتف بدل ما تسأله من جديد. لا تكشف ملاحظات المالك (notes) للزبون." : "") },
+      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
