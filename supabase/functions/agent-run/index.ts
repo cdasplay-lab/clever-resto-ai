@@ -789,7 +789,24 @@ Deno.serve(async (req) => {
 
     const media: MediaItem[] = [];
     let finalText = "";
+    let quickReplies: string[] = [];
     const loopStartedAt = Date.now();
+
+    // === /cancel shortcut: clear cart + pending confirmation without calling the model ===
+    const lastUserMsg = [...cleanHistory].reverse().find((m) => m.role === "user");
+    const lastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim().toLowerCase() : "";
+    if (["/cancel", "الغاء", "إلغاء", "الغاء الطلب", "إلغاء الطلب", "cancel"].includes(lastUserText)) {
+      await db.from("conversations").update({
+        cart: [],
+        delivery: {},
+        state: "idle",
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conversation_id);
+      const reply = "تم إلغاء طلبك. متى ما تحب نبدأ من جديد، أنا موجود 🌹";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
+    }
+
     // Guardrails: dedup identical consecutive tool calls + loop breaker
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
@@ -868,6 +885,26 @@ Deno.serve(async (req) => {
             });
           }
 
+            toolCallCache.set(cacheKey, result);
+            await db.from("agent_logs").insert({
+              conversation_id, restaurant_id: restaurant.id, step,
+              kind: `tool_result:${name}`, payload: { ...result, _cached: fromCache },
+            });
+          }
+
+          // Derive quick-reply buttons from successful tool results
+          if (result && !result.error) {
+            if (name === "preview_order" && result.confirmation_token) {
+              quickReplies = ["✅ نعم، أكد", "❌ إلغاء"];
+            } else if (name === "submit_order" && result.order_id) {
+              quickReplies = [];
+            } else if (name === "add_to_cart" || name === "get_cart_summary") {
+              quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];
+            } else if (name === "show_menu") {
+              quickReplies = ["🛒 السلة", "🧾 معاينة الطلب"];
+            }
+          }
+
           const toolMsg = {
             role: "tool",
             tool_call_id: tc.id,
@@ -892,6 +929,7 @@ Deno.serve(async (req) => {
       break;
     }
 
+
     // Phase 1 observability: log overall run summary (additive — does not affect behavior)
     try {
       await db.from("agent_logs").insert({
@@ -905,7 +943,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
-    return json({ reply: finalText, state: conv.state, media });
+    return json({ reply: finalText, state: conv.state, media, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";
     // Phase 1: log error to agent_logs for the owner's bot-health view
