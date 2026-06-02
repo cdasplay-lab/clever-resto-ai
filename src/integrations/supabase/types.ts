@@ -539,6 +539,7 @@ export type Database = {
           items: Json
           notes: string | null
           restaurant_id: string
+          scheduled_for: string | null
           status: Database["public"]["Enums"]["order_status"]
           subtotal: number
           total: number
@@ -557,6 +558,7 @@ export type Database = {
           items: Json
           notes?: string | null
           restaurant_id: string
+          scheduled_for?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           subtotal?: number
           total?: number
@@ -575,6 +577,7 @@ export type Database = {
           items?: Json
           notes?: string | null
           restaurant_id?: string
+          scheduled_for?: string | null
           status?: Database["public"]["Enums"]["order_status"]
           subtotal?: number
           total?: number
@@ -990,6 +993,7 @@ export type Database = {
         | "out_for_delivery"
         | "completed"
         | "cancelled"
+        | "scheduled"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1135,6 +1139,7 @@ export const Constants = {
         "out_for_delivery",
         "completed",
         "cancelled",
+        "scheduled",
       ],
     },
   },
