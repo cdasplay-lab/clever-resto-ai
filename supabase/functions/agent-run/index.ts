@@ -821,6 +821,15 @@ async function runTool(
 
 
   if (name === "show_menu") {
+    // If the restaurant uploaded a single menu image, send only that (no captions, no text).
+    if ((restaurant as any).menu_image_url && !args.category) {
+      media.push({ photo_url: (restaurant as any).menu_image_url, caption: "" });
+      return {
+        ok: true,
+        mode: "image_only",
+        note: "تم إرسال صورة المنيو للزبون. لا تكتب أي قائمة أصناف أو أسعار، اكتفِ بجملة قصيرة جداً مثل 'تفضل المنيو 👇'.",
+      };
+    }
     let q = db
       .from("menu_items")
       .select("id,name,description,price,category,image_url,is_available")
