@@ -52,6 +52,9 @@ type MenuItem = {
   is_available: boolean;
   image_url: string | null;
   options?: MenuOptionGroup[];
+  track_stock?: boolean;
+  stock_qty?: number | null;
+  upsell_category?: string | null;
 };
 type Order = {
   id: string;
