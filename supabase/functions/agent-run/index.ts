@@ -821,15 +821,23 @@ async function runTool(
 
 
   if (name === "show_menu") {
-    // If the restaurant uploaded a single menu image, send only that (no captions, no text).
-    if ((restaurant as any).menu_image_url && !args.category) {
-      media.push({ photo_url: (restaurant as any).menu_image_url, caption: "" });
+    // If the restaurant uploaded menu images, send them all (no captions, no text).
+    const menuImgs: string[] = Array.isArray((restaurant as any).menu_image_urls)
+      ? (restaurant as any).menu_image_urls.filter(Boolean)
+      : [];
+    if ((restaurant as any).menu_image_url && menuImgs.length === 0) {
+      menuImgs.push((restaurant as any).menu_image_url);
+    }
+    if (menuImgs.length > 0 && !args.category) {
+      for (const url of menuImgs) media.push({ photo_url: url, caption: "" });
       return {
         ok: true,
         mode: "image_only",
-        note: "تم إرسال صورة المنيو للزبون. لا تكتب أي قائمة أصناف أو أسعار، اكتفِ بجملة قصيرة جداً مثل 'تفضل المنيو 👇'.",
+        count: menuImgs.length,
+        note: "تم إرسال صور المنيو للزبون. لا تكتب أي قائمة أصناف أو أسعار، اكتفِ بجملة قصيرة جداً مثل 'تفضل المنيو 👇'.",
       };
     }
+
     let q = db
       .from("menu_items")
       .select("id,name,description,price,category,image_url,is_available")
