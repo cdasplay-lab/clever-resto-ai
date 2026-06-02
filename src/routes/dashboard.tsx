@@ -582,6 +582,9 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
   const [category, setCategory] = useState(item.category ?? "");
   const [price, setPrice] = useState<number>(Number(item.price) || 0);
   const [description, setDescription] = useState(item.description ?? "");
+  const [trackStock, setTrackStock] = useState<boolean>(!!item.track_stock);
+  const [stockQty, setStockQty] = useState<number>(Number(item.stock_qty ?? 0));
+  const [upsellCategory, setUpsellCategory] = useState<string>(item.upsell_category ?? "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -590,6 +593,9 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
       setCategory(item.category ?? "");
       setPrice(Number(item.price) || 0);
       setDescription(item.description ?? "");
+      setTrackStock(!!item.track_stock);
+      setStockQty(Number(item.stock_qty ?? 0));
+      setUpsellCategory(item.upsell_category ?? "");
     }
   }, [open, item]);
 
@@ -603,6 +609,9 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
         category: category.trim() || null,
         price: Number(price) || 0,
         description: description.trim() || null,
+        track_stock: trackStock,
+        stock_qty: trackStock ? Math.max(0, Number(stockQty) || 0) : null,
+        upsell_category: upsellCategory.trim() || null,
       })
       .eq("id", item.id);
     setSaving(false);
@@ -618,13 +627,39 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
       <Button variant="ghost" size="icon" onClick={() => setOpen(true)} title="تعديل">
         <Pencil className="h-4 w-4" />
       </Button>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader><DialogTitle>تعديل الصنف</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1"><Label>الاسم</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="space-y-1"><Label>الصنف</Label><Input value={category} onChange={(e) => setCategory(e.target.value)} /></div>
           <div className="space-y-1"><Label>السعر</Label><Input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} /></div>
           <div className="space-y-1"><Label>الوصف</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} /></div>
+
+          <div className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm">تتبّع المخزون</Label>
+                <p className="text-xs text-muted-foreground">لما الكمية تخلص، الوكيل ما يبيع الصنف.</p>
+              </div>
+              <Switch checked={trackStock} onCheckedChange={setTrackStock} />
+            </div>
+            {trackStock && (
+              <div className="space-y-1">
+                <Label>الكمية المتوفرة</Label>
+                <Input type="number" min={0} value={stockQty} onChange={(e) => setStockQty(Number(e.target.value))} />
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-1">
+            <Label>فئة الـ Upsell (اختياري)</Label>
+            <Input
+              value={upsellCategory}
+              onChange={(e) => setUpsellCategory(e.target.value)}
+              placeholder="مثلاً: مشروبات — الوكيل يقترح صنف من هذي الفئة بعد إضافة الصنف"
+            />
+            <p className="text-xs text-muted-foreground">اكتب اسم فئة موجودة بمنيوك. الوكيل يقترح صنف منها مرة واحدة بعد إضافة هذا الصنف.</p>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>إلغاء</Button>
