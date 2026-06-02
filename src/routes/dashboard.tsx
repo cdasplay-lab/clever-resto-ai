@@ -19,6 +19,7 @@ import { SubscriptionTab } from "@/components/subscription-tab";
 import { BotHealthTab } from "@/components/bot-health-tab";
 import { CustomersTab } from "@/components/customers-tab";
 import { SocialTab } from "@/components/social-tab";
+import { MarketingTab } from "@/components/marketing-tab";
 
 
 
