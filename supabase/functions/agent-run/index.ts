@@ -811,6 +811,18 @@ async function runTool(
       })
       .eq("id", conv.id);
 
+    // Fire-and-forget preference extraction
+    try {
+      const baseUrl = Deno.env.get("SUPABASE_URL");
+      fetch(`${baseUrl}/functions/v1/extract-preferences`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ conversation_id: conv.id, order_id: order.id }),
+      }).catch(() => {});
+    } catch (_) {}
+
+
+
     return {
       ok: true,
       order_id: order.id,
