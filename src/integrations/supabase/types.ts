@@ -165,6 +165,59 @@ export type Database = {
           },
         ]
       }
+      campaign_recipients: {
+        Row: {
+          campaign_id: string
+          channel: string
+          created_at: string
+          customer_handle: string
+          customer_name: string | null
+          error: string | null
+          external_chat_id: string | null
+          id: string
+          rendered_message: string | null
+          restaurant_id: string
+          sent_at: string | null
+          status: string
+        }
+        Insert: {
+          campaign_id: string
+          channel: string
+          created_at?: string
+          customer_handle: string
+          customer_name?: string | null
+          error?: string | null
+          external_chat_id?: string | null
+          id?: string
+          rendered_message?: string | null
+          restaurant_id: string
+          sent_at?: string | null
+          status?: string
+        }
+        Update: {
+          campaign_id?: string
+          channel?: string
+          created_at?: string
+          customer_handle?: string
+          customer_name?: string | null
+          error?: string | null
+          external_chat_id?: string | null
+          id?: string
+          rendered_message?: string | null
+          restaurant_id?: string
+          sent_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "campaign_recipients_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "marketing_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conversations: {
         Row: {
           assigned_to: string | null
@@ -271,6 +324,60 @@ export type Database = {
           preferences?: string | null
           restaurant_id?: string
           total_orders?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      marketing_campaigns: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          channel: string
+          created_at: string
+          id: string
+          message_template: string
+          restaurant_id: string
+          scheduled_at: string | null
+          segment: string
+          segment_params: Json
+          sent_at: string | null
+          stats: Json
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          channel?: string
+          created_at?: string
+          id?: string
+          message_template: string
+          restaurant_id: string
+          scheduled_at?: string | null
+          segment?: string
+          segment_params?: Json
+          sent_at?: string | null
+          stats?: Json
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          channel?: string
+          created_at?: string
+          id?: string
+          message_template?: string
+          restaurant_id?: string
+          scheduled_at?: string | null
+          segment?: string
+          segment_params?: Json
+          sent_at?: string | null
+          stats?: Json
+          status?: string
+          title?: string
           updated_at?: string
         }
         Relationships: []
@@ -779,6 +886,7 @@ export type Database = {
         Args: { _months?: number; _plan_code: string; _restaurant_id: string }
         Returns: string
       }
+      approve_campaign: { Args: { _campaign_id: string }; Returns: undefined }
       consume_quota: {
         Args: { _kind: string; _ref?: string; _restaurant_id: string }
         Returns: Json
