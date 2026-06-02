@@ -630,6 +630,13 @@ async function runTool(
       return { error: "عذراً، المطعم وصل لحدّه الشهري من الطلبات. حاول لاحقاً." };
     }
 
+    // Atomically decrement stock for any tracked items
+    try {
+      const stockItems = (cart as CartItem[]).map((c) => ({ menu_item_id: c.menu_item_id, qty: c.qty }));
+      await db.rpc("decrement_stock", { _items: stockItems });
+    } catch (_) { /* don't block the order */ }
+
+
     await db
       .from("conversations")
       .update({
