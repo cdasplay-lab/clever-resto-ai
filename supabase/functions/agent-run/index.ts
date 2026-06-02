@@ -789,7 +789,24 @@ Deno.serve(async (req) => {
 
     const media: MediaItem[] = [];
     let finalText = "";
+    let quickReplies: string[] = [];
     const loopStartedAt = Date.now();
+
+    // === /cancel shortcut: clear cart + pending confirmation without calling the model ===
+    const lastUserMsg = [...cleanHistory].reverse().find((m) => m.role === "user");
+    const lastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim().toLowerCase() : "";
+    if (["/cancel", "الغاء", "إلغاء", "الغاء الطلب", "إلغاء الطلب", "cancel"].includes(lastUserText)) {
+      await db.from("conversations").update({
+        cart: [],
+        delivery: {},
+        state: "idle",
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conversation_id);
+      const reply = "تم إلغاء طلبك. متى ما تحب نبدأ من جديد، أنا موجود 🌹";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
+    }
+
     // Guardrails: dedup identical consecutive tool calls + loop breaker
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
