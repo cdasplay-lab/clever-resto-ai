@@ -18,6 +18,7 @@ import { BranchesTab } from "@/components/branches-tab";
 import { SubscriptionTab } from "@/components/subscription-tab";
 import { BotHealthTab } from "@/components/bot-health-tab";
 import { CustomersTab } from "@/components/customers-tab";
+import { SocialTab } from "@/components/social-tab";
 
 
 
@@ -249,6 +250,7 @@ function RestaurantManager({
             <TabsTrigger value="subscription">الاشتراك</TabsTrigger>
             <TabsTrigger value="health">صحة البوت</TabsTrigger>
             <TabsTrigger value="customers">الزبائن</TabsTrigger>
+            <TabsTrigger value="social">ستوري/تعليقات</TabsTrigger>
 
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
@@ -262,6 +264,7 @@ function RestaurantManager({
           <TabsContent value="subscription"><SubscriptionTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="health"><BotHealthTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="customers"><CustomersTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="social"><SocialTab restaurantId={restaurant.id} /></TabsContent>
 
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 

@@ -636,6 +636,60 @@ export type Database = {
         }
         Relationships: []
       }
+      social_interactions: {
+        Row: {
+          created_at: string
+          customer_handle: string | null
+          customer_name: string | null
+          error: string | null
+          external_id: string
+          id: string
+          incoming_text: string | null
+          kind: string
+          meta: Json
+          parent_id: string | null
+          platform: string
+          reply_text: string | null
+          restaurant_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          customer_handle?: string | null
+          customer_name?: string | null
+          error?: string | null
+          external_id: string
+          id?: string
+          incoming_text?: string | null
+          kind: string
+          meta?: Json
+          parent_id?: string | null
+          platform: string
+          reply_text?: string | null
+          restaurant_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          customer_handle?: string | null
+          customer_name?: string | null
+          error?: string | null
+          external_id?: string
+          id?: string
+          incoming_text?: string | null
+          kind?: string
+          meta?: Json
+          parent_id?: string | null
+          platform?: string
+          reply_text?: string | null
+          restaurant_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       usage_counters: {
         Row: {
           ai_replies_used: number
