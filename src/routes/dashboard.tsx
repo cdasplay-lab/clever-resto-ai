@@ -13,6 +13,7 @@ import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Insta
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { BranchesTab } from "@/components/branches-tab";
 import { SubscriptionTab } from "@/components/subscription-tab";
