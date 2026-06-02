@@ -134,16 +134,17 @@ const TOOLS = [
     function: {
       name: "set_delivery_info",
       description:
-        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. تحقق من العنوان والهاتف.",
+        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. لازم تتضمن اسم الزبون + العنوان + الهاتف.",
       parameters: {
         type: "object",
         properties: {
+          customer_name: { type: "string", description: "اسم الزبون كما ذكره (مطلوب)" },
           address: { type: "string" },
           phone: { type: "string" },
           time: { type: "string", description: "وقت التوصيل المطلوب (نص حر)" },
           area: { type: "string" },
         },
-        required: ["address", "phone"],
+        required: ["customer_name", "address", "phone"],
         additionalProperties: false,
       },
     },
@@ -310,9 +311,10 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 # قواعد صارمة (Rules)
 1) ممنوع تخترع صنف أو سعر — استدعِ search_menu قبل أي add_to_cart.
 2) تأكيد الطلب (إلزامي وبخطوتين):
-   أ) بعد ما تتجمع: السلة + العنوان + الهاتف (+ الفرع لو متعدد) — استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
-   ب) لا تستدعِ submit_order إلا بعد ما الزبون يرد بصراحة بـ نعم/أكد/تمام/أوكي. عند الاستدعاء مرّر confirmation_token كما هو ونص موافقة الزبون الحرفي في user_confirmation_text.
-   ج) لو الزبون عدّل السلة أو العنوان بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
+   أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف (+ الفرع لو متعدد). إذا ما تعرف اسمه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name. إذا recall_customer رجّع اسم محفوظ، لا تعيد السؤال — أكّد فقط: "نأكّد الطلب باسم (فلان)؟".
+   ب) بعد ما تكتمل البيانات استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
+   ج) لا تستدعِ submit_order إلا بعد ما الزبون يرد بصراحة بـ نعم/أكد/تمام/أوكي. عند الاستدعاء مرّر confirmation_token كما هو ونص موافقة الزبون الحرفي في user_confirmation_text.
+   د) لو الزبون عدّل السلة أو العنوان أو الاسم بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
 4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
@@ -446,12 +448,14 @@ async function runTool(
       time: args.time,
       area: args.area,
     };
+    const newName = (args.customer_name || "").toString().trim() || conv.customer_name || null;
     conv.delivery = delivery;
+    conv.customer_name = newName;
     await db
       .from("conversations")
-      .update({ delivery, state: "confirm" })
+      .update({ delivery, state: "confirm", customer_name: newName })
       .eq("id", conv.id);
-    return { ok: true, delivery };
+    return { ok: true, delivery, customer_name: newName };
   }
 
   if (name === "preview_order") {
@@ -461,6 +465,9 @@ async function runTool(
     const delivery = conv.delivery || {};
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف — استدعِ set_delivery_info أولاً" };
+    }
+    if (!conv.customer_name || !String(conv.customer_name).trim()) {
+      return { error: "ناقص اسم الزبون — اسأله عن اسمه ثم استدعِ set_delivery_info مع customer_name." };
     }
     const branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
@@ -481,7 +488,7 @@ async function runTool(
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
       return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
     }).join("\n");
-    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
     return {
       ok: true,
       confirmation_token: token,
