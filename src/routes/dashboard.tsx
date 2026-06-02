@@ -42,6 +42,7 @@ type Restaurant = {
   platform_webhook_secret: string | null;
   open_hours: OpenHours | null;
   menu_image_url: string | null;
+  menu_image_urls: string[] | null;
 };
 type MenuOptionChoice = { name: string; price_delta?: number };
 type MenuOptionGroup = { name: string; type: "single" | "multi"; required?: boolean; choices: MenuOptionChoice[] };
@@ -1095,6 +1096,7 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
       open_hours: r.open_hours as any,
       platform_webhook_url: r.platform_webhook_url, platform_webhook_secret: r.platform_webhook_secret,
       menu_image_url: r.menu_image_url,
+      menu_image_urls: r.menu_image_urls ?? [],
     }).eq("id", r.id).select().single();
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -1137,35 +1139,51 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
             </div>
             <div className="space-y-2 md:col-span-2"><Label>الوصف</Label><Textarea value={r.description ?? ""} onChange={(e) => setR({ ...r, description: e.target.value })} /></div>
             <div className="space-y-2 md:col-span-2">
-              <Label>صورة المنيو (تُرسل للزبون لما يطلب المنيو)</Label>
-              {r.menu_image_url ? (
-                <div className="flex items-start gap-3">
-                  <img src={r.menu_image_url} alt="menu" className="h-32 w-32 rounded border object-cover" />
-                  <div className="flex flex-col gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setR({ ...r, menu_image_url: null })}>
-                      حذف الصورة
-                    </Button>
-                    <p className="text-xs text-muted-foreground">اضغط حفظ لتثبيت التغيير.</p>
-                  </div>
+              <Label>صور المنيو (تُرسل للزبون لما يطلب المنيو — تكدر تضيف هواي صور)</Label>
+              {(r.menu_image_urls && r.menu_image_urls.length > 0) && (
+                <div className="flex flex-wrap gap-3">
+                  {r.menu_image_urls.map((url, idx) => (
+                    <div key={idx} className="relative">
+                      <img src={url} alt={`menu-${idx}`} className="h-32 w-32 rounded border object-cover" />
+                      <Button
+                        type="button"
+                        variant="destructive"
+                        size="sm"
+                        className="absolute -top-2 -right-2 h-7 w-7 rounded-full p-0"
+                        onClick={() => setR({ ...r, menu_image_urls: (r.menu_image_urls ?? []).filter((_, i) => i !== idx) })}
+                      >
+                        ×
+                      </Button>
+                    </div>
+                  ))}
                 </div>
-              ) : (
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
+              )}
+              <Input
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={async (e) => {
+                  const files = Array.from(e.target.files || []);
+                  if (!files.length) return;
+                  const uploaded: string[] = [];
+                  for (const file of files) {
                     const ext = file.name.split(".").pop() || "jpg";
                     const path = `${r.id}/menu-${crypto.randomUUID()}.${ext}`;
                     const { error: upErr } = await supabase.storage.from("menu-images").upload(path, file, { upsert: false });
-                    if (upErr) return toast.error(upErr.message);
+                    if (upErr) { toast.error(upErr.message); continue; }
                     const { data: pub } = supabase.storage.from("menu-images").getPublicUrl(path);
-                    setR({ ...r, menu_image_url: pub.publicUrl });
-                    toast.success("تم رفع الصورة. اضغط حفظ.");
-                  }}
-                />
-              )}
+                    uploaded.push(pub.publicUrl);
+                  }
+                  if (uploaded.length) {
+                    setR({ ...r, menu_image_urls: [...(r.menu_image_urls ?? []), ...uploaded] });
+                    toast.success(`تم رفع ${uploaded.length} صورة. اضغط حفظ.`);
+                  }
+                  e.target.value = "";
+                }}
+              />
+              <p className="text-xs text-muted-foreground">تكدر تختار أكثر من صورة بنفس الوقت.</p>
             </div>
+
             <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
             <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
             <div className="space-y-2 md:col-span-2"><Label>رابط Webhook لمنصتك (يُرسل إليه الطلب المؤكد)</Label><Input value={r.platform_webhook_url ?? ""} onChange={(e) => setR({ ...r, platform_webhook_url: e.target.value })} placeholder="https://your-saas.com/api/incoming-order" /></div>

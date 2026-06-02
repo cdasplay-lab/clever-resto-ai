@@ -1,0 +1,2 @@
+ALTER TABLE public.restaurants ADD COLUMN IF NOT EXISTS menu_image_urls text[] NOT NULL DEFAULT '{}';
+UPDATE public.restaurants SET menu_image_urls = ARRAY[menu_image_url] WHERE menu_image_url IS NOT NULL AND (menu_image_urls IS NULL OR array_length(menu_image_urls,1) IS NULL);
