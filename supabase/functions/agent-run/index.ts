@@ -1319,7 +1319,7 @@ Deno.serve(async (req) => {
       }).eq("id", conversation_id);
       const reply = "تم إلغاء طلبك. متى ما تحب نبدأ من جديد، أنا موجود 🌹";
       await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
-      return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
+      return json({ reply, state: "idle", media: [], quick_replies: [] });
     }
 
     // Guardrails: dedup identical consecutive tool calls + loop breaker
