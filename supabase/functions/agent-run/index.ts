@@ -447,12 +447,14 @@ async function runTool(
       time: args.time,
       area: args.area,
     };
+    const newName = (args.customer_name || "").toString().trim() || conv.customer_name || null;
     conv.delivery = delivery;
+    conv.customer_name = newName;
     await db
       .from("conversations")
-      .update({ delivery, state: "confirm" })
+      .update({ delivery, state: "confirm", customer_name: newName })
       .eq("id", conv.id);
-    return { ok: true, delivery };
+    return { ok: true, delivery, customer_name: newName };
   }
 
   if (name === "preview_order") {
