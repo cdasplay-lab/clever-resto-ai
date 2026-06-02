@@ -943,7 +943,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
-    return json({ reply: finalText, state: conv.state, media });
+    return json({ reply: finalText, state: conv.state, media, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";
     // Phase 1: log error to agent_logs for the owner's bot-health view
