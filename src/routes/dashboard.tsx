@@ -1094,6 +1094,7 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
       currency: r.currency, min_order: r.min_order,
       open_hours: r.open_hours as any,
       platform_webhook_url: r.platform_webhook_url, platform_webhook_secret: r.platform_webhook_secret,
+      menu_image_url: r.menu_image_url,
     }).eq("id", r.id).select().single();
     setSaving(false);
     if (error) return toast.error(error.message);
