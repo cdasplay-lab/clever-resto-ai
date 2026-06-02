@@ -178,6 +178,25 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "schedule_order",
+      description:
+        "احجز الطلب لوقت لاحق (مو الآن). نفس شروط submit_order: لازم preview_order أولاً + موافقة صريحة من الزبون + scheduled_for بصيغة ISO 8601 (مع المنطقة الزمنية). الطلب يُخزن بحالة scheduled ويُرسل للفرع تلقائياً قبل نصف ساعة من الموعد. لا ينقص المخزون الآن.",
+      parameters: {
+        type: "object",
+        properties: {
+          confirmation_token: { type: "string", description: "التوكن اللي رجع من preview_order" },
+          user_confirmation_text: { type: "string", description: "نص موافقة الزبون الحرفي" },
+          scheduled_for: { type: "string", description: "موعد الطلب بصيغة ISO 8601 (مثلاً 2026-06-02T19:00:00+03:00 لبغداد). لازم يكون بعد 15 دقيقة على الأقل من الآن وضمن أسبوعين." },
+          scheduled_for_human: { type: "string", description: "تمثيل بشري للموعد كما تفهمه (مثلاً: اليوم الساعة 7 مساءً، بكرة الظهر)" },
+        },
+        required: ["confirmation_token", "user_confirmation_text", "scheduled_for", "scheduled_for_human"],
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "handoff_to_human",
       description: "حوّل المحادثة لموظف بشري لما تكون غير متأكد أو الزبون يطلب ذلك.",
       parameters: {
