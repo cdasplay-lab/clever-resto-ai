@@ -112,6 +112,42 @@ export type Database = {
           },
         ]
       }
+      bad_responses: {
+        Row: {
+          context_json: Json
+          conversation_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          message_id: string | null
+          note: string | null
+          reason: string
+          restaurant_id: string
+        }
+        Insert: {
+          context_json?: Json
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_id?: string | null
+          note?: string | null
+          reason: string
+          restaurant_id: string
+        }
+        Update: {
+          context_json?: Json
+          conversation_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          message_id?: string | null
+          note?: string | null
+          reason?: string
+          restaurant_id?: string
+        }
+        Relationships: []
+      }
       branches: {
         Row: {
           address: string | null
@@ -851,6 +887,7 @@ export type Database = {
           name: string
           open_hours: Json
           owner_id: string
+          owner_telegram_chat_id: string | null
           platform_webhook_secret: string | null
           platform_webhook_url: string | null
           telegram_bot_username: string | null
@@ -875,6 +912,7 @@ export type Database = {
           name: string
           open_hours?: Json
           owner_id: string
+          owner_telegram_chat_id?: string | null
           platform_webhook_secret?: string | null
           platform_webhook_url?: string | null
           telegram_bot_username?: string | null
@@ -899,6 +937,7 @@ export type Database = {
           name?: string
           open_hours?: Json
           owner_id?: string
+          owner_telegram_chat_id?: string | null
           platform_webhook_secret?: string | null
           platform_webhook_url?: string | null
           telegram_bot_username?: string | null
@@ -1044,7 +1083,15 @@ export type Database = {
       }
     }
     Views: {
-      [_ in never]: never
+      weekly_bad_response_summary: {
+        Row: {
+          count: number | null
+          last_at: string | null
+          reason: string | null
+          restaurant_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       activate_subscription: {
