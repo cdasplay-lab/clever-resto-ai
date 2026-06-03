@@ -1385,25 +1385,7 @@ Deno.serve(async (req) => {
             });
           }
 
-          // Derive quick-reply buttons from successful tool results
-          if (result && !result.error) {
-            if (name === "preview_order" && result.confirmation_token) {
-              quickReplies = ["✅ نعم، أكد", "❌ إلغاء"];
-            } else if ((name === "submit_order" || name === "schedule_order") && result.order_id) {
-              quickReplies = [];
-            } else if (name === "add_to_cart" || name === "add_combo_to_cart" || name === "get_cart_summary") {
-              quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];
-            } else if (name === "show_menu" || name === "show_combos") {
-              // لو المنيو صور فقط، لا نعرض أزرار سفلية حتى ما تطلع تحت الصور
-              if (result.mode === "image_only") {
-                quickReplies = [];
-              } else {
-                quickReplies = [];
-              }
-            } else if (name === "suggest_upsell" && Array.isArray(result.suggestions) && result.suggestions.length) {
-              quickReplies = ["✅ أضف", "لا شكراً", "🧾 معاينة الطلب"];
-            }
-          }
+          // Quick-reply buttons disabled — الزبون يرد نصياً
 
           const toolMsg = {
             role: "tool",
