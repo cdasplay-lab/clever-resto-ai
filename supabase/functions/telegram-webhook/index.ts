@@ -68,15 +68,19 @@ function buildKeyboard(replies: string[]) {
   return { inline_keyboard: rows };
 }
 
-async function tgSend(chatId: number, text: string, replies?: string[]) {
-  const chunks = splitText(text);
+async function tgSend(chatId: number, text: string, replies?: string[]): Promise<boolean> {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return false; // Never send empty/whitespace-only messages
+  const chunks = splitText(trimmed);
   const kb = buildKeyboard(replies || []);
+  let allOk = true;
   for (let i = 0; i < chunks.length; i++) {
     const body: any = { chat_id: chatId, text: chunks[i] };
-    // Attach keyboard only on the last chunk
     if (i === chunks.length - 1 && kb) body.reply_markup = kb;
-    await tgCall("sendMessage", body);
+    const r = await tgCall("sendMessage", body);
+    if (!r.ok) allOk = false;
   }
+  return allOk;
 }
 
 async function tgSendTyping(chatId: number) {
@@ -87,18 +91,40 @@ async function tgAnswerCallback(callbackId: string) {
   try { await tgCall("answerCallbackQuery", { callback_query_id: callbackId }); } catch (_) {}
 }
 
-async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]) {
+// Returns count of photos actually delivered (so caller knows truth instead of assuming success).
+async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]): Promise<number> {
+  let delivered = 0;
   for (let i = 0; i < items.length; i += 10) {
     const chunk = items.slice(i, i + 10);
-    if (chunk.length === 1) {
-      await tgCall("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
-    } else {
-      await tgCall("sendMediaGroup", {
-        chat_id: chatId,
-        media: chunk.map((m) => ({ type: "photo", media: m.photo_url, caption: m.caption })),
-      });
-    }
+    try {
+      let r: Response;
+      if (chunk.length === 1) {
+        r = await tgCall("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
+      } else {
+        r = await tgCall("sendMediaGroup", {
+          chat_id: chatId,
+          media: chunk.map((m) => ({ type: "photo", media: m.photo_url, caption: m.caption })),
+        });
+      }
+      if (r.ok) delivered += chunk.length;
+    } catch (_) { /* counted as failed */ }
   }
+  return delivered;
+}
+
+// In-memory idempotency: Telegram retries deliveries. Worker keeps recent update_ids to avoid
+// double-processing within the same isolate (the common case for retries within seconds).
+const RECENT_UPDATES = new Map<string, number>();
+const RECENT_UPDATES_TTL_MS = 120_000;
+function markAndCheckUpdate(updateId: number | string | undefined): boolean {
+  if (updateId === undefined || updateId === null) return false; // can't dedup, allow
+  const key = String(updateId);
+  const now = Date.now();
+  // GC
+  for (const [k, t] of RECENT_UPDATES) if (now - t > RECENT_UPDATES_TTL_MS) RECENT_UPDATES.delete(k);
+  if (RECENT_UPDATES.has(key)) return true; // duplicate
+  RECENT_UPDATES.set(key, now);
+  return false;
 }
 
 Deno.serve(async (req) => {
@@ -113,6 +139,9 @@ Deno.serve(async (req) => {
   if (!safeEqual(got, expected)) return new Response("Unauthorized", { status: 401 });
 
   const update = await req.json();
+  if (markAndCheckUpdate(update?.update_id)) {
+    return json({ ok: true, deduped: true });
+  }
 
   // === Callback (inline keyboard button press) ===
   const cb = update.callback_query;
@@ -278,9 +307,19 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
-  if (Array.isArray(data.media) && data.media.length) {
-    await tgSendMedia(chatId, data.media);
+  let mediaSent = 0;
+  const mediaRequested = Array.isArray(data.media) ? data.media.length : 0;
+  if (mediaRequested) {
+    mediaSent = await tgSendMedia(chatId, data.media);
   }
-  if (data.reply) await tgSend(chatId, data.reply, data.quick_replies);
-  return json({ ok: true });
+  // If model thought it sent images but the channel actually failed, override the reply
+  // with an honest message instead of letting the bot lie about delivery.
+  let finalReply: string = typeof data.reply === "string" ? data.reply : "";
+  if (mediaRequested > 0 && mediaSent === 0) {
+    finalReply = "اعتذر، صار خلل بإرسال الصور. أحاول مرة ثانية الحين 🙏";
+  }
+  if (finalReply && finalReply.trim()) {
+    await tgSend(chatId, finalReply, data.quick_replies);
+  }
+  return json({ ok: true, media_requested: mediaRequested, media_sent: mediaSent });
 });

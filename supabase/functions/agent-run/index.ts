@@ -496,6 +496,15 @@ ${branchRule}
    • طابق الأصناف عبر search_menu قبل add_to_cart.
    • لخّص ما فهمت بسطر واحد ثم اطلب توضيحاً واحداً فقط للمعلومة الناقصة الأهم.
 
+# قواعد إنتاج صارمة لا تُكسر أبداً (Production Hard Rules)
+P1) الإضافات/الصوصات الإضافية: لو الزبون طلب صوص/إضافة/مكمّل بسعر (مو ضمن مكوّنات الصنف الأصلي) — لازم تستدعي search_menu وتجده كصنف منفصل ثم add_to_cart مع qty الصحيحة. ممنوع تسجيلها كـ "ملاحظة للمطبخ" فقط. لو ما لكيت الصنف بالمنيو، اعتذر وقل "هذي الإضافة مو متوفرة منفصلة" — لا تضيفها كنوتة بسعر صفر.
+P2) الفروع: لو الزبون ذكر اسم فرع صراحةً ("فرع X")، استدعِ resolve_branch مع نص اسم الفرع نفسه. لو الفرع غير موجود بالقائمة، خبّره صراحةً بقائمة الفروع المتاحة واسأله يختار، ولا تفترض الفرع الرئيسي بصمت.
+P3) فشل إنشاء الطلب: لو submit_order أو schedule_order رجّع error، **ممنوع** تقول "تم التأكيد" أو "تم تأكيد طلبك" أو "صار". قل بصراحة: "طلبك يحتاج تأكيد من الموظف، راح يتواصل وياك" واستدعِ handoff_to_human مباشرةً. لا تجمع بين "تم التأكيد" و "حوّلتك لموظف" بنفس الرسالة أبداً.
+P4) handoff_to_human: بعد ما تستدعيه، **لا تكتب أي نص آخر** بنفس الرد إلا جملة تأكيد قصيرة جداً ("حوّلتك لزميل بشري، راح يجاوبك"). لا ترد على شكر أو أسئلة لاحقة — البوت متوقف للمحادثة هذي.
+P5) المنيو: لو الزبون قال "وين المنيو؟"، "ما وصل"، "ما أشوف"، "أرسلها مرة ثانية" أو ما يشبه ذلك — استدعِ show_menu **من جديد** بدل ما تقول "وصلتك". لا تدّعِ أنك أرسلت صور لم تُرسل فعلياً — استدعاء show_menu هو اللي يُرسل الصور.
+P6) ممنوع أي تكرار: لو رسالتك السابقة لنفس الزبون كانت نفس المحتوى تقريباً، **لا ترسل** نسخة ثانية — أعد الصياغة أو اكتفِ بسؤال واحد.
+P7) الأسعار والأصناف: كل سعر تذكره لازم يجي من نتيجة search_menu/show_menu/show_combos. ممنوع تخمين أو تقريب أسعار.
+
 # السياق الحالي (Context)
 السلة:
 ${cartLines}
@@ -878,7 +887,8 @@ async function runTool(
   }
 
   if (name === "resolve_branch") {
-    const addr = String(args.address || "").trim().toLowerCase();
+    const addrRaw = String(args.address || "").trim();
+    const addr = addrRaw.toLowerCase();
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
     if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
     if (branches.length === 1) {
@@ -887,15 +897,27 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), branch_id: b.id };
       return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
     }
+    // 1) explicit branch-name match (e.g. customer said "فرع سامراء")
+    const nameMatch = branches.find((b: any) => {
+      const n = String(b.name || "").toLowerCase();
+      return n && (addr.includes(n) || n.includes(addr));
+    });
+    if (nameMatch) {
+      await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: nameMatch.id } }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), branch_id: nameMatch.id };
+      return { ok: true, branch: { id: nameMatch.id, name: nameMatch.name, address: nameMatch.address, min_order: nameMatch.min_order, open_hours: nameMatch.open_hours }, matched_by: "name" };
+    }
+    // 2) delivery-area match
     const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
     if (matches.length === 0) {
       const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
-      return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas };
+      const allNames = branches.map((b: any) => b.name);
+      return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas, branch_names: allNames };
     }
     const chosen = matches[0];
     await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: chosen.id } }).eq("id", conv.id);
     conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
-    return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
+    return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })), matched_by: "area" };
   }
 
   if (name === "handoff_to_human") {
@@ -1466,6 +1488,34 @@ Deno.serve(async (req) => {
         payload: { reply_len: finalText.length, media_count: media.length },
       });
     } catch (_) { /* logging must never break the run */ }
+
+    // === Production hardening of the outgoing reply ===
+    finalText = (finalText || "").trim();
+
+    // Suppress consecutive duplicate replies (against the previous assistant turn).
+    if (finalText) {
+      try {
+        const { data: prevAssistants } = await db
+          .from("messages")
+          .select("content,role,created_at")
+          .eq("conversation_id", conversation_id)
+          .eq("role", "assistant")
+          .order("created_at", { ascending: false })
+          .limit(3);
+        const prev = (prevAssistants || [])[1]; // [0] is the one we inserted this run
+        if (prev && typeof prev.content === "string" && prev.content.trim() === finalText) {
+          finalText = "";
+        }
+      } catch (_) { /* dedup must never block delivery */ }
+    }
+
+    // If handoff was called this run, force one short ack and drop any media.
+    const handoffWasCalled = Array.from(toolCallCache.keys()).some((k) => k.startsWith("handoff_to_human:"));
+    if (handoffWasCalled) {
+      finalText = "حوّلتك لزميل بشري، راح يتواصل وياك قريباً.";
+      media.length = 0;
+      quickReplies = [];
+    }
 
     return json({ reply: finalText, state: conv.state, media, quick_replies: sanitizeQuickReplies(quickReplies) });
   } catch (e: any) {
