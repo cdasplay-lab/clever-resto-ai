@@ -222,14 +222,33 @@ Deno.serve(async (req) => {
   let convId: string;
   const { data: existing } = await db
     .from("conversations")
-    .select("id")
+    .select("id, last_message_at, cart, state, delivery, meta")
     .eq("restaurant_id", restaurant.id)
     .eq("channel", "telegram")
     .eq("external_chat_id", externalChatId)
     .maybeSingle();
   if (existing) {
     convId = existing.id;
-    await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", convId);
+    const nowIso = new Date().toISOString();
+    // Auto-reset stale cart for returning customers: if last activity > 3h ago AND cart still has items
+    // AND last order was not submitted, wipe cart/delivery/pending_confirmation so the new session starts fresh.
+    const lastMs = existing.last_message_at ? new Date(existing.last_message_at).getTime() : 0;
+    const ageMs = Date.now() - lastMs;
+    const STALE_MS = 3 * 60 * 60 * 1000;
+    const cartHasItems = Array.isArray((existing as any).cart) && (existing as any).cart.length > 0;
+    const notSubmitted = (existing as any).state !== "submitted";
+    if (ageMs > STALE_MS && cartHasItems && notSubmitted) {
+      const prevMeta = ((existing as any).meta || {}) as Record<string, any>;
+      await db.from("conversations").update({
+        last_message_at: nowIso,
+        cart: [],
+        delivery: {},
+        state: "greeting",
+        meta: { ...prevMeta, pending_confirmation: null },
+      }).eq("id", convId);
+    } else {
+      await db.from("conversations").update({ last_message_at: nowIso }).eq("id", convId);
+    }
   } else {
     const { data: created, error } = await db
       .from("conversations")
