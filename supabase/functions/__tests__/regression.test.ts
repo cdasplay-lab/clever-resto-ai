@@ -406,3 +406,156 @@ Deno.test("notifyOwner is a no-op when owner_telegram_chat_id is absent or blank
   assertFalse(shouldSend({ owner_telegram_chat_id: null }));
   assert(shouldSend({ owner_telegram_chat_id: "123456789" }));
 });
+
+// ===== Sprint 5: pure helpers mirrored from agent-run/index.ts =====
+
+// Mirror of redactPii — keep in sync with production.
+const PHONE_RE = /(\+?\d[\d\s\-()]{7,}\d)/g;
+const LONG_DIGIT_RE = /\b\d{9,}\b/g;
+const ADDRESS_HINT_RE = /(عنوان|address|محله|محلة|زقاق|دار)\s*[:：]\s*[^\n,]{3,}/gi;
+function redactPii(input: unknown): unknown {
+  if (input == null) return input;
+  if (typeof input === "string") {
+    return input
+      .replace(PHONE_RE, "[redacted_phone]")
+      .replace(LONG_DIGIT_RE, "[redacted_digits]")
+      .replace(ADDRESS_HINT_RE, (_m, k) => `${k}: [redacted_address]`);
+  }
+  if (Array.isArray(input)) return input.map(redactPii);
+  if (typeof input === "object") {
+    const out: any = {};
+    for (const [k, v] of Object.entries(input as any)) {
+      if (/^(phone|customer_phone|delivery_address|address)$/i.test(k) && typeof v === "string") {
+        out[k] = v ? "[redacted]" : v;
+      } else {
+        out[k] = redactPii(v);
+      }
+    }
+    return out;
+  }
+  return input;
+}
+
+const HEAVY_INTENT_RE = /(طلب|اطلب|أطلب|اوصل|أوصل|توصيل|دفع|عنوان|الفاتورة|الحساب|بشري|موظف|شكوى|الغ[يى]|cancel|order|delivery|address|payment|invoice|human|agent|complain)/i;
+function pickModel(messages: any[], flash = "flash", pro = "pro"): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role !== "user") continue;
+    const txt = typeof m.content === "string"
+      ? m.content
+      : Array.isArray(m.content)
+        ? m.content.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join(" ")
+        : "";
+    return HEAVY_INTENT_RE.test(txt) ? pro : flash;
+  }
+  return flash;
+}
+
+// Circuit breaker mirror
+const CB_FAIL_THRESHOLD = 3;
+const CB_WINDOW_MS = 60_000;
+const CB_COOLDOWN_MS = 60_000;
+type CbState = { fails: number; firstFailAt: number; openedAt: number };
+function makeBreaker() {
+  const m = new Map<string, CbState>();
+  return {
+    isOpen(id: string, now: number) {
+      const s = m.get(id);
+      if (!s || !s.openedAt) return false;
+      if (now - s.openedAt < CB_COOLDOWN_MS) return true;
+      m.delete(id);
+      return false;
+    },
+    fail(id: string, now: number) {
+      const s = m.get(id);
+      if (!s || now - s.firstFailAt > CB_WINDOW_MS) {
+        m.set(id, { fails: 1, firstFailAt: now, openedAt: 0 });
+        return false;
+      }
+      s.fails++;
+      if (s.fails >= CB_FAIL_THRESHOLD) { s.openedAt = now; return true; }
+      return false;
+    },
+    success(id: string) { m.delete(id); },
+  };
+}
+
+// ---------- 20. Sprint 5: redactPii scrubs phones, long digit runs, and addressed fields ----------
+Deno.test("redactPii: phones, long digits and labeled keys are scrubbed", () => {
+  const out = redactPii({
+    customer_phone: "07901234567",
+    note: "اتصل على 0790-123-4567 بسرعة",
+    delivery_address: "بغداد - الكرادة",
+    safe: "hello",
+    nested: { phone: "+9647801112233", text: "id 1234567890 here" },
+  }) as any;
+  assertEquals(out.customer_phone, "[redacted]");
+  assertEquals(out.delivery_address, "[redacted]");
+  assertEquals(out.nested.phone, "[redacted]");
+  assertEquals(out.safe, "hello");
+  assert(!out.note.includes("0790"), `phone leaked: ${out.note}`);
+  assert(/[redacted_(digits|phone)]/.test(out.nested.text));
+});
+
+Deno.test("redactPii: idempotent and safe on primitives", () => {
+  const once = redactPii({ phone: "07901234567" });
+  const twice = redactPii(once);
+  assertEquals(once, twice);
+  assertEquals(redactPii(null), null);
+  assertEquals(redactPii(42), 42);
+});
+
+// ---------- 21. Sprint 5: pickModel routes heavy intents to PRO, small talk to FLASH ----------
+Deno.test("pickModel: routes by intent on the last user turn", () => {
+  assertEquals(pickModel([{ role: "user", content: "هلا، شلونكم اليوم؟" }]), "flash");
+  assertEquals(pickModel([{ role: "user", content: "شنو عندكم منيو؟" }]), "flash");
+  assertEquals(pickModel([{ role: "user", content: "اريد اطلب برغر للعنوان" }]), "pro");
+  assertEquals(pickModel([{ role: "user", content: "حولني لموظف بشري" }]), "pro");
+  assertEquals(pickModel([
+    { role: "user", content: "هلا" },
+    { role: "assistant", content: "أهلاً" },
+    { role: "user", content: "اريد توصيل" },
+  ]), "pro");
+  assertEquals(pickModel([]), "flash");
+});
+
+// ---------- 22. Sprint 5: circuit breaker opens after 3 failures, closes on success ----------
+Deno.test("circuit breaker: opens after threshold and cools down", () => {
+  const cb = makeBreaker();
+  const t0 = 1_000_000;
+  assertFalse(cb.fail("r1", t0));
+  assertFalse(cb.fail("r1", t0 + 100));
+  assert(cb.fail("r1", t0 + 200), "third failure should trip");
+  assert(cb.isOpen("r1", t0 + 1_000));
+  // Cooldown passes -> closed again
+  assertFalse(cb.isOpen("r1", t0 + 200 + CB_COOLDOWN_MS + 1));
+  // Different restaurant is unaffected
+  assertFalse(cb.isOpen("r2", t0 + 200));
+});
+
+Deno.test("circuit breaker: success resets the failure window", () => {
+  const cb = makeBreaker();
+  cb.fail("r1", 1000);
+  cb.fail("r1", 1100);
+  cb.success("r1");
+  assertFalse(cb.fail("r1", 1200), "post-success first failure should not trip");
+  assertFalse(cb.isOpen("r1", 1300));
+});
+
+// ---------- 23. Sprint 5: golden conversations — model tier matches intent labels ----------
+Deno.test("golden conversations: tier assignment matches expectations", () => {
+  const golden: Array<{ text: string; expect: "flash" | "pro" }> = [
+    { text: "هلا والله",                    expect: "flash" },
+    { text: "شلون الجو اليوم",              expect: "flash" },
+    { text: "اشلون منيو الوجبات؟",          expect: "flash" },
+    { text: "اريد اطلب وجبتين",             expect: "pro"   },
+    { text: "العنوان: الكرادة قرب الجامعة", expect: "pro"   },
+    { text: "ابغى ادفع كاش",                expect: "pro"   },
+    { text: "حولني على موظف",               expect: "pro"   },
+    { text: "اريد الغي طلبي",               expect: "pro"   },
+  ];
+  for (const g of golden) {
+    const got = pickModel([{ role: "user", content: g.text }]);
+    assertEquals(got, g.expect, `text="${g.text}" expected=${g.expect} got=${got}`);
+  }
+});
