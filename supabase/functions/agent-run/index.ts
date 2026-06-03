@@ -738,6 +738,48 @@ async function runTool(
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
+
+    // === One-shot lock: clear the confirmation token BEFORE inserting the order.
+    // If the customer double-taps "نعم" or the model re-calls submit_order, the second
+    // call's token check above will fail and no duplicate order will be created.
+    {
+      const { data: locked, error: lockErr } = await db
+        .from("conversations")
+        .update({ meta: { ...(conv.meta || {}), pending_confirmation: null } })
+        .eq("id", conv.id)
+        .eq("meta->pending_confirmation->>token", pending.token)
+        .select("id");
+      if (lockErr || !locked || locked.length === 0) {
+        // Someone else already consumed this token (race) -> abort cleanly.
+        return { error: "هذا الطلب صار تأكيده بالفعل. لا حاجة لإعادة الإرسال." };
+      }
+      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
+    }
+
+    // === Re-validate availability + stock for ALL items at submit time.
+    // Item may have been disabled or run out between preview and submit.
+    {
+      const ids = Array.from(new Set(cart.map((c) => c.menu_item_id)));
+      const { data: rows } = await db
+        .from("menu_items")
+        .select("id,name,is_available,track_stock,stock_qty")
+        .in("id", ids);
+      const byId = new Map((rows || []).map((r: any) => [r.id, r]));
+      const unavailable: string[] = [];
+      for (const ci of cart) {
+        const row: any = byId.get(ci.menu_item_id);
+        if (!row || !row.is_available) { unavailable.push(ci.name); continue; }
+        if (row.track_stock && (row.stock_qty == null || row.stock_qty < ci.qty)) {
+          unavailable.push(`${ci.name} (الموجود ${row.stock_qty ?? 0})`);
+        }
+      }
+      if (unavailable.length) {
+        return {
+          error: `خلال التأكيد، صار غير متوفر: ${unavailable.join("، ")}. اعتذر للزبون، اقترح بديل، وأعد المعاينة قبل أي تأكيد جديد.`,
+        };
+      }
+    }
+
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -772,6 +814,8 @@ async function runTool(
       const stockItems = (cart as CartItem[]).map((c) => ({ menu_item_id: c.menu_item_id, qty: c.qty }));
       await db.rpc("decrement_stock", { _items: stockItems });
     } catch (_) { /* don't block the order */ }
+
+
 
 
     await db
