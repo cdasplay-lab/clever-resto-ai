@@ -112,6 +112,21 @@ async function tgSendMedia(chatId: number, items: { photo_url: string; caption: 
   return delivered;
 }
 
+// In-memory idempotency: Telegram retries deliveries. Worker keeps recent update_ids to avoid
+// double-processing within the same isolate (the common case for retries within seconds).
+const RECENT_UPDATES = new Map<string, number>();
+const RECENT_UPDATES_TTL_MS = 120_000;
+function markAndCheckUpdate(updateId: number | string | undefined): boolean {
+  if (updateId === undefined || updateId === null) return false; // can't dedup, allow
+  const key = String(updateId);
+  const now = Date.now();
+  // GC
+  for (const [k, t] of RECENT_UPDATES) if (now - t > RECENT_UPDATES_TTL_MS) RECENT_UPDATES.delete(k);
+  if (RECENT_UPDATES.has(key)) return true; // duplicate
+  RECENT_UPDATES.set(key, now);
+  return false;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
@@ -124,6 +139,9 @@ Deno.serve(async (req) => {
   if (!safeEqual(got, expected)) return new Response("Unauthorized", { status: 401 });
 
   const update = await req.json();
+  if (markAndCheckUpdate(update?.update_id)) {
+    return json({ ok: true, deduped: true });
+  }
 
   // === Callback (inline keyboard button press) ===
   const cb = update.callback_query;
