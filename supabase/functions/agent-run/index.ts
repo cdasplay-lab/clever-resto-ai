@@ -898,7 +898,7 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
-    return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
+    return { ok: true, message: "تم تحويلك لفريق المطعم 🙏 راح يتواصلون وياك بأقرب وقت." };
   }
 
 
