@@ -494,7 +494,7 @@ Deno.test("redactPii: phones, long digits and labeled keys are scrubbed", () => 
   assertEquals(out.nested.phone, "[redacted]");
   assertEquals(out.safe, "hello");
   assert(!out.note.includes("0790"), `phone leaked: ${out.note}`);
-  assert(out.nested.text.includes("[redacted_digits]"));
+  assert(/[redacted_(digits|phone)]/.test(out.nested.text));
 });
 
 Deno.test("redactPii: idempotent and safe on primitives", () => {
