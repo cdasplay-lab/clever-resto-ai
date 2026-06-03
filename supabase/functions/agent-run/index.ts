@@ -290,6 +290,24 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "file_complaint",
+      description:
+        "سجّل شكوى من الزبون عن طلب سابق أو تجربة سيئة (طعام بارد، صنف ناقص، تأخر، خطأ بالطلب، طعم سيء، إلخ). استدعِ هذي الأداة فوراً عند أول إشارة لشكوى أو طلب استرداد/تعويض. بعد التسجيل، استدعِ handoff_to_human مباشرةً — ممنوع تعد بتعويض من نفسك.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", description: "نوع الشكوى المختصر: cold_food | missing_item | late | wrong_order | bad_taste | rude_staff | refund_request | other" },
+          note: { type: "string", description: "وصف الشكوى كما قالها الزبون (سطر أو سطرين)" },
+          order_id: { type: "string", description: "اختياري: معرّف الطلب المعني لو معروف (من last_order_id بالميتا أو سؤال الزبون)" },
+        },
+        required: ["type", "note"],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
 
 
