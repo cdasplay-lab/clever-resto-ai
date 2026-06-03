@@ -1535,8 +1535,8 @@ Deno.serve(async (req) => {
     const { branches, zones } = await loadBranchesAndZones(db, restaurant.id);
     (restaurant as any).__branches = branches;
     (restaurant as any).__zones = zones;
-    const zones = zonesData ?? [];
-    (restaurant as any).__zones = zones;
+
+
 
     // Customer memory is always on. Eagerly fetch the profile and inject it into the system prompt.
     let customerProfile: any = { found: false };
