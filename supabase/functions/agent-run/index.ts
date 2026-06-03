@@ -1171,6 +1171,11 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
+    // Owner alert: handoff is high-priority.
+    try {
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      await notifyOwner(restaurant, `🚨 محادثة تحتاج تدخل\nالزبون: ${who}\nالسبب: ${reason}`);
+    } catch (_) {}
     return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
   }
 
