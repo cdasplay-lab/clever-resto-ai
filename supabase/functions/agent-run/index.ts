@@ -369,12 +369,20 @@ function buildCustomerProfileBlock(profile: any): string {
 }
 
 function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any) {
-  const cartLines =
-    Array.isArray(conv.cart) && conv.cart.length
-      ? conv.cart
-          .map((i: CartItem) => `- ${i.qty} × ${i.name} (${i.unit_price} ${restaurant.currency})`)
-          .join("\n")
-      : "السلة فارغة";
+  const cartItemsArr = Array.isArray(conv.cart) ? conv.cart : [];
+  // Detect stale carry-over cart (returning customer with items left from previous session)
+  const lastMsgMs = conv.last_message_at ? new Date(conv.last_message_at).getTime() : Date.now();
+  const cartAgeMin = Math.floor((Date.now() - lastMsgMs) / 60000);
+  const isStaleCart = cartItemsArr.length > 0 && cartAgeMin >= 60;
+  const stalePrefix = isStaleCart
+    ? `⚠️ تنبيه: هذه السلة من جلسة سابقة (آخر نشاط قبل ${cartAgeMin} دقيقة، ما تأكد طلبها). قبل ما تضيف أي شي جديد للزبون، اسأله بوضوح: "تكمّل طلبك السابق لو نبدأ من جديد؟". إذا قال جديد، استدعِ remove_from_cart لكل صنف أو وجّهه لقول "طلب جديد".\n`
+    : "";
+  const cartLines = stalePrefix + (
+    cartItemsArr.length
+      ? cartItemsArr.map((i: CartItem) => `- ${i.qty} × ${i.name} (${i.unit_price} ${restaurant.currency})`).join("\n")
+      : "السلة فارغة"
+  );
+
 
   const defaultLang = restaurant.language === "ar"
     ? "عربي عراقي بسيط ومحكي"
