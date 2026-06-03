@@ -159,8 +159,12 @@ Deno.serve(async (req) => {
   if (!safeEqual(got, expected)) return new Response("Unauthorized", { status: 401 });
 
   const update = await req.json();
-  if (markAndCheckUpdate(update?.update_id)) {
-    return json({ ok: true, deduped: true });
+  if (memDuplicate(update?.update_id)) {
+    return json({ ok: true, deduped: "memory" });
+  }
+  const _db0 = admin();
+  if (await dbMarkUpdate(_db0, update?.update_id)) {
+    return json({ ok: true, deduped: "db" });
   }
 
   // === Callback (inline keyboard button press) ===
