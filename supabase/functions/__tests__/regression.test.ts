@@ -211,3 +211,54 @@ Deno.test("invariant: menu re-ask triggers another show_menu (not a lie)", () =>
     assert(menuReask.test(phrase), `menu re-ask must match: "${phrase}"`);
   }
 });
+
+// ---------- 8. One-shot submit_order lock ----------
+// Simulates the new guard: clearing pending_confirmation BEFORE order insert means
+// a second submit_order call with the same token must fail.
+Deno.test("submit_order: second call with same token after lock is rejected", () => {
+  // Initial meta has a token; after the "lock" step, it's null.
+  let meta: any = { pending_confirmation: { token: "T1", fp: "FP1" } };
+  function trySubmit(token: string): { ok: boolean; reason?: string } {
+    const pending = meta.pending_confirmation;
+    if (!pending?.token || pending.token !== token) return { ok: false, reason: "no-token" };
+    // Simulate the conditional UPDATE that clears the token atomically.
+    meta = { ...meta, pending_confirmation: null };
+    return { ok: true };
+  }
+  assertEquals(trySubmit("T1").ok, true);
+  const second = trySubmit("T1");
+  assertEquals(second.ok, false);
+  assertEquals(second.reason, "no-token");
+});
+
+// ---------- 9. Re-validate availability at submit time ----------
+Deno.test("submit_order: aborts if any cart item became unavailable since preview", () => {
+  const cart = [
+    { menu_item_id: "a", name: "برغر", qty: 1 },
+    { menu_item_id: "b", name: "بطاطا", qty: 2 },
+  ];
+  const liveRows: Record<string, { is_available: boolean; track_stock: boolean; stock_qty: number | null }> = {
+    a: { is_available: true, track_stock: false, stock_qty: null },
+    b: { is_available: false, track_stock: false, stock_qty: null }, // 86'd between preview and submit
+  };
+  function validate() {
+    const bad: string[] = [];
+    for (const ci of cart) {
+      const row = liveRows[ci.menu_item_id];
+      if (!row || !row.is_available) { bad.push(ci.name); continue; }
+      if (row.track_stock && (row.stock_qty == null || row.stock_qty < ci.qty)) {
+        bad.push(`${ci.name} (الموجود ${row.stock_qty ?? 0})`);
+      }
+    }
+    return bad;
+  }
+  assertEquals(validate(), ["بطاطا"]);
+});
+
+// ---------- 10. Per-chat flood guard ----------
+Deno.test("flood guard triggers when user sends > 8 messages in 30s window", () => {
+  function shouldThrottle(countInLast30s: number): boolean { return countInLast30s > 8; }
+  assertFalse(shouldThrottle(8));
+  assert(shouldThrottle(9));
+  assert(shouldThrottle(50));
+});

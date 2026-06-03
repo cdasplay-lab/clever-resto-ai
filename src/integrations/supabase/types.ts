@@ -660,6 +660,24 @@ export type Database = {
         }
         Relationships: []
       }
+      processed_updates: {
+        Row: {
+          channel: string
+          processed_at: string
+          update_key: string
+        }
+        Insert: {
+          channel: string
+          processed_at?: string
+          update_key: string
+        }
+        Update: {
+          channel?: string
+          processed_at?: string
+          update_key?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -982,6 +1000,10 @@ export type Database = {
       set_subscription_status: {
         Args: { _status: string; _sub_id: string }
         Returns: undefined
+      }
+      try_mark_update: {
+        Args: { _channel: string; _key: string }
+        Returns: boolean
       }
     }
     Enums: {

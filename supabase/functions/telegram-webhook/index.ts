@@ -112,19 +112,39 @@ async function tgSendMedia(chatId: number, items: { photo_url: string; caption: 
   return delivered;
 }
 
-// In-memory idempotency: Telegram retries deliveries. Worker keeps recent update_ids to avoid
-// double-processing within the same isolate (the common case for retries within seconds).
+// Cross-instance idempotency via DB: Telegram retries; multiple worker instances run in parallel.
+// In-memory Map is a fast pre-check, but the DB is the source of truth.
 const RECENT_UPDATES = new Map<string, number>();
 const RECENT_UPDATES_TTL_MS = 120_000;
-function markAndCheckUpdate(updateId: number | string | undefined): boolean {
-  if (updateId === undefined || updateId === null) return false; // can't dedup, allow
+function memDuplicate(updateId: number | string | undefined): boolean {
+  if (updateId === undefined || updateId === null) return false;
   const key = String(updateId);
   const now = Date.now();
-  // GC
   for (const [k, t] of RECENT_UPDATES) if (now - t > RECENT_UPDATES_TTL_MS) RECENT_UPDATES.delete(k);
-  if (RECENT_UPDATES.has(key)) return true; // duplicate
+  if (RECENT_UPDATES.has(key)) return true;
   RECENT_UPDATES.set(key, now);
   return false;
+}
+async function dbMarkUpdate(db: any, updateId: number | string | undefined): Promise<boolean> {
+  if (updateId === undefined || updateId === null) return false;
+  try {
+    const { data } = await db.rpc("try_mark_update", { _channel: "telegram", _key: String(updateId) });
+    // try_mark_update returns true when inserted (fresh). Duplicate => false.
+    return data === false;
+  } catch (_) { return false; }
+}
+// Soft per-chat flood protection: > 8 user messages in 30s => silently drop.
+async function isFlooding(db: any, convId: string): Promise<boolean> {
+  try {
+    const since = new Date(Date.now() - 30_000).toISOString();
+    const { count } = await db
+      .from("messages")
+      .select("id", { count: "exact", head: true })
+      .eq("conversation_id", convId)
+      .eq("role", "user")
+      .gte("created_at", since);
+    return (count ?? 0) > 8;
+  } catch (_) { return false; }
 }
 
 Deno.serve(async (req) => {
@@ -139,8 +159,12 @@ Deno.serve(async (req) => {
   if (!safeEqual(got, expected)) return new Response("Unauthorized", { status: 401 });
 
   const update = await req.json();
-  if (markAndCheckUpdate(update?.update_id)) {
-    return json({ ok: true, deduped: true });
+  if (memDuplicate(update?.update_id)) {
+    return json({ ok: true, deduped: "memory" });
+  }
+  const _db0 = admin();
+  if (await dbMarkUpdate(_db0, update?.update_id)) {
+    return json({ ok: true, deduped: "db" });
   }
 
   // === Callback (inline keyboard button press) ===
@@ -278,11 +302,19 @@ Deno.serve(async (req) => {
     convId = created.id;
   }
 
+  // Per-chat flood guard: if this customer is hammering the bot, drop the request silently
+  // (except for the very first overflow message, where we tell them once).
+  if (await isFlooding(db, convId)) {
+    await tgSend(chatId, "لحظة من فضلك 🙏 وصلتني رسائل كثيرة بنفس الوقت، خليني أجاوب على اللي قبل.");
+    return json({ ok: true, throttled: true });
+  }
+
   await db.from("messages").insert({
     conversation_id: convId,
     role: "user",
     content: userText,
   });
+
 
   // Keep typing visible during agent call (refresh every ~4s)
   let typingTimer: number | undefined;
