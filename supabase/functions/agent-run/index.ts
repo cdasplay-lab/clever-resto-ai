@@ -433,7 +433,10 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
   const effectiveHours = selectedBranch?.open_hours && Object.keys(selectedBranch.open_hours).length
     ? selectedBranch.open_hours
     : restaurant.open_hours;
+  const effectivePrep = selectedBranch?.current_prep_minutes ?? null;
   const effectiveMinOrder = selectedBranch?.min_order ?? restaurant.min_order;
+  const zonesBlock = buildZonesBlock(zones || [], branches);
+  const selectedZone = conv.meta?.delivery_zone || null;
 
   const activeBranches = branches.filter((b: any) => b.is_active);
   const branchesBlock = activeBranches.length === 0
