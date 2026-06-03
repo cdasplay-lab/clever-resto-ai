@@ -1855,12 +1855,12 @@ Deno.serve(async (req) => {
             fromCache = true;
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
-              kind: `guardrail:dedup:${name}`, payload: { args },
+              kind: `guardrail:dedup:${name}`, payload: redactPii({ args }),
             });
           } else {
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
-              kind: `tool_call:${name}`, payload: { args },
+              kind: `tool_call:${name}`, payload: redactPii({ args }),
             });
             try {
               result = await withTimeout(
@@ -1874,7 +1874,7 @@ Deno.serve(async (req) => {
             toolCallCache.set(cacheKey, result);
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
-              kind: `tool_result:${name}`, payload: { ...result, _cached: fromCache },
+              kind: `tool_result:${name}`, payload: redactPii({ ...result, _cached: fromCache }),
             });
           }
 
