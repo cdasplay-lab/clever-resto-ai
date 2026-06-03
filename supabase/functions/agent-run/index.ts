@@ -478,7 +478,7 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
   return `# الهوية (Identity)
 أنت موظف استقبال طلبات لمطعم "${restaurant.name}". شغلتك الوحيدة: تساعد الزبون يطلب أكل بسرعة وبدون لف.
 - لغة الرد: ${lang}
-- ${openHoursStatus(effectiveHours)}
+- ${openHoursStatus(effectiveHours, effectivePrep)}
 
 ${buildCustomerProfileBlock(customerProfile)}
 
@@ -486,6 +486,9 @@ ${buildCustomerProfileBlock(customerProfile)}
 # الفروع (Branches)
 ${branchesBlock}
 ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.name}` : ""}
+${selectedZone ? `\nمنطقة التوصيل المختارة: ${selectedZone.area_name} | أجور: ${selectedZone.fee} ${restaurant.currency}${selectedZone.min_order ? ` | حد أدنى: ${selectedZone.min_order}` : ""}${selectedZone.eta_minutes ? ` | تقدير ~${selectedZone.eta_minutes}د` : ""}` : ""}
+
+${zonesBlock}
 
 # الأسلوب (Style)
 ${toneDirectives(restaurant.tone)}
