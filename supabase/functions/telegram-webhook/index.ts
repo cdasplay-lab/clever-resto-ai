@@ -182,7 +182,10 @@ Deno.serve(async (req) => {
     };
   }
 
-  const message = update.message ?? update.edited_message;
+  // Telegram can deliver normal chats as `message`, and business-linked chats as
+  // `business_message`. Treat both as customer messages so updates are not marked
+  // processed while silently ignored.
+  const message = update.message ?? update.edited_message ?? update.business_message ?? update.edited_business_message;
   const chatId = message?.chat?.id;
   const text: string | undefined = message?.text;
   const caption: string | undefined = message?.caption;
