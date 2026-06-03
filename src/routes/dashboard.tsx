@@ -1024,13 +1024,9 @@ function HandoffControls({ conv, onChange }: { conv: Conversation; onChange: () 
   const [busy, setBusy] = useState(false);
   async function toggle() {
     setBusy(true);
-    const nextPaused = !conv.is_bot_paused;
     const { error } = await supabase
       .from("conversations")
-      .update({
-        is_bot_paused: nextPaused,
-        state: nextPaused ? "handoff" : "greeting",
-      })
+      .update({ is_bot_paused: !conv.is_bot_paused })
       .eq("id", conv.id);
     setBusy(false);
     if (error) return toast.error(error.message);

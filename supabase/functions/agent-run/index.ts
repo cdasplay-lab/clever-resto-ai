@@ -30,7 +30,7 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function cartFingerprint(cart: any[], delivery: any, branchId: string | null, zoneId: string | null = null, deliveryFee = 0): string {
+function cartFingerprint(cart: any[], delivery: any, branchId: string | null): string {
   const norm = {
     cart: (cart || []).map((c) => ({
       id: c.menu_item_id, q: c.qty, p: c.unit_price,
@@ -39,35 +39,11 @@ function cartFingerprint(cart: any[], delivery: any, branchId: string | null, zo
     })),
     d: { a: delivery?.address || "", p: delivery?.phone || "", t: delivery?.time || "" },
     b: branchId || "",
-    z: zoneId || "",
-    f: Number(deliveryFee || 0),
   };
   return JSON.stringify(norm);
 }
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
-
-// Best-effort Telegram notification to the restaurant owner's personal chat.
-// No-op when the restaurant has not configured owner_telegram_chat_id or the
-// connector creds are missing. Never throws — never blocks the customer reply.
-async function notifyOwner(restaurant: any, text: string): Promise<void> {
-  try {
-    const chatId = (restaurant?.owner_telegram_chat_id || "").toString().trim();
-    if (!chatId) return;
-    const LK = Deno.env.get("LOVABLE_API_KEY");
-    const TG = Deno.env.get("TELEGRAM_API_KEY");
-    if (!LK || !TG) return;
-    await fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LK}`,
-        "X-Connection-Api-Key": TG,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ chat_id: chatId, text }),
-    }).catch(() => {});
-  } catch (_) { /* never block */ }
-}
 
 type CartItem = {
   menu_item_id: string;
@@ -314,52 +290,17 @@ const TOOLS = [
       },
     },
   },
-  {
-    type: "function",
-    function: {
-      name: "file_complaint",
-      description:
-        "سجّل شكوى من الزبون عن طلب سابق أو تجربة سيئة (طعام بارد، صنف ناقص، تأخر، خطأ بالطلب، طعم سيء، إلخ). استدعِ هذي الأداة فوراً عند أول إشارة لشكوى أو طلب استرداد/تعويض. بعد التسجيل، استدعِ handoff_to_human مباشرةً — ممنوع تعد بتعويض من نفسك.",
-      parameters: {
-        type: "object",
-        properties: {
-          type: { type: "string", description: "نوع الشكوى المختصر: cold_food | missing_item | late | wrong_order | bad_taste | rude_staff | refund_request | other" },
-          note: { type: "string", description: "وصف الشكوى كما قالها الزبون (سطر أو سطرين)" },
-          order_id: { type: "string", description: "اختياري: معرّف الطلب المعني لو معروف (من last_order_id بالميتا أو سؤال الزبون)" },
-        },
-        required: ["type", "note"],
-        additionalProperties: false,
-      },
-    },
-  },
 ] as const;
 
 
 // Media to deliver via the channel (filled by show_menu tool)
 type MediaItem = { photo_url: string; caption: string };
 
-const FORBIDDEN_QUICK_REPLY_PATTERNS = [
-  /معاينة\s*الطلب/i,
-  /المنيو/i,
-  /\bmenu\b/i,
-  /\bpreview\b/i,
-  /🧾/u,
-  /📋/u,
-];
-
-function sanitizeQuickReplies(replies: string[]): string[] {
-  if (!Array.isArray(replies)) return [];
-  return replies.filter((reply) => !FORBIDDEN_QUICK_REPLY_PATTERNS.some((pattern) => pattern.test(reply)));
-}
-
 // ---------- System prompt builder ----------
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-function openHoursStatus(open_hours: any, prepMinutes?: number | null): string {
-  const prepLine = (prepMinutes && Number(prepMinutes) > 0)
-    ? `\nوقت التحضير الحالي تقريباً: ${Number(prepMinutes)} دقيقة (اذكره للزبون عند تأكيد أي طلب أو عند سؤاله عن وقت الوصول).`
-    : "";
+function openHoursStatus(open_hours: any): string {
   if (!open_hours || typeof open_hours !== "object" || !Object.keys(open_hours).length) {
-    return `أوقات العمل: غير محددة (افترض مفتوح).${prepLine}`;
+    return "أوقات العمل: غير محددة (افترض مفتوح).";
   }
   // Iraq timezone (Asia/Baghdad, UTC+3, no DST)
   const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
@@ -377,34 +318,7 @@ function openHoursStatus(open_hours: any, prepMinutes?: number | null): string {
     else if (hhmm >= h.open && hhmm <= h.close) status = `المطعم مفتوح الآن (${h.open}-${h.close}). الوقت ${hhmm}.`;
     else status = `المطعم مغلق الآن. دوام اليوم ${h.open}-${h.close}. الوقت ${hhmm}.`;
   }
-  return `${status}\nجدول الأسبوع: ${lines}${prepLine}`;
-}
-
-function buildZonesBlock(zones: any[], branches: any[]): string {
-  if (!Array.isArray(zones) || !zones.length) return "";
-  const byBranch = new Map<string, any[]>();
-  for (const z of zones) {
-    if (!z.is_active) continue;
-    const arr = byBranch.get(z.branch_id) || [];
-    arr.push(z);
-    byBranch.set(z.branch_id, arr);
-  }
-  if (!byBranch.size) return "";
-  const lines: string[] = ["# مناطق التوصيل والأجور (Delivery Zones)"];
-  for (const b of branches) {
-    const zs = byBranch.get(b.id);
-    if (!zs?.length) continue;
-    lines.push(`- ${b.name}:`);
-    for (const z of zs) {
-      const parts = [`أجور: ${Number(z.fee || 0)}`];
-      if (Number(z.min_order || 0) > 0) parts.push(`حد أدنى: ${Number(z.min_order)}`);
-      if (z.eta_minutes) parts.push(`~${z.eta_minutes}د`);
-      lines.push(`  • ${z.area_name} (${parts.join(" | ")})`);
-    }
-  }
-  lines.push("");
-  lines.push("**استخدام:** بعد resolve_branch ستجد ضمن الرد delivery_zone مع fee و min_order. اذكر الأجور صراحةً للزبون عند تأكيد العنوان، واطرحها مع الإجمالي. ممنوع تخمين أي رسوم.");
-  return lines.join("\n");
+  return `${status}\nجدول الأسبوع: ${lines}`;
 }
 
 function buildCustomerProfileBlock(profile: any): string {
@@ -454,7 +368,7 @@ function buildCustomerProfileBlock(profile: any): string {
   return lines.join("\n");
 }
 
-function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any, zones?: any[]) {
+function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any) {
   const cartLines =
     Array.isArray(conv.cart) && conv.cart.length
       ? conv.cart
@@ -475,10 +389,7 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
   const effectiveHours = selectedBranch?.open_hours && Object.keys(selectedBranch.open_hours).length
     ? selectedBranch.open_hours
     : restaurant.open_hours;
-  const effectivePrep = selectedBranch?.current_prep_minutes ?? null;
   const effectiveMinOrder = selectedBranch?.min_order ?? restaurant.min_order;
-  const zonesBlock = buildZonesBlock(zones || [], branches);
-  const selectedZone = conv.meta?.delivery_zone || null;
 
   const activeBranches = branches.filter((b: any) => b.is_active);
   const branchesBlock = activeBranches.length === 0
@@ -494,33 +405,11 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
     ? `8) المطعم عنده عدة فروع. لازم تستدعي resolve_branch(address) أول ما الزبون يعطي عنوانه/منطقته، قبل set_delivery_info و submit_order. إذا منطقته ما مخدومة من أي فرع، اعتذر بلطف واذكر المناطق المخدومة.`
     : `8) المطعم عنده فرع واحد فقط.`;
 
-  const toneDirectives = (tone: string) => {
-    const t = (tone || "").trim();
-    if (t.includes("رسمي")) {
-      return `## النبرة الفعّالة: رسمي وموجز (التزم حرفياً)
-- ممنوع استخدام أي إيموجي إطلاقاً.
-- ممنوع علامات التعجّب، ممنوع الكلمات العامية.
-- استخدم صيغ احترام: "حضرتك"، "تفضّل"، "نعتذر".
-- جمل قصيرة جداً، مباشرة، بدون تحبّب.`;
-    }
-    if (t.includes("مرح") || t.includes("عفوي")) {
-      return `## النبرة الفعّالة: مرح وعفوي (التزم حرفياً)
-- صفر إيموجي افتراضياً. مسموح إيموجي واحد فقط (كحد أقصى) في رسالة الترحيب الأولى أو رسالة التأكيد النهائي الناجح — وليس بغيرهما.
-- ممنوع منعاً باتاً تكتلات الإيموجي (مثل 🍔🥤📍 أو ✨😋) — رسالة بدون أي إيموجي أفضل من رسالة بإيموجيين.
-- عبارات عراقية خفيفة مسموحة: "هلا والله"، "تمام"، "على راسي" — بدون تكلّف ولا مبالغة.
-- لا تكرر نفس الإيموجي بالمحادثة.`;
-    }
-    return `## النبرة الفعّالة: ودود ومحترف (التزم حرفياً)
-- صفر إيموجي افتراضياً بكل الرسائل. مسموح إيموجي واحد فقط (اختياري) في رسالة الترحيب الأولى أو رسالة التأكيد النهائي الناجح للطلب — وليس بغير ذلك.
-- ممنوع منعاً باتاً تكتلات الإيموجي (مثل 🍔🥤📍 أو ✨😋 أو 🤔😋) بأي رسالة — رسالة بدون أي إيموجي أفضل دائماً.
-- ممنوع الإيموجي نهائياً في: ملخّص الطلب، المعاينة، الفاتورة، طلب البيانات (اسم/عنوان/هاتف)، رسائل الخطأ والاعتذار، أي رد على سؤال عادي.
-- لهجة دافئة مهذّبة، بدون مبالغة بالتحبّب أو كلمات زائدة.`;
-  };
-
   return `# الهوية (Identity)
 أنت موظف استقبال طلبات لمطعم "${restaurant.name}". شغلتك الوحيدة: تساعد الزبون يطلب أكل بسرعة وبدون لف.
+- نبرة: ${restaurant.tone}
 - لغة الرد: ${lang}
-- ${openHoursStatus(effectiveHours, effectivePrep)}
+- ${openHoursStatus(effectiveHours)}
 
 ${buildCustomerProfileBlock(customerProfile)}
 
@@ -528,19 +417,13 @@ ${buildCustomerProfileBlock(customerProfile)}
 # الفروع (Branches)
 ${branchesBlock}
 ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.name}` : ""}
-${selectedZone ? `\nمنطقة التوصيل المختارة: ${selectedZone.area_name} | أجور: ${selectedZone.fee} ${restaurant.currency}${selectedZone.min_order ? ` | حد أدنى: ${selectedZone.min_order}` : ""}${selectedZone.eta_minutes ? ` | تقدير ~${selectedZone.eta_minutes}د` : ""}` : ""}
-
-${zonesBlock}
 
 # الأسلوب (Style)
-${toneDirectives(restaurant.tone)}
-
-## قواعد عامة فوق النبرة
 - ردود قصيرة جداً (سطر أو سطرين). بدون مقدمات طويلة.
-- سؤال واحد فقط بكل رسالة.
+- سؤال واحد بس بكل رسالة.
+- استخدم الإيموجي بهدوء (🍔 🥤 ✅ 📍) لما يناسب — مو بكل رسالة.
 - خاطب الزبون باسمه إذا تعرفه.
 - لا تكرر نفس الجملة الترحيبية أكثر من مرة بنفس المحادثة.
-- قواعد الإيموجي بالنبرة أعلاه هي **الحد الأقصى** — الأفضل دائماً أقل.
 
 # قواعد صارمة (Rules)
 1) ممنوع تخترع صنف أو سعر — استدعِ search_menu قبل أي add_to_cart.
@@ -552,12 +435,7 @@ ${toneDirectives(restaurant.tone)}
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
 4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
-6) handoff_to_human هو **آخر حل** ولا يُستخدم إلا في الحالات التالية حصراً:
-   • الزبون طلب صراحةً يحجي مع موظف/إنسان ("ودّيني لموظف"، "أريد بشر").
-   • شكوى حقيقية عن طلب سابق (file_complaint استُدعي للتو).
-   • submit_order/schedule_order رجّع error حقيقي (P3).
-   • الزبون كرر نفس السؤال 3 مرات ولم تفهم قصده إطلاقاً.
-   • ممنوع handoff لمجرد أن الزبون: سأل "ليش"، اعترض على سياسة المطعم، طلب توضيح، قال "ما عجبني"، سأل سؤال عام، أو لم يطلب شيء بعد. هذي ردود طبيعية تتعامل معاها كموظف استقبال — اعتذر بلطف، اشرح بسطر، واسأل وش يحب يطلب.
+6) لو ما فهمت قصده بعد محاولتين، أو الزبون متضايق/زعلان، استخدم handoff_to_human فوراً.
 7) المطعم مغلق؟ اعتذر واذكر وقت الافتتاح. ما تأخذ طلب نهائي إلا إذا الزبون يطلب جدولة ضمن الدوام.
 13) الطلبات المجدولة (لوقت لاحق):
    • إذا الزبون قال "بكرة"، "بعد ساعة"، "الساعة كذا"، "للغداء"، "للعشاء" أو أي وقت مستقبلي — اسأله عن الوقت المحدد، ثم بعد preview_order وموافقة الزبون استدعِ schedule_order بدل submit_order.
@@ -578,19 +456,6 @@ ${branchRule}
    • افحص الصورة بدقّة واستخرج: رقم الطلب، الأصناف والكميات والإضافات، العنوان/الهاتف/الاسم.
    • طابق الأصناف عبر search_menu قبل add_to_cart.
    • لخّص ما فهمت بسطر واحد ثم اطلب توضيحاً واحداً فقط للمعلومة الناقصة الأهم.
-
-# قواعد إنتاج صارمة لا تُكسر أبداً (Production Hard Rules)
-P1) الإضافات/الصوصات الإضافية: لو الزبون طلب صوص/إضافة/مكمّل بسعر (مو ضمن مكوّنات الصنف الأصلي) — لازم تستدعي search_menu وتجده كصنف منفصل ثم add_to_cart مع qty الصحيحة. ممنوع تسجيلها كـ "ملاحظة للمطبخ" فقط. لو ما لكيت الصنف بالمنيو، اعتذر وقل "هذي الإضافة مو متوفرة منفصلة" — لا تضيفها كنوتة بسعر صفر.
-P2) الفروع: لو الزبون ذكر اسم فرع صراحةً ("فرع X")، استدعِ resolve_branch مع نص اسم الفرع نفسه. لو الفرع غير موجود بالقائمة، خبّره صراحةً بقائمة الفروع المتاحة واسأله يختار، ولا تفترض الفرع الرئيسي بصمت.
-P3) فشل إنشاء الطلب: لو submit_order أو schedule_order رجّع error، **ممنوع** تقول "تم التأكيد" أو "تم تأكيد طلبك" أو "صار". قل بصراحة: "طلبك يحتاج تأكيد من الموظف، راح يتواصل وياك" واستدعِ handoff_to_human مباشرةً. لا تجمع بين "تم التأكيد" و "حوّلتك لموظف" بنفس الرسالة أبداً.
-P4) handoff_to_human: بعد ما تستدعيه، **لا تكتب أي نص آخر** بنفس الرد إلا جملة تأكيد قصيرة جداً ("حوّلتك لزميل بشري، راح يجاوبك"). لا ترد على شكر أو أسئلة لاحقة — البوت متوقف للمحادثة هذي.
-P5) المنيو: لو الزبون قال "وين المنيو؟"، "ما وصل"، "ما أشوف"، "أرسلها مرة ثانية" أو ما يشبه ذلك — استدعِ show_menu **من جديد** بدل ما تقول "وصلتك". لا تدّعِ أنك أرسلت صور لم تُرسل فعلياً — استدعاء show_menu هو اللي يُرسل الصور.
-P6) ممنوع أي تكرار: لو رسالتك السابقة لنفس الزبون كانت نفس المحتوى تقريباً، **لا ترسل** نسخة ثانية — أعد الصياغة أو اكتفِ بسؤال واحد.
-P7) الأسعار والأصناف: كل سعر تذكره لازم يجي من نتيجة search_menu/show_menu/show_combos. ممنوع تخمين أو تقريب أسعار.
-P8) أجور التوصيل: ممنوع تخترع أي رقم لأجور التوصيل. الرقم يجي حصراً من نتيجة resolve_branch (حقل delivery_zone). لو الزبون بمنطقة بدون zone محدد، قل بصراحة "الأجور يحددها الفرع عند التواصل" — لا تخمن. preview_order يحسب الأجور تلقائياً ويضيفها للإجمالي.
-P9) الشكاوى: لو الزبون اشتكى من طلب سابق (بارد، ناقص، متأخر، خطأ بالطلب) أو طلب استرداد/تعويض — استدعِ file_complaint(type, note, order_id?) فوراً. اعتذر بصدق بسطر واحد ثم استدعِ handoff_to_human. ممنوع تعد بتعويض أو خصم من نفسك — الموظف هو اللي يقرر.
-P10) وقت التحضير: لو محدد current_prep_minutes للفرع، اذكره صراحةً عند تأكيد الطلب ("الطلب يجهز خلال ~X دقيقة"). لا تخمن وقت لو غير محدد.
-P11) ذاكرة الزبون: إذا ملف الزبون أعلاه يعرض last_address أو last_phone، استخدمه افتراضياً بدون ما تسأل من جديد. لكن قبل preview_order اذكره بجملة واحدة للتأكيد: "نوصل لنفس العنوان السابق (X)؟" — لو الزبون قال لا أو ذكر عنوان/رقم جديد، بدّله فوراً. ممنوع تسأله من الصفر لو عندك معلومة محفوظة.
 
 # السياق الحالي (Context)
 السلة:
@@ -766,16 +631,11 @@ async function runTool(
     const branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
-    const zone = conv.meta?.delivery_zone || null;
-    const zoneMin = Number(zone?.min_order || 0);
-    const branchMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
-    const effectiveMin = Math.max(zoneMin, branchMin);
+    const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
     }
-    const deliveryFee = Number(zone?.fee || 0);
-    const total = subtotal + deliveryFee;
-    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId, zone?.id || null, deliveryFee));
+    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
     const token = `ord_${fp.slice(0, 16)}`;
     await db.from("conversations").update({
       meta: { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } },
@@ -787,24 +647,16 @@ async function runTool(
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
       return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
     }).join("\n");
-    const prepLine = branch?.current_prep_minutes ? `\n⏱️ وقت التحضير الحالي ~${Number(branch.current_prep_minutes)}د` : "";
-    const zoneLine = zone ? `\n🚗 توصيل (${zone.area_name}): ${deliveryFee} ${restaurant.currency}${zone.eta_minutes ? ` (~${zone.eta_minutes}د)` : ""}` : "";
-    const breakdown = zone
-      ? `\n\nالأصناف: ${subtotal} ${restaurant.currency}${zoneLine}\n💰 الإجمالي: ${total} ${restaurant.currency}`
-      : `\n\n💰 الإجمالي: ${total} ${restaurant.currency}`;
-    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}${prepLine}${breakdown}`;
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
     return {
       ok: true,
       confirmation_token: token,
       summary,
-      subtotal,
-      delivery_fee: deliveryFee,
-      total,
+      total: subtotal,
       currency: restaurant.currency,
       instruction: "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
     };
   }
-
 
   if (name === "submit_order") {
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
@@ -820,9 +672,7 @@ async function runTool(
     }
     const delivery = conv.delivery || {};
     const branchId = conv.meta?.branch_id || null;
-    const zone = conv.meta?.delivery_zone || null;
-    const deliveryFee = Number(zone?.fee || 0);
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, zone?.id || null, deliveryFee));
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
     if (currentFp !== pending.fp) {
       // Cart or delivery changed since preview — force a new preview
       await db.from("conversations").update({
@@ -837,54 +687,9 @@ async function runTool(
     }
 
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const total = subtotal + deliveryFee;
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
-
-
-    // === One-shot lock: clear the confirmation token BEFORE inserting the order.
-    // If the customer double-taps "نعم" or the model re-calls submit_order, the second
-    // call's token check above will fail and no duplicate order will be created.
-    {
-      const { data: locked, error: lockErr } = await db
-        .from("conversations")
-        .update({ meta: { ...(conv.meta || {}), pending_confirmation: null } })
-        .eq("id", conv.id)
-        .eq("meta->pending_confirmation->>token", pending.token)
-        .select("id");
-      if (lockErr || !locked || locked.length === 0) {
-        // Someone else already consumed this token (race) -> abort cleanly.
-        return { error: "هذا الطلب صار تأكيده بالفعل. لا حاجة لإعادة الإرسال." };
-      }
-      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
-    }
-
-    // === Re-validate availability + stock for ALL items at submit time.
-    // Item may have been disabled or run out between preview and submit.
-    {
-      const ids = Array.from(new Set(cart.map((c) => c.menu_item_id)));
-      const { data: rows } = await db
-        .from("menu_items")
-        .select("id,name,is_available,track_stock,stock_qty")
-        .in("id", ids);
-      const byId = new Map((rows || []).map((r: any) => [r.id, r]));
-      const unavailable: string[] = [];
-      for (const ci of cart) {
-        const row: any = byId.get(ci.menu_item_id);
-        if (!row || !row.is_available) { unavailable.push(ci.name); continue; }
-        if (row.track_stock && (row.stock_qty == null || row.stock_qty < ci.qty)) {
-          unavailable.push(`${ci.name} (الموجود ${row.stock_qty ?? 0})`);
-        }
-      }
-      if (unavailable.length) {
-        return {
-          error: `خلال التأكيد، صار غير متوفر: ${unavailable.join("، ")}. اعتذر للزبون، اقترح بديل، وأعد المعاينة قبل أي تأكيد جديد.`,
-        };
-      }
-    }
-
-    const orderNotes = deliveryFee > 0 ? `أجور التوصيل: ${deliveryFee} ${restaurant.currency}${zone?.area_name ? ` (${zone.area_name})` : ""}` : null;
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -896,8 +701,7 @@ async function runTool(
         delivery_address: delivery.address,
         items: cart,
         subtotal,
-        total,
-        notes: orderNotes,
+        total: subtotal,
         status: "pending",
       })
       .select()
@@ -920,8 +724,6 @@ async function runTool(
       const stockItems = (cart as CartItem[]).map((c) => ({ menu_item_id: c.menu_item_id, qty: c.qty }));
       await db.rpc("decrement_stock", { _items: stockItems });
     } catch (_) { /* don't block the order */ }
-
-
 
 
     await db
@@ -950,37 +752,7 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
-    // Owner alert (separate from branch chat) — direct ping to the restaurant owner.
-    try {
-      const who = conv.customer_name || conv.customer_handle || "زبون";
-      await notifyOwner(
-        restaurant,
-        `✅ طلب جديد #${String(order.id).slice(0,8)}\nالزبون: ${who}\nالإجمالي: ${total} ${restaurant.currency || "IQD"}`,
-      );
-    } catch (_) {}
-
-    // Notify branch staff on Telegram (so a real human sees the order even if no
-    // platform webhook is configured). Best-effort, never blocks the customer reply.
-    try {
-      const branches: any[] = (restaurant.__branches || []);
-      const target = branches.find((b: any) => b.id === branchId && b.is_active && b.telegram_chat_id)
-        || branches.find((b: any) => b.is_active && b.telegram_chat_id);
-      const TG_KEY = Deno.env.get("TELEGRAM_API_KEY");
-      const LK = Deno.env.get("LOVABLE_API_KEY");
-      if (target && TG_KEY && LK) {
-        const lines = (cart as CartItem[]).map((c) => `• ${c.qty}× ${c.name}`).join("\n");
-        const txt = `🆕 طلب جديد #${String(order.id).slice(0, 8)}\nالزبون: ${conv.customer_name || conv.customer_handle || "—"}\nالهاتف: ${delivery.phone}\nالعنوان: ${delivery.address}\n${lines}${deliveryFee > 0 ? `\nتوصيل: ${deliveryFee}` : ""}\nالإجمالي: ${total} ${restaurant.currency || "IQD"}`;
-        fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${LK}`, "X-Connection-Api-Key": TG_KEY, "Content-Type": "application/json" },
-          body: JSON.stringify({ chat_id: target.telegram_chat_id, text: txt }),
-        }).catch(() => {});
-      }
-    } catch (_) {}
-
-
-
-    return { ok: true, order_id: order.id, subtotal, delivery_fee: deliveryFee, total, message: "تم إرسال الطلب للمطبخ ✅" };
+    return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
   if (name === "schedule_order") {
@@ -995,9 +767,7 @@ async function runTool(
     }
     const delivery = conv.delivery || {};
     const branchId = conv.meta?.branch_id || null;
-    const zone = conv.meta?.delivery_zone || null;
-    const deliveryFee = Number(zone?.fee || 0);
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, zone?.id || null, deliveryFee));
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
     if (currentFp !== pending.fp) {
       await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
@@ -1016,12 +786,6 @@ async function runTool(
     if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
 
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const total = subtotal + deliveryFee;
-    const feeNote = deliveryFee > 0 ? `أجور التوصيل: ${deliveryFee} ${restaurant.currency}${zone?.area_name ? ` (${zone.area_name})` : ""}` : null;
-    const noteParts = [
-      args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
-      feeNote,
-    ].filter(Boolean);
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -1033,10 +797,10 @@ async function runTool(
         delivery_address: delivery.address,
         items: cart,
         subtotal,
-        total,
+        total: subtotal,
         status: "scheduled",
         scheduled_for: when.toISOString(),
-        notes: noteParts.length ? noteParts.join(" | ") : null,
+        notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
       })
       .select()
       .single();
@@ -1069,82 +833,31 @@ async function runTool(
       order_id: order.id,
       scheduled_for: when.toISOString(),
       scheduled_for_human: args.scheduled_for_human || when.toISOString(),
-      subtotal,
-      delivery_fee: deliveryFee,
-      total,
+      total: subtotal,
       message: `تم حجز الطلب ✅ راح يوصل قبل ${args.scheduled_for_human || when.toISOString()} إن شاء الله.`,
     };
   }
 
   if (name === "resolve_branch") {
-    const addrRaw = String(args.address || "").trim();
-    const addr = addrRaw.toLowerCase();
+    const addr = String(args.address || "").trim().toLowerCase();
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
-    const allZones: any[] = ((restaurant as any).__zones || []).filter((z: any) => z.is_active);
     if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
-
-    const pickZoneFor = (branchId: string) => {
-      const zs = allZones.filter((z) => z.branch_id === branchId);
-      const match = zs.find((z) => {
-        const a = String(z.area_name || "").toLowerCase().trim();
-        return a && (addr.includes(a) || a.includes(addr));
-      });
-      return match || null;
-    };
-
-    const persist = async (b: any, zone: any, extra: any = {}) => {
-      const zoneMeta = zone
-        ? { id: zone.id, area_name: zone.area_name, fee: Number(zone.fee || 0), min_order: Number(zone.min_order || 0), eta_minutes: zone.eta_minutes ?? null }
-        : null;
-      const newMeta = { ...(conv.meta || {}), branch_id: b.id, delivery_zone: zoneMeta };
-      await db.from("conversations").update({ meta: newMeta }).eq("id", conv.id);
-      conv.meta = newMeta;
-      return {
-        ok: true,
-        branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours, current_prep_minutes: b.current_prep_minutes ?? null },
-        delivery_zone: zoneMeta,
-        ...extra,
-      };
-    };
-
     if (branches.length === 1) {
       const b = branches[0];
-      return await persist(b, pickZoneFor(b.id));
+      await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: b.id } }).eq("id", conv.id);
+      conv.meta = { ...(conv.meta || {}), branch_id: b.id };
+      return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
     }
-    // 1) explicit branch-name match
-    const nameMatch = branches.find((b: any) => {
-      const n = String(b.name || "").toLowerCase();
-      return n && (addr.includes(n) || n.includes(addr));
-    });
-    if (nameMatch) return await persist(nameMatch, pickZoneFor(nameMatch.id), { matched_by: "name" });
-
-    // 2) zone-area match across all branches
-    const zoneMatch = allZones.find((z) => {
-      const a = String(z.area_name || "").toLowerCase().trim();
-      return a && (addr.includes(a) || a.includes(addr));
-    });
-    if (zoneMatch) {
-      const b = branches.find((br: any) => br.id === zoneMatch.branch_id);
-      if (b) return await persist(b, zoneMatch, { matched_by: "zone" });
-    }
-
-    // 3) legacy delivery_areas array match
     const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
     if (matches.length === 0) {
-      const allAreas = Array.from(new Set([
-        ...branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : [])),
-        ...allZones.map((z) => z.area_name),
-      ])).filter(Boolean);
-      const allNames = branches.map((b: any) => b.name);
-      return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas, branch_names: allNames };
+      const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
+      return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas };
     }
     const chosen = matches[0];
-    return await persist(chosen, pickZoneFor(chosen.id), {
-      matched_by: "area",
-      alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })),
-    });
+    await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: chosen.id } }).eq("id", conv.id);
+    conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
+    return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
   }
-
 
   if (name === "handoff_to_human") {
     const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
@@ -1177,89 +890,8 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
-    // Owner alert: handoff is high-priority.
-    try {
-      const who = conv.customer_name || conv.customer_handle || "زبون";
-      await notifyOwner(restaurant, `🚨 محادثة تحتاج تدخل\nالزبون: ${who}\nالسبب: ${reason}`);
-    } catch (_) {}
     return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
   }
-
-
-  if (name === "file_complaint") {
-    const ALLOWED_TYPES = new Set([
-      "cold_food","missing_item","late","wrong_order","bad_taste","rude_staff","refund_request","other",
-    ]);
-    const rawType = String(args.type || "").trim().toLowerCase();
-    const type = ALLOWED_TYPES.has(rawType) ? rawType : "other";
-    const note = String(args.note || "").trim().slice(0, 1000);
-    if (!note) return { error: "ناقص وصف الشكوى. اطلب من الزبون يوضح أكثر." };
-    let orderId: string | null = null;
-    const candidate = String(args.order_id || "").trim();
-    if (candidate && /^[0-9a-f-]{36}$/i.test(candidate)) {
-      const { data: ord } = await db
-        .from("orders").select("id").eq("id", candidate).eq("restaurant_id", restaurant.id).maybeSingle();
-      if (ord?.id) orderId = ord.id;
-    }
-    if (!orderId && conv.meta?.last_order_id) orderId = conv.meta.last_order_id;
-
-    const { data: complaint, error: cErr } = await db
-      .from("complaints")
-      .insert({
-        restaurant_id: restaurant.id,
-        conversation_id: conv.id,
-        order_id: orderId,
-        channel: conv.channel,
-        customer_handle: conv.customer_handle,
-        customer_name: conv.customer_name,
-        type,
-        note,
-        status: "open",
-      })
-      .select("id")
-      .single();
-    if (cErr) {
-      console.error("file_complaint insert failed:", cErr);
-      return { error: "ما كدرت أسجل الشكوى. حوّل لموظف فوراً." };
-    }
-
-    // Notify branches
-    try {
-      const targetBranches: any[] = (restaurant.__branches || [])
-        .filter((b: any) => b.is_active && b.telegram_chat_id);
-      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
-      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
-      if (LOVABLE_API_KEY && TELEGRAM_API_KEY && targetBranches.length) {
-        const who = conv.customer_name || conv.customer_handle || "زبون";
-        const text = `🚨 شكوى جديدة\nالنوع: ${type}\nالزبون: ${who}\nالطلب: ${orderId || "غير محدد"}\nالنص: ${note}\n— يحتاج تدخّل موظف.`;
-        await Promise.all(targetBranches.map((b) =>
-          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
-            method: "POST",
-            headers: {
-              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-              "X-Connection-Api-Key": TELEGRAM_API_KEY,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ chat_id: b.telegram_chat_id, text }),
-          }).catch(() => {}),
-        ));
-      }
-    } catch (_) { /* never block */ }
-    // Owner alert: complaints are escalation-worthy.
-    try {
-      const who = conv.customer_name || conv.customer_handle || "زبون";
-      await notifyOwner(restaurant, `🚨 شكوى جديدة (${type})\nالزبون: ${who}\nالنص: ${note.slice(0, 200)}`);
-    } catch (_) {}
-
-
-    return {
-      ok: true,
-      complaint_id: complaint.id,
-      message: "سجّلت الشكوى. اعتذر بصدق بسطر واحد ثم استدعِ handoff_to_human فوراً.",
-    };
-  }
-
-
 
 
   if (name === "show_menu") {
@@ -1508,117 +1140,7 @@ async function runTool(
 }
 
 
-// ===== Sprint 3: per-worker TTL cache for branches + zones =====
-// Branches/zones change rarely. Caching them per restaurant for a short
-// window cuts ~2 DB roundtrips per LLM turn under load. Worst-case
-// staleness = BR_TTL_MS; restart the function (deploy/redeploy) to flush.
-const BR_TTL_MS = 60_000; // 60s
-type BzEntry = { at: number; branches: any[]; zones: any[] };
-const _bzCache = new Map<string, BzEntry>();
-export function _resetBzCache() { _bzCache.clear(); }
-
-async function loadBranchesAndZones(db: any, restaurantId: string): Promise<{ branches: any[]; zones: any[] }> {
-  const now = Date.now();
-  const hit = _bzCache.get(restaurantId);
-  if (hit && now - hit.at < BR_TTL_MS) {
-    return { branches: hit.branches, zones: hit.zones };
-  }
-  const [{ data: branchesData }, { data: zonesData }] = await Promise.all([
-    db.from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,current_prep_minutes")
-      .eq("restaurant_id", restaurantId),
-    db.from("delivery_zones")
-      .select("id,branch_id,area_name,fee,min_order,eta_minutes,is_active")
-      .eq("restaurant_id", restaurantId)
-      .eq("is_active", true),
-  ]);
-  const branches = branchesData ?? [];
-  const zones = zonesData ?? [];
-  _bzCache.set(restaurantId, { at: now, branches, zones });
-  return { branches, zones };
-}
-
-
-// ===== Sprint 5: PII redaction for agent_logs payloads =====
-// Logs are seen by support/owner; redact phones, long digit runs, and
-// common address-like words. Pure + idempotent so it's safe to wrap any
-// payload right before insert.
-const PHONE_RE = /(\+?\d[\d\s\-()]{7,}\d)/g;
-const LONG_DIGIT_RE = /\b\d{9,}\b/g;
-const ADDRESS_HINT_RE = /(عنوان|address|محله|محلة|زقاق|دار)\s*[:：]\s*[^\n,]{3,}/gi;
-export function redactPii(input: unknown): unknown {
-  if (input == null) return input;
-  if (typeof input === "string") {
-    return input
-      .replace(PHONE_RE, "[redacted_phone]")
-      .replace(LONG_DIGIT_RE, "[redacted_digits]")
-      .replace(ADDRESS_HINT_RE, (_m, k) => `${k}: [redacted_address]`);
-  }
-  if (Array.isArray(input)) return input.map(redactPii);
-  if (typeof input === "object") {
-    const out: any = {};
-    for (const [k, v] of Object.entries(input as any)) {
-      if (/^(phone|customer_phone|delivery_address|address)$/i.test(k) && typeof v === "string") {
-        out[k] = v ? "[redacted]" : v;
-      } else {
-        out[k] = redactPii(v);
-      }
-    }
-    return out;
-  }
-  return input;
-}
-
-// ===== Sprint 5: model tiering =====
-// Cheap model for greetings/menu lookups; full model for orders/handoff/payment.
-// Pure function on the latest user turn — easy to test, easy to revert.
-const HEAVY_INTENT_RE = /(طلب|اطلب|أطلب|اوصل|أوصل|توصيل|دفع|عنوان|الفاتورة|الحساب|بشري|موظف|شكوى|الغ[يى]|cancel|order|delivery|address|payment|invoice|human|agent|complain)/i;
-const FLASH_MODEL = Deno.env.get("AGENT_MODEL_FLASH") ?? "google/gemini-3-flash-preview";
-const PRO_MODEL   = Deno.env.get("AGENT_MODEL_PRO")   ?? MODEL;
-export function pickModel(messages: any[]): string {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m?.role !== "user") continue;
-    const txt = typeof m.content === "string"
-      ? m.content
-      : Array.isArray(m.content)
-        ? m.content.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join(" ")
-        : "";
-    return HEAVY_INTENT_RE.test(txt) ? PRO_MODEL : FLASH_MODEL;
-  }
-  return FLASH_MODEL;
-}
-
-// ===== Sprint 5: per-restaurant circuit breaker around the AI gateway =====
-// After N consecutive failures within WINDOW, open the circuit for COOLDOWN.
-// While open, agent-run short-circuits with a fallback message and pauses
-// the conversation so a human can take over (no further model calls).
-const CB_FAIL_THRESHOLD = 3;
-const CB_WINDOW_MS = 60_000;
-const CB_COOLDOWN_MS = 60_000;
-type CbState = { fails: number; firstFailAt: number; openedAt: number };
-const _cb = new Map<string, CbState>();
-export function _resetCircuitBreaker() { _cb.clear(); }
-export function circuitIsOpen(restaurantId: string, now = Date.now()): boolean {
-  const s = _cb.get(restaurantId);
-  if (!s || !s.openedAt) return false;
-  if (now - s.openedAt < CB_COOLDOWN_MS) return true;
-  _cb.delete(restaurantId);
-  return false;
-}
-export function circuitRecordFailure(restaurantId: string, now = Date.now()): boolean {
-  const s = _cb.get(restaurantId);
-  if (!s || now - s.firstFailAt > CB_WINDOW_MS) {
-    _cb.set(restaurantId, { fails: 1, firstFailAt: now, openedAt: 0 });
-    return false;
-  }
-  s.fails++;
-  if (s.fails >= CB_FAIL_THRESHOLD) { s.openedAt = now; return true; }
-  return false;
-}
-export function circuitRecordSuccess(restaurantId: string) { _cb.delete(restaurantId); }
-
-async function callModel(messages: any[], tools: any, modelOverride?: string) {
+async function callModel(messages: any[], tools: any) {
   const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -1626,7 +1148,7 @@ async function callModel(messages: any[], tools: any, modelOverride?: string) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: modelOverride ?? MODEL,
+      model: MODEL,
       messages,
       tools,
       tool_choice: "auto",
@@ -1687,26 +1209,13 @@ Deno.serve(async (req) => {
       return json({ reply: "", state: conv.state, media: [], skipped: "quota_blocked", reason });
     }
 
-    // Sprint 5: short-circuit if the breaker is open for this restaurant.
-    if (circuitIsOpen(restaurant.id)) {
-      const fallback = "نواجه ضغط بسيط حالياً، حوّلتك لزميل بشري راح يرد عليك قريباً 🙏";
-      try {
-        await db.from("conversations").update({ is_bot_paused: true }).eq("id", conversation_id);
-        await db.from("messages").insert({ conversation_id, role: "assistant", content: fallback });
-        await db.from("agent_logs").insert({
-          conversation_id, restaurant_id: restaurant.id, step: 0,
-          kind: "circuit:open", payload: {},
-        });
-      } catch (_) {}
-      return json({ reply: fallback, state: conv.state, media: [], quick_replies: [], skipped: "circuit_open" });
-    }
-
-    // Load branches + zones with a small per-worker TTL cache (Sprint 3).
-    const { branches, zones } = await loadBranchesAndZones(db, restaurant.id);
+    // Load branches for this restaurant (used by resolve_branch tool + system prompt)
+    const { data: branchesData } = await db
+      .from("branches")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active")
+      .eq("restaurant_id", restaurant.id);
+    const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
-    (restaurant as any).__zones = zones;
-
-
 
     // Customer memory is always on. Eagerly fetch the profile and inject it into the system prompt.
     let customerProfile: any = { found: false };
@@ -1741,7 +1250,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile, zones) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
@@ -1785,7 +1294,7 @@ Deno.serve(async (req) => {
       }).eq("id", conversation_id);
       const reply = "تم إلغاء طلبك. متى ما تحب نبدأ من جديد، أنا موجود 🌹";
       await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
-      return json({ reply, state: "idle", media: [], quick_replies: [] });
+      return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
     }
 
     // Guardrails: dedup identical consecutive tool calls + loop breaker
@@ -1802,24 +1311,7 @@ Deno.serve(async (req) => {
         break;
       }
 
-      let resp;
-      try {
-        const chosenModel = pickModel(llmMessages);
-        resp = await callModel(llmMessages, activeTools, chosenModel);
-        circuitRecordSuccess(restaurant.id);
-      } catch (modelErr: any) {
-        const opened = circuitRecordFailure(restaurant.id);
-        if (opened) {
-          try {
-            await db.from("conversations").update({ is_bot_paused: true }).eq("id", conversation_id);
-            await db.from("agent_logs").insert({
-              conversation_id, restaurant_id: restaurant.id, step,
-              kind: "circuit:trip", payload: { error: String(modelErr?.message || modelErr) },
-            });
-          } catch (_) {}
-        }
-        throw modelErr;
-      }
+      const resp = await callModel(llmMessages, activeTools);
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
@@ -1860,12 +1352,12 @@ Deno.serve(async (req) => {
             fromCache = true;
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
-              kind: `guardrail:dedup:${name}`, payload: redactPii({ args }),
+              kind: `guardrail:dedup:${name}`, payload: { args },
             });
           } else {
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
-              kind: `tool_call:${name}`, payload: redactPii({ args }),
+              kind: `tool_call:${name}`, payload: { args },
             });
             try {
               result = await withTimeout(
@@ -1879,7 +1371,7 @@ Deno.serve(async (req) => {
             toolCallCache.set(cacheKey, result);
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
-              kind: `tool_result:${name}`, payload: redactPii({ ...result, _cached: fromCache }),
+              kind: `tool_result:${name}`, payload: { ...result, _cached: fromCache },
             });
           }
 
@@ -1890,11 +1382,16 @@ Deno.serve(async (req) => {
             } else if ((name === "submit_order" || name === "schedule_order") && result.order_id) {
               quickReplies = [];
             } else if (name === "add_to_cart" || name === "add_combo_to_cart" || name === "get_cart_summary") {
-              quickReplies = [];
+              quickReplies = ["🧾 معاينة الطلب", "📋 المنيو", "❌ إلغاء"];
             } else if (name === "show_menu" || name === "show_combos") {
-              quickReplies = [];
+              // لو المنيو صور فقط، لا نعرض أزرار سفلية حتى ما تطلع تحت الصور
+              if (result.mode === "image_only") {
+                quickReplies = [];
+              } else {
+                quickReplies = [];
+              }
             } else if (name === "suggest_upsell" && Array.isArray(result.suggestions) && result.suggestions.length) {
-              quickReplies = ["✅ أضف", "لا شكراً"];
+              quickReplies = ["✅ أضف", "لا شكراً", "🧾 معاينة الطلب"];
             }
           }
 
@@ -1936,35 +1433,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
-    // === Production hardening of the outgoing reply ===
-    finalText = (finalText || "").trim();
-
-    // Suppress consecutive duplicate replies (against the previous assistant turn).
-    if (finalText) {
-      try {
-        const { data: prevAssistants } = await db
-          .from("messages")
-          .select("content,role,created_at")
-          .eq("conversation_id", conversation_id)
-          .eq("role", "assistant")
-          .order("created_at", { ascending: false })
-          .limit(3);
-        const prev = (prevAssistants || [])[1]; // [0] is the one we inserted this run
-        if (prev && typeof prev.content === "string" && prev.content.trim() === finalText) {
-          finalText = "";
-        }
-      } catch (_) { /* dedup must never block delivery */ }
-    }
-
-    // If handoff was called this run, force one short ack and drop any media.
-    const handoffWasCalled = Array.from(toolCallCache.keys()).some((k) => k.startsWith("handoff_to_human:"));
-    if (handoffWasCalled) {
-      finalText = "حوّلتك لزميل بشري، راح يتواصل وياك قريباً.";
-      media.length = 0;
-      quickReplies = [];
-    }
-
-    return json({ reply: finalText, state: conv.state, media, quick_replies: sanitizeQuickReplies(quickReplies) });
+    return json({ reply: finalText, state: conv.state, media, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";
     // Phase 1: log error to agent_logs for the owner's bot-health view

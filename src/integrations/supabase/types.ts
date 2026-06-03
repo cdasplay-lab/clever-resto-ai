@@ -112,47 +112,10 @@ export type Database = {
           },
         ]
       }
-      bad_responses: {
-        Row: {
-          context_json: Json
-          conversation_id: string | null
-          created_at: string
-          created_by: string | null
-          id: string
-          message_id: string | null
-          note: string | null
-          reason: string
-          restaurant_id: string
-        }
-        Insert: {
-          context_json?: Json
-          conversation_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          message_id?: string | null
-          note?: string | null
-          reason: string
-          restaurant_id: string
-        }
-        Update: {
-          context_json?: Json
-          conversation_id?: string | null
-          created_at?: string
-          created_by?: string | null
-          id?: string
-          message_id?: string | null
-          note?: string | null
-          reason?: string
-          restaurant_id?: string
-        }
-        Relationships: []
-      }
       branches: {
         Row: {
           address: string | null
           created_at: string
-          current_prep_minutes: number | null
           delivery_areas: Json
           id: string
           is_active: boolean
@@ -167,7 +130,6 @@ export type Database = {
         Insert: {
           address?: string | null
           created_at?: string
-          current_prep_minutes?: number | null
           delivery_areas?: Json
           id?: string
           is_active?: boolean
@@ -182,7 +144,6 @@ export type Database = {
         Update: {
           address?: string | null
           created_at?: string
-          current_prep_minutes?: number | null
           delivery_areas?: Json
           id?: string
           is_active?: boolean
@@ -296,51 +257,6 @@ export type Database = {
         }
         Relationships: []
       }
-      complaints: {
-        Row: {
-          channel: string | null
-          conversation_id: string | null
-          created_at: string
-          customer_handle: string | null
-          customer_name: string | null
-          id: string
-          note: string
-          order_id: string | null
-          restaurant_id: string
-          status: string
-          type: string
-          updated_at: string
-        }
-        Insert: {
-          channel?: string | null
-          conversation_id?: string | null
-          created_at?: string
-          customer_handle?: string | null
-          customer_name?: string | null
-          id?: string
-          note: string
-          order_id?: string | null
-          restaurant_id: string
-          status?: string
-          type: string
-          updated_at?: string
-        }
-        Update: {
-          channel?: string | null
-          conversation_id?: string | null
-          created_at?: string
-          customer_handle?: string | null
-          customer_name?: string | null
-          id?: string
-          note?: string
-          order_id?: string | null
-          restaurant_id?: string
-          status?: string
-          type?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       conversations: {
         Row: {
           assigned_to: string | null
@@ -450,45 +366,6 @@ export type Database = {
           preferences?: string | null
           restaurant_id?: string
           total_orders?: number
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      delivery_zones: {
-        Row: {
-          area_name: string
-          branch_id: string
-          created_at: string
-          eta_minutes: number | null
-          fee: number
-          id: string
-          is_active: boolean
-          min_order: number
-          restaurant_id: string
-          updated_at: string
-        }
-        Insert: {
-          area_name: string
-          branch_id: string
-          created_at?: string
-          eta_minutes?: number | null
-          fee?: number
-          id?: string
-          is_active?: boolean
-          min_order?: number
-          restaurant_id: string
-          updated_at?: string
-        }
-        Update: {
-          area_name?: string
-          branch_id?: string
-          created_at?: string
-          eta_minutes?: number | null
-          fee?: number
-          id?: string
-          is_active?: boolean
-          min_order?: number
-          restaurant_id?: string
           updated_at?: string
         }
         Relationships: []
@@ -783,24 +660,6 @@ export type Database = {
         }
         Relationships: []
       }
-      processed_updates: {
-        Row: {
-          channel: string
-          processed_at: string
-          update_key: string
-        }
-        Insert: {
-          channel: string
-          processed_at?: string
-          update_key: string
-        }
-        Update: {
-          channel?: string
-          processed_at?: string
-          update_key?: string
-        }
-        Relationships: []
-      }
       profiles: {
         Row: {
           created_at: string
@@ -887,7 +746,6 @@ export type Database = {
           name: string
           open_hours: Json
           owner_id: string
-          owner_telegram_chat_id: string | null
           platform_webhook_secret: string | null
           platform_webhook_url: string | null
           telegram_bot_username: string | null
@@ -912,7 +770,6 @@ export type Database = {
           name: string
           open_hours?: Json
           owner_id: string
-          owner_telegram_chat_id?: string | null
           platform_webhook_secret?: string | null
           platform_webhook_url?: string | null
           telegram_bot_username?: string | null
@@ -937,7 +794,6 @@ export type Database = {
           name?: string
           open_hours?: Json
           owner_id?: string
-          owner_telegram_chat_id?: string | null
           platform_webhook_secret?: string | null
           platform_webhook_url?: string | null
           telegram_bot_username?: string | null
@@ -1083,15 +939,7 @@ export type Database = {
       }
     }
     Views: {
-      weekly_bad_response_summary: {
-        Row: {
-          count: number | null
-          last_at: string | null
-          reason: string | null
-          restaurant_id: string | null
-        }
-        Relationships: []
-      }
+      [_ in never]: never
     }
     Functions: {
       activate_subscription: {
@@ -1110,10 +958,6 @@ export type Database = {
       decrement_stock: { Args: { _items: Json }; Returns: Json }
       get_bot_health: { Args: { _restaurant_id: string }; Returns: Json }
       get_my_subscription: { Args: { _restaurant_id: string }; Returns: Json }
-      get_restaurant_readiness: {
-        Args: { _restaurant_id: string }
-        Returns: Json
-      }
       has_role: {
         Args: {
           _restaurant_id: string
@@ -1138,10 +982,6 @@ export type Database = {
       set_subscription_status: {
         Args: { _status: string; _sub_id: string }
         Returns: undefined
-      }
-      try_mark_update: {
-        Args: { _channel: string; _key: string }
-        Returns: boolean
       }
     }
     Enums: {
