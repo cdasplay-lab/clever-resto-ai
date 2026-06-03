@@ -932,7 +932,7 @@ async function runTool(
       const LK = Deno.env.get("LOVABLE_API_KEY");
       if (target && TG_KEY && LK) {
         const lines = (cart as CartItem[]).map((c) => `• ${c.qty}× ${c.name}`).join("\n");
-        const txt = `🆕 طلب جديد #${String(order.id).slice(0, 8)}\nالزبون: ${conv.customer_name || conv.customer_handle || "—"}\nالهاتف: ${delivery.phone}\nالعنوان: ${delivery.address}\n${lines}\nالإجمالي: ${subtotal} ${restaurant.currency || "IQD"}`;
+        const txt = `🆕 طلب جديد #${String(order.id).slice(0, 8)}\nالزبون: ${conv.customer_name || conv.customer_handle || "—"}\nالهاتف: ${delivery.phone}\nالعنوان: ${delivery.address}\n${lines}${deliveryFee > 0 ? `\nتوصيل: ${deliveryFee}` : ""}\nالإجمالي: ${total} ${restaurant.currency || "IQD"}`;
         fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
           method: "POST",
           headers: { Authorization: `Bearer ${LK}`, "X-Connection-Api-Key": TG_KEY, "Content-Type": "application/json" },
