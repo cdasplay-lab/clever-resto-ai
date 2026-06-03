@@ -1239,6 +1239,12 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
+    // Owner alert: complaints are escalation-worthy.
+    try {
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      await notifyOwner(restaurant, `🚨 شكوى جديدة (${type})\nالزبون: ${who}\nالنص: ${note.slice(0, 200)}`);
+    } catch (_) {}
+
 
     return {
       ok: true,
