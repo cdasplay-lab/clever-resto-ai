@@ -1460,10 +1460,19 @@ Deno.serve(async (req) => {
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,current_prep_minutes")
       .eq("restaurant_id", restaurant.id);
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
+
+    // Load active delivery zones (Sprint 2) — used by resolve_branch + system prompt
+    const { data: zonesData } = await db
+      .from("delivery_zones")
+      .select("id,branch_id,area_name,fee,min_order,eta_minutes,is_active")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_active", true);
+    const zones = zonesData ?? [];
+    (restaurant as any).__zones = zones;
 
     // Customer memory is always on. Eagerly fetch the profile and inject it into the system prompt.
     let customerProfile: any = { found: false };
