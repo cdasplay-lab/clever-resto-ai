@@ -1063,6 +1063,10 @@ export type Database = {
       decrement_stock: { Args: { _items: Json }; Returns: Json }
       get_bot_health: { Args: { _restaurant_id: string }; Returns: Json }
       get_my_subscription: { Args: { _restaurant_id: string }; Returns: Json }
+      get_restaurant_readiness: {
+        Args: { _restaurant_id: string }
+        Returns: Json
+      }
       has_role: {
         Args: {
           _restaurant_id: string
