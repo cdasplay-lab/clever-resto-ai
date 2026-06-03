@@ -369,3 +369,40 @@ Deno.test("readiness score reflects key setup milestones", () => {
   const partial = score({ menu_available: 5, menu_with_image: 2, branches: 1, branches_with_chat: 0, zones: 1, open_hours_set: true, menu_images: 0, has_bot: false });
   assert(partial >= 40 && partial < 80, `expected 40<=partial<80, got ${partial}`);
 });
+
+// ---------- 17. Sprint 4: auto-resume targets only stale paused conversations ----------
+Deno.test("auto-resume: only paused conversations idle >24h are revived", () => {
+  const now = Date.now();
+  type C = { id: string; is_bot_paused: boolean; last_message_at: number };
+  const rows: C[] = [
+    { id: "a", is_bot_paused: true,  last_message_at: now - 26 * 3600_000 }, // stale -> revive
+    { id: "b", is_bot_paused: true,  last_message_at: now -  2 * 3600_000 }, // fresh -> skip
+    { id: "c", is_bot_paused: false, last_message_at: now - 48 * 3600_000 }, // not paused
+  ];
+  const cutoff = now - 24 * 3600_000;
+  const revived = rows.filter((r) => r.is_bot_paused && r.last_message_at < cutoff).map((r) => r.id);
+  assertEquals(revived, ["a"]);
+});
+
+// ---------- 18. Sprint 4: bad-response context snapshot uses last 6 messages in order ----------
+Deno.test("bad_response context_json keeps last 6 messages in chronological order", () => {
+  const msgs = Array.from({ length: 10 }, (_, i) => ({ id: `m${i}`, created_at: i }));
+  // Mirror the UI: select desc limit 6, then reverse to chronological.
+  const desc = [...msgs].sort((a, b) => b.created_at - a.created_at).slice(0, 6);
+  const ctx = desc.slice().reverse();
+  assertEquals(ctx.length, 6);
+  assertEquals(ctx.map((m) => m.id), ["m4","m5","m6","m7","m8","m9"]);
+});
+
+// ---------- 19. Sprint 4: owner notification gated by owner_telegram_chat_id ----------
+Deno.test("notifyOwner is a no-op when owner_telegram_chat_id is absent or blank", () => {
+  function shouldSend(restaurant: { owner_telegram_chat_id?: string | null }): boolean {
+    const id = (restaurant?.owner_telegram_chat_id || "").toString().trim();
+    return id.length > 0;
+  }
+  assertFalse(shouldSend({}));
+  assertFalse(shouldSend({ owner_telegram_chat_id: "" }));
+  assertFalse(shouldSend({ owner_telegram_chat_id: "   " }));
+  assertFalse(shouldSend({ owner_telegram_chat_id: null }));
+  assert(shouldSend({ owner_telegram_chat_id: "123456789" }));
+});

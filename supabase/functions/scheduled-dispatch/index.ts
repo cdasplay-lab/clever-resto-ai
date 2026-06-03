@@ -41,7 +41,21 @@ Deno.serve(async (req) => {
 
       results.push({ id: o.id, scheduled_for: o.scheduled_for });
     }
-    return json({ ok: true, dispatched: results.length, orders: results });
+    // Auto-resume paused bots that have been idle for >24h with no staff reply.
+    // Defensive: only the paused-state flag is touched; no message is sent here.
+    let resumed = 0;
+    try {
+      const cutoffResume = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const { data: revived, error: rErr } = await db
+        .from("conversations")
+        .update({ is_bot_paused: false })
+        .eq("is_bot_paused", true)
+        .lt("last_message_at", cutoffResume)
+        .select("id");
+      if (!rErr && revived) resumed = revived.length;
+    } catch (_) { /* never block dispatch */ }
+
+    return json({ ok: true, dispatched: results.length, orders: results, auto_resumed: resumed });
   } catch (e: any) {
     return json({ error: e?.message || "error" }, 500);
   }

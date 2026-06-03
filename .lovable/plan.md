@@ -1,152 +1,80 @@
-# تقييم شامل من منظور مدير المنتج
+## Sprint 4 — أهم الأشياء المتبقية لجودة "موظف حقيقي" + تشغيل آمن
 
-## أولاً: أهم النواقص حتى يصير الوكيل بذكاء موظف مطعم محترف
+ركّزت على البنود اللي بقت من خرائط Sprint 1-3 وعندها أعلى أثر على تجربة الزبون والمالك. كلها صغيرة ومركّزة — مو إعادة كتابة.
 
-### 1. الذاكرة طويلة الأمد للزبون (Customer Memory)
-حالياً البوت يتعامل مع كل محادثة كأنها أول مرة. الموظف الحقيقي يتذكر:
-- طلبات الزبون السابقة وتفضيلاته (حار/بدون بصل/صوص محدد).
-- العنوان الافتراضي ورقم الهاتف.
-- شكاوى سابقة (وصل بارد، تأخر).
-- مناسبات (عيد ميلاد، زبون VIP).
+### 1) حقن ذاكرة الزبون في كل محادثة (Customer Memory Injection)
+المشكلة: جدول `customer_memory` موجود ويُكتب فيه، بس الـ system prompt ما يستفيد منه. الزبون اللي طلب 10 مرات يحس البوت لقاه أول مرة.
 
-**الحل:** جدول `customer_preferences` + استدعاء تلقائي بأول رسالة لحقن ملخص في system prompt (3-5 أسطر فقط لتقليل التوكنز).
+- في بداية كل run داخل `agent-run/index.ts`، نسحب صف `customer_memory` المطابق لـ (restaurant_id, channel, customer_handle).
+- نضيف كتلة قصيرة (≤6 أسطر) للـ system prompt: اسم، آخر عنوان/هاتف، عدد الطلبات، LTV، آخر تفضيلات (`auto_preferences` + `preferences` نص حر).
+- قاعدة P11 جديدة: "استخدم العنوان/الهاتف المحفوظ افتراضياً بدون ما تسأل، لكن اعرضه للتأكيد بجملة واحدة قبل submit_order".
+- نُحدّث `customer_memory` بعد submit_order ناجح (total_orders++، lifetime_value+=total، last_order_at، last_phone، last_address).
 
-### 2. فهم النية الضمنية (Intent Disambiguation)
-الموظف يميّز:
-- "اريد شي خفيف" → اقتراح سلطات/تندرز لا برغر دبل.
-- "للأطفال" → بدون حار، حجم صغير.
-- "سريع/مستعجل" → أصناف جاهزة بسرعة.
+### 2) استئناف البوت بعد handoff (Resume UI + Auto-resume)
+المشكلة: لما يصير handoff، `is_bot_paused=true` يبقى للأبد. المالك ما عنده زر يرجّع البوت.
 
-**الحل:** قائمة tags على كل صنف (`spice_level`, `prep_time_min`, `kid_friendly`, `healthy`) + قاعدة في النصائح.
+- في `src/components/bot-health-tab.tsx` (أو tab المحادثات إذا أنسب): جدول محادثات `is_bot_paused=true` مع زر **"استئناف البوت"** يعمل UPDATE على `conversations`.
+- Auto-resume اختياري: إذا مضى > 24 ساعة بدون رد من موظف، البوت يرجع تلقائياً (cron خفيف عبر `scheduled-dispatch`).
+- رسالة ترحيب قصيرة للزبون عند الاستئناف: "رجعنا لخدمتك 👋".
 
-### 3. إدارة التوفر والمخزون اللحظي (86'd items)
-أكبر سبب إحراج: البوت يأكد طلب صنف "نفد". الموظف يعرف فوراً.
+### 3) تنبيه فوري للمالك على Telegram عند handoff/طلب جديد
+المشكلة: Sprint 1 ذكر "تنبيه المالك" لكن حالياً الإشعار يروح لـ branch chat فقط. لو المالك مو بشات الفرع → ضايع.
 
-**الحل:** عمود `available` على `menu_items` + زر تبديل سريع للمالك + فحص قبل `submit_order` وليس قبل `add_to_cart` فقط.
+- حقل جديد على `restaurants`: `owner_telegram_chat_id` (TEXT, nullable) + إدخاله في صفحة الإعدادات.
+- في `agent-run`: عند `handoff_to_human` أو order ناجح، نرسل ملخص قصير لـ owner_telegram_chat_id (إذا موجود) بالإضافة لشات الفرع.
+- صياغة مختلفة للمالك: "🚨 محادثة تحتاج تدخل" / "✅ طلب جديد #1234 — 18,500 IQD".
 
-### 4. أوقات الدوام والذروة (Hours & Surge)
-- رفض ذكي خارج الدوام مع جدولة لاحقة.
-- تنبيه "وقت التحضير 45 دقيقة بسبب الضغط" بدل 20.
+### 4) Bad-response flagging + تقرير أسبوعي
+المشكلة: ما عنا حلقة تعلّم. ردود سيئة تضيع.
 
-**الحل:** حقل `current_prep_minutes` على الفرع يحدّثه المالك من اللوحة، يُحقن في كل رد سعر/تأكيد.
+- جدول جديد `bad_responses` (restaurant_id, conversation_id, message_id, reason TEXT, created_at، الـ snapshot من آخر 6 رسائل في `context_json`).
+- في `bot-health-tab`: عرض آخر 50 محادثة + زر 👎 على رد البوت يفتح dialog فيه أسباب (هلوسة/سعر غلط/لهجة/معلومة خاطئة/أخرى) + ملاحظة.
+- View `weekly_bad_response_summary` يجمع top 10 أنماط للأسبوع الأخير.
 
-### 5. حساب التوصيل الحقيقي
-حالياً "نوصل لكل كركوك" بدون سعر/حد أدنى لكل منطقة. الموظف يقول: "للقادسية رسم 2000 وحد أدنى 10 آلاف".
+### 5) 86-list سريع للأصناف (UI toggle)
+المشكلة: المنطق موجود (`is_available` يُفحص في submit)، بس المالك يحتاج يدخل لصفحة المنيو ويعدّل كل صنف. تحت الضغط = إحراج.
 
-**الحل:** جدول `delivery_zones (branch_id, area_name, fee, min_order, eta_minutes)` يُستخدم في `resolve_branch` و `preview_order`.
+- في `bot-health-tab` أو tab منفصل صغير: قائمة أصناف اليوم مع Switch سريع لكل صنف (`is_available`). تحديث فوري عبر Supabase realtime.
+- اختصار "نفد كل شي تحت category=X" زر واحد.
 
-### 6. التعامل مع الشكاوى والاسترداد
-لا يوجد مسار للشكوى. الموظف الجيد يعتذر، يسجل، يحوّل.
+### 6) Owner-facing readiness gate
+المشكلة: Sprint 3 أضاف `get_restaurant_readiness` RPC، بس ما في UI يستخدمها ولا فيه gate.
 
-**الحل:** أداة `file_complaint(order_id, type, note)` → تُدرج في جدول `complaints` + إشعار فوري للمالك + handoff تلقائي.
-
-### 7. الـ Upsell الذكي (وليس العشوائي)
-حالياً `suggest_upsell` موجودة لكن من غير سياق. الموظف يقول: "تضيف وياه بطاطا بـ 1500 بس؟" بعد البرغر، مو قبله.
-
-**الحل:** قواعد upsell مربوطة بالـ category (برغر → بطاطا+مشروب، شاورما → مخلل+بيبسي) مع سقف 1 اقتراح/محادثة.
-
-### 8. التحقق من رقم الهاتف (OTP خفيف أو نمط)
-طلبات وهمية = خسارة فادحة. حالياً أي رقم يمر.
-
-**الحل:** Regex عراقي صارم (07[3-9]\d{8}) + قائمة سوداء + (اختياري) إرسال كود تأكيد عبر تلغرام نفسه قبل أول طلب من زبون جديد.
-
-### 9. اللهجة والثقافة المحلية
-نسبياً جيدة، لكن تنقصها:
-- التعامل مع الأسماء (أبو فلان، كاك، خالة).
-- ردود رمضان/المناسبات.
-- تمييز الذكر/الأنثى من الاسم لاختيار صيغة الخطاب.
-
-**الحل:** كتلة `cultural_context` تُحقن في system prompt حسب التاريخ والاسم.
-
-### 10. التعلّم من الأخطاء (Feedback Loop)
-لا يوجد آلية لتحسين البوت من المحادثات الفاشلة.
-
-**الحل:** زر "هذا الرد سيء" في لوحة `bot-health-tab` → يُسجَّل في `bad_responses` ويعطي المالك تقرير أسبوعي بأكثر 10 إخفاقات.
+- بانر في dashboard يعرض Score + checklist. لو < 60: تحذير "البوت قد يعطي ردود ضعيفة، أكمل الإعدادات".
+- (لا نوقف البوت تلقائياً — قرار المالك.)
 
 ---
 
-## ثانياً: أشياء فنية/تشغيلية نُسيت
+## الملفات المتأثرة
 
-| # | المشكلة | الأثر |
-|---|---|---|
-| 1 | **لا يوجد rate limiting** على telegram-webhook | زبون واحد ممكن يفجّر فاتورة الـ AI |
-| 2 | **idempotency بالذاكرة فقط** (Map داخل العامل) — يضيع عند restart ولا يعمل بين أكثر من instance | تكرار طلبات عند publish |
-| 3 | **لا يوجد قفل على submit_order** | لو الزبون ضغط "اكد" مرتين بسرعة → طلبين |
-| 4 | **prompts متضخمة** (1544 سطر) — قد تتجاوز context window مع محادثة طويلة | قطع/هلوسة |
-| 5 | **لا يوجد circuit breaker** لما LLM يفشل — البوت يصمت كلياً | زبون يهرب |
-| 6 | **الصور تُرفع لتلغرام كل مرة** بدل `file_id` المخزّن | بطء + كلفة |
-| 7 | **لا يوجد تنبيه للمالك** عند طلب جديد/handoff (push notification) | طلبات تضيع |
-| 8 | **بدون tests للأدوات الفعلية** (resolve_branch DB, add_to_cart) — فقط helpers | ريغريشن خفي |
-| 9 | **لا توجد سياسة retention** للمحادثات/الصور — سيكبر DB بلا حد | كلفة + بطء |
-| 10 | **مفاتيح/أسرار**: AGENT_MODEL hardcoded fallback، لا fallback model عند 429 | توقف كلي |
-| 11 | **لا يوجد A/B للنبرة/الـ system prompt** | استحالة قياس التحسينات |
-| 12 | **handoff** يوقف البوت لكن ما عدنا UI واضح للمالك حتى "يستأنف" | البوت يبقى صامت للأبد |
-| 13 | **سجلات الأخطاء** ما يحتوي trace كافي (conversation_id موجود لكن بدون snapshot للـ messages) | debug صعب |
-| 14 | **لا يوجد فحص PII** قبل log/analytics — رقم هاتف وعنوان يُسجّل خام | امتثال |
+**Migrations:**
+- إضافة `restaurants.owner_telegram_chat_id` (TEXT).
+- جدول `bad_responses` (id, restaurant_id, conversation_id, message_id, reason, note, context_json, created_at) + RLS owners-only + GRANTs.
+- View `weekly_bad_response_summary` (read-only للمالك).
 
----
+**Edge functions:**
+- `supabase/functions/agent-run/index.ts`: تحميل + حقن `customer_memory`، تحديثه بعد submit_order ناجح، إرسال إشعار للمالك في handoff + submit_order، قاعدة P11 في system prompt.
+- `supabase/functions/scheduled-dispatch/index.ts`: فقرة auto-resume للمحادثات الميتة > 24h.
 
-## ثالثاً: هل الردود بنفس الجودة لكل المطاعم؟ هل يتحمل ضغط؟
+**Frontend:**
+- `src/components/bot-health-tab.tsx`: قسم "محادثات متوقفة" + زر استئناف، قسم "ردود سيئة" مع dialog، قسم 86-list switches، بانر readiness.
+- `src/routes/dashboard.tsx`: حقل `owner_telegram_chat_id` في الإعدادات.
 
-### الجواب الصريح: **لا، ولا.**
-
-**أ. تفاوت الجودة بين المطاعم:**
-
-1. **system prompt واحد ضخم** يُستخدم لكل المطاعم — مطعم بـ 200 صنف يحصل على نفس المعالجة كمطعم بـ 15 صنف، والسياق يخنق الموديل.
-2. **جودة بيانات المنيو متفاوتة** — مطعم رفع صور بدون OCR/أسعار صحيحة = البوت يهلوس. لا يوجد "completeness score" يمنع تشغيل البوت قبل بلوغ حد أدنى.
-3. **النبرة يحددها المالك** لكن بدون أمثلة محلية لكل نبرة، الموديل يفسرها مختلف.
-4. **بدون benchmark/eval suite** لكل مطعم → ما تعرف أصلاً إذا الجودة هبطت بعد تعديل.
-
-**التوصية:** 
-- "Restaurant Readiness Score" (0-100) قبل تفعيل البوت: منيو مكتمل، فروع، دوام، مناطق توصيل، 5 محادثات اختبار ناجحة.
-- Golden conversations لكل مطعم (5-10 سيناريوهات) تعمل تلقائياً يومياً.
-
-**ب. تحمّل الضغط:**
-
-نقاط الانهيار المتوقعة عند 50+ مطعم نشط:
-
-| المورد | السقف الحالي | الانهيار عند |
-|---|---|---|
-| Lovable AI (Gemini) | شراكة مشتركة | ~RPM للمشروع كله |
-| Edge Function CPU | 50ms-150ms لكل invocation | system prompt الكبير + tool loop يطلع 5-10s |
-| DB connections | pooler محدود | كل tool call = 1-3 queries → اختناق |
-| Telegram API | 30 msg/sec لكل bot | غير ذي صلة إلا في broadcasts |
-| Memory dedup (Map) | per-instance | لا يصمد مع scaling أفقي |
-
-**التوصية للحِمل:**
-1. **Queue + Worker**: telegram-webhook يرد فوراً 200 ويرمي للـ queue (`pg_boss` أو ما شابه). agent-run يعمل async.
-2. **Redis/Upstash** للـ idempotency و rate-limit عابر للنسخ.
-3. **Caching للمنيو والفروع** (TTL 5 دقائق) — حالياً كل استدعاء أداة يضرب DB.
-4. **Model tiering**: gemini-flash للمحادثة العادية، نموذج أرخص (flash-lite) لـ classify-only.
-5. **Circuit breaker**: لو فشل LLM 3 مرات لمطعم → handoff تلقائي وإشعار مالك.
-6. **Indices** على `conversation_id, created_at` و `restaurant_id, state` (تأكد من وجودها).
-7. **Load test**: k6 على 100 محادثة متزامنة قبل إطلاق تجاري.
+**Tests (`supabase/functions/__tests__/regression.test.ts`) — إضافة 4 اختبارات:**
+- 17: ذاكرة الزبون تُحقن بشكل صحيح (≤ 6 أسطر، تتجاهل الفارغ).
+- 18: تحديث customer_memory بعد submit_order يجمع الإحصاء صحيح.
+- 19: auto-resume يستهدف المحادثات > 24h فقط ولا يلمس النشطة.
+- 20: bad_response context snapshot يأخذ آخر 6 رسائل بالضبط.
 
 ---
 
-## الأولويات المقترحة (Sprint plan)
+## ما هو خارج النطاق هنا (يبقى للاحقاً)
 
-**Sprint 1 — استقرار إنتاج (الأهم):**
-1. idempotency في DB بدل Map.
-2. قفل على submit_order (advisory lock بـ conversation_id).
-3. توفر الأصناف (86 list) + فحص قبل submit.
-4. Rate limit بالـ chat_id.
-5. تنبيه المالك عند handoff/طلب جديد.
-
-**Sprint 2 — جودة الموظف:**
-6. ذاكرة الزبون (preferences + last_address).
-7. delivery_zones مع رسوم وحد أدنى.
-8. file_complaint tool.
-9. أوقات الدوام + current_prep_minutes.
-
-**Sprint 3 — قابلية القياس والتوسع:**
-10. Golden conversations + readiness score.
-11. Queue للـ webhook.
-12. Cache للمنيو/الفروع.
-13. UI لاستئناف البوت بعد handoff.
-14. تقرير أسبوعي للمالك بأسوأ 10 ردود.
+- Queue/Worker (يحتاج بنية تحتية إضافية — Sprint 5).
+- Model tiering و circuit breaker (Sprint 5).
+- Golden conversations + eval harness (Sprint 5).
+- PII redaction في logs (Sprint 5، يحتاج policy decision).
 
 ---
 
-## ملاحظة
-هذا تحليل وخارطة طريق فقط. لم أقترح تعديل ملف الآن. قل لي أي Sprint نبدأ بيه، أو أي بند تعتبره أولوية حرجة، حتى أحوّله إلى خطة تنفيذ تفصيلية بتعديلات ملفات محددة.
+أبدأ التنفيذ على هذا الترتيب: (1) → (3) → (5) → (2) → (4) → (6). كل بند معزول ويمكن مراجعته/التراجع عنه لحاله.

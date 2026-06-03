@@ -47,6 +47,28 @@ function cartFingerprint(cart: any[], delivery: any, branchId: string | null, zo
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
+// Best-effort Telegram notification to the restaurant owner's personal chat.
+// No-op when the restaurant has not configured owner_telegram_chat_id or the
+// connector creds are missing. Never throws — never blocks the customer reply.
+async function notifyOwner(restaurant: any, text: string): Promise<void> {
+  try {
+    const chatId = (restaurant?.owner_telegram_chat_id || "").toString().trim();
+    if (!chatId) return;
+    const LK = Deno.env.get("LOVABLE_API_KEY");
+    const TG = Deno.env.get("TELEGRAM_API_KEY");
+    if (!LK || !TG) return;
+    await fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LK}`,
+        "X-Connection-Api-Key": TG,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    }).catch(() => {});
+  } catch (_) { /* never block */ }
+}
+
 type CartItem = {
   menu_item_id: string;
   name: string;
@@ -563,6 +585,7 @@ P7) الأسعار والأصناف: كل سعر تذكره لازم يجي من
 P8) أجور التوصيل: ممنوع تخترع أي رقم لأجور التوصيل. الرقم يجي حصراً من نتيجة resolve_branch (حقل delivery_zone). لو الزبون بمنطقة بدون zone محدد، قل بصراحة "الأجور يحددها الفرع عند التواصل" — لا تخمن. preview_order يحسب الأجور تلقائياً ويضيفها للإجمالي.
 P9) الشكاوى: لو الزبون اشتكى من طلب سابق (بارد، ناقص، متأخر، خطأ بالطلب) أو طلب استرداد/تعويض — استدعِ file_complaint(type, note, order_id?) فوراً. اعتذر بصدق بسطر واحد ثم استدعِ handoff_to_human. ممنوع تعد بتعويض أو خصم من نفسك — الموظف هو اللي يقرر.
 P10) وقت التحضير: لو محدد current_prep_minutes للفرع، اذكره صراحةً عند تأكيد الطلب ("الطلب يجهز خلال ~X دقيقة"). لا تخمن وقت لو غير محدد.
+P11) ذاكرة الزبون: إذا ملف الزبون أعلاه يعرض last_address أو last_phone، استخدمه افتراضياً بدون ما تسأل من جديد. لكن قبل preview_order اذكره بجملة واحدة للتأكيد: "نوصل لنفس العنوان السابق (X)؟" — لو الزبون قال لا أو ذكر عنوان/رقم جديد، بدّله فوراً. ممنوع تسأله من الصفر لو عندك معلومة محفوظة.
 
 # السياق الحالي (Context)
 السلة:
@@ -922,6 +945,15 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
+    // Owner alert (separate from branch chat) — direct ping to the restaurant owner.
+    try {
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      await notifyOwner(
+        restaurant,
+        `✅ طلب جديد #${String(order.id).slice(0,8)}\nالزبون: ${who}\nالإجمالي: ${total} ${restaurant.currency || "IQD"}`,
+      );
+    } catch (_) {}
+
     // Notify branch staff on Telegram (so a real human sees the order even if no
     // platform webhook is configured). Best-effort, never blocks the customer reply.
     try {
@@ -1140,6 +1172,11 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
+    // Owner alert: handoff is high-priority.
+    try {
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      await notifyOwner(restaurant, `🚨 محادثة تحتاج تدخل\nالزبون: ${who}\nالسبب: ${reason}`);
+    } catch (_) {}
     return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
   }
 
@@ -1203,6 +1240,12 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
+    // Owner alert: complaints are escalation-worthy.
+    try {
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      await notifyOwner(restaurant, `🚨 شكوى جديدة (${type})\nالزبون: ${who}\nالنص: ${note.slice(0, 200)}`);
+    } catch (_) {}
+
 
     return {
       ok: true,
