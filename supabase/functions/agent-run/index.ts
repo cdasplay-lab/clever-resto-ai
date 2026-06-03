@@ -738,11 +738,16 @@ async function runTool(
     const branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
-    const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
+    const zone = conv.meta?.delivery_zone || null;
+    const zoneMin = Number(zone?.min_order || 0);
+    const branchMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
+    const effectiveMin = Math.max(zoneMin, branchMin);
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
     }
-    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const deliveryFee = Number(zone?.fee || 0);
+    const total = subtotal + deliveryFee;
+    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId, zone?.id || null, deliveryFee));
     const token = `ord_${fp.slice(0, 16)}`;
     await db.from("conversations").update({
       meta: { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } },
@@ -754,16 +759,24 @@ async function runTool(
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
       return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
     }).join("\n");
-    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    const prepLine = branch?.current_prep_minutes ? `\n⏱️ وقت التحضير الحالي ~${Number(branch.current_prep_minutes)}د` : "";
+    const zoneLine = zone ? `\n🚗 توصيل (${zone.area_name}): ${deliveryFee} ${restaurant.currency}${zone.eta_minutes ? ` (~${zone.eta_minutes}د)` : ""}` : "";
+    const breakdown = zone
+      ? `\n\nالأصناف: ${subtotal} ${restaurant.currency}${zoneLine}\n💰 الإجمالي: ${total} ${restaurant.currency}`
+      : `\n\n💰 الإجمالي: ${total} ${restaurant.currency}`;
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}${prepLine}${breakdown}`;
     return {
       ok: true,
       confirmation_token: token,
       summary,
-      total: subtotal,
+      subtotal,
+      delivery_fee: deliveryFee,
+      total,
       currency: restaurant.currency,
       instruction: "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
     };
   }
+
 
   if (name === "submit_order") {
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
