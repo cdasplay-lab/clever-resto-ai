@@ -116,6 +116,7 @@ export type Database = {
         Row: {
           address: string | null
           created_at: string
+          current_prep_minutes: number | null
           delivery_areas: Json
           id: string
           is_active: boolean
@@ -130,6 +131,7 @@ export type Database = {
         Insert: {
           address?: string | null
           created_at?: string
+          current_prep_minutes?: number | null
           delivery_areas?: Json
           id?: string
           is_active?: boolean
@@ -144,6 +146,7 @@ export type Database = {
         Update: {
           address?: string | null
           created_at?: string
+          current_prep_minutes?: number | null
           delivery_areas?: Json
           id?: string
           is_active?: boolean
@@ -257,6 +260,51 @@ export type Database = {
         }
         Relationships: []
       }
+      complaints: {
+        Row: {
+          channel: string | null
+          conversation_id: string | null
+          created_at: string
+          customer_handle: string | null
+          customer_name: string | null
+          id: string
+          note: string
+          order_id: string | null
+          restaurant_id: string
+          status: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          channel?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          customer_handle?: string | null
+          customer_name?: string | null
+          id?: string
+          note: string
+          order_id?: string | null
+          restaurant_id: string
+          status?: string
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          customer_handle?: string | null
+          customer_name?: string | null
+          id?: string
+          note?: string
+          order_id?: string | null
+          restaurant_id?: string
+          status?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       conversations: {
         Row: {
           assigned_to: string | null
@@ -366,6 +414,45 @@ export type Database = {
           preferences?: string | null
           restaurant_id?: string
           total_orders?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      delivery_zones: {
+        Row: {
+          area_name: string
+          branch_id: string
+          created_at: string
+          eta_minutes: number | null
+          fee: number
+          id: string
+          is_active: boolean
+          min_order: number
+          restaurant_id: string
+          updated_at: string
+        }
+        Insert: {
+          area_name: string
+          branch_id: string
+          created_at?: string
+          eta_minutes?: number | null
+          fee?: number
+          id?: string
+          is_active?: boolean
+          min_order?: number
+          restaurant_id: string
+          updated_at?: string
+        }
+        Update: {
+          area_name?: string
+          branch_id?: string
+          created_at?: string
+          eta_minutes?: number | null
+          fee?: number
+          id?: string
+          is_active?: boolean
+          min_order?: number
+          restaurant_id?: string
           updated_at?: string
         }
         Relationships: []
