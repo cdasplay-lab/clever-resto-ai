@@ -1507,7 +1507,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile, zones) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
