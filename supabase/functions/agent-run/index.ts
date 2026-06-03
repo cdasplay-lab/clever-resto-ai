@@ -1307,6 +1307,25 @@ Deno.serve(async (req) => {
       return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
     }
 
+    // === "new order" shortcut: clear cart so returning customer starts fresh ===
+    const newOrderTriggers = [
+      "طلب جديد", "اطلب جديد", "ابدأ من جديد", "ابدا من جديد", "من جديد",
+      "ريستارت", "اعادة", "إعادة", "نظف السلة", "نظّف السلة", "افرغ السلة", "أفرغ السلة",
+      "restart", "new order", "start over", "reset", "/new", "/reset",
+    ];
+    if (newOrderTriggers.some((t) => lastUserText === t || lastUserText.startsWith(t + " "))) {
+      await db.from("conversations").update({
+        cart: [],
+        delivery: {},
+        state: "collecting_items",
+        meta: { ...(conv.meta || {}), pending_confirmation: null },
+      }).eq("id", conversation_id);
+      const reply = "تمام، بدينا من جديد 🌹 شنو تحب تطلب؟";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: "collecting_items", media: [], quick_replies: ["📋 المنيو"] });
+    }
+
+
     // Guardrails: dedup identical consecutive tool calls + loop breaker
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
