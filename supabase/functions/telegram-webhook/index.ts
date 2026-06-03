@@ -307,9 +307,19 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
 
-  if (Array.isArray(data.media) && data.media.length) {
-    await tgSendMedia(chatId, data.media);
+  let mediaSent = 0;
+  const mediaRequested = Array.isArray(data.media) ? data.media.length : 0;
+  if (mediaRequested) {
+    mediaSent = await tgSendMedia(chatId, data.media);
   }
-  if (data.reply) await tgSend(chatId, data.reply, data.quick_replies);
-  return json({ ok: true });
+  // If model thought it sent images but the channel actually failed, override the reply
+  // with an honest message instead of letting the bot lie about delivery.
+  let finalReply: string = typeof data.reply === "string" ? data.reply : "";
+  if (mediaRequested > 0 && mediaSent === 0) {
+    finalReply = "اعتذر، صار خلل بإرسال الصور. أحاول مرة ثانية الحين 🙏";
+  }
+  if (finalReply && finalReply.trim()) {
+    await tgSend(chatId, finalReply, data.quick_replies);
+  }
+  return json({ ok: true, media_requested: mediaRequested, media_sent: mediaSent });
 });
