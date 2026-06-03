@@ -302,11 +302,19 @@ Deno.serve(async (req) => {
     convId = created.id;
   }
 
+  // Per-chat flood guard: if this customer is hammering the bot, drop the request silently
+  // (except for the very first overflow message, where we tell them once).
+  if (await isFlooding(db, convId)) {
+    await tgSend(chatId, "لحظة من فضلك 🙏 وصلتني رسائل كثيرة بنفس الوقت، خليني أجاوب على اللي قبل.");
+    return json({ ok: true, throttled: true });
+  }
+
   await db.from("messages").insert({
     conversation_id: convId,
     role: "user",
     content: userText,
   });
+
 
   // Keep typing visible during agent call (refresh every ~4s)
   let typingTimer: number | undefined;
