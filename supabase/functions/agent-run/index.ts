@@ -312,9 +312,12 @@ function sanitizeQuickReplies(replies: string[]): string[] {
 
 // ---------- System prompt builder ----------
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
-function openHoursStatus(open_hours: any): string {
+function openHoursStatus(open_hours: any, prepMinutes?: number | null): string {
+  const prepLine = (prepMinutes && Number(prepMinutes) > 0)
+    ? `\nوقت التحضير الحالي تقريباً: ${Number(prepMinutes)} دقيقة (اذكره للزبون عند تأكيد أي طلب أو عند سؤاله عن وقت الوصول).`
+    : "";
   if (!open_hours || typeof open_hours !== "object" || !Object.keys(open_hours).length) {
-    return "أوقات العمل: غير محددة (افترض مفتوح).";
+    return `أوقات العمل: غير محددة (افترض مفتوح).${prepLine}`;
   }
   // Iraq timezone (Asia/Baghdad, UTC+3, no DST)
   const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
@@ -332,7 +335,34 @@ function openHoursStatus(open_hours: any): string {
     else if (hhmm >= h.open && hhmm <= h.close) status = `المطعم مفتوح الآن (${h.open}-${h.close}). الوقت ${hhmm}.`;
     else status = `المطعم مغلق الآن. دوام اليوم ${h.open}-${h.close}. الوقت ${hhmm}.`;
   }
-  return `${status}\nجدول الأسبوع: ${lines}`;
+  return `${status}\nجدول الأسبوع: ${lines}${prepLine}`;
+}
+
+function buildZonesBlock(zones: any[], branches: any[]): string {
+  if (!Array.isArray(zones) || !zones.length) return "";
+  const byBranch = new Map<string, any[]>();
+  for (const z of zones) {
+    if (!z.is_active) continue;
+    const arr = byBranch.get(z.branch_id) || [];
+    arr.push(z);
+    byBranch.set(z.branch_id, arr);
+  }
+  if (!byBranch.size) return "";
+  const lines: string[] = ["# مناطق التوصيل والأجور (Delivery Zones)"];
+  for (const b of branches) {
+    const zs = byBranch.get(b.id);
+    if (!zs?.length) continue;
+    lines.push(`- ${b.name}:`);
+    for (const z of zs) {
+      const parts = [`أجور: ${Number(z.fee || 0)}`];
+      if (Number(z.min_order || 0) > 0) parts.push(`حد أدنى: ${Number(z.min_order)}`);
+      if (z.eta_minutes) parts.push(`~${z.eta_minutes}د`);
+      lines.push(`  • ${z.area_name} (${parts.join(" | ")})`);
+    }
+  }
+  lines.push("");
+  lines.push("**استخدام:** بعد resolve_branch ستجد ضمن الرد delivery_zone مع fee و min_order. اذكر الأجور صراحةً للزبون عند تأكيد العنوان، واطرحها مع الإجمالي. ممنوع تخمين أي رسوم.");
+  return lines.join("\n");
 }
 
 function buildCustomerProfileBlock(profile: any): string {
