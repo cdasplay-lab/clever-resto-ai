@@ -30,7 +30,7 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function cartFingerprint(cart: any[], delivery: any, branchId: string | null): string {
+function cartFingerprint(cart: any[], delivery: any, branchId: string | null, zoneId: string | null = null, deliveryFee = 0): string {
   const norm = {
     cart: (cart || []).map((c) => ({
       id: c.menu_item_id, q: c.qty, p: c.unit_price,
@@ -39,6 +39,8 @@ function cartFingerprint(cart: any[], delivery: any, branchId: string | null): s
     })),
     d: { a: delivery?.address || "", p: delivery?.phone || "", t: delivery?.time || "" },
     b: branchId || "",
+    z: zoneId || "",
+    f: Number(deliveryFee || 0),
   };
   return JSON.stringify(norm);
 }
