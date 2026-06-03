@@ -279,9 +279,10 @@ Deno.serve(async (req) => {
   const customerName = [message?.from?.first_name, message?.from?.last_name].filter(Boolean).join(" ");
 
   let convId: string;
+  let shouldSkipAgent = false;
   const { data: existing } = await db
     .from("conversations")
-    .select("id")
+    .select("id,state,is_bot_paused")
     .eq("restaurant_id", restaurant.id)
     .eq("channel", "telegram")
     .eq("external_chat_id", externalChatId)
@@ -289,6 +290,7 @@ Deno.serve(async (req) => {
   if (existing) {
     convId = existing.id;
     await db.from("conversations").update({ last_message_at: new Date().toISOString() }).eq("id", convId);
+    shouldSkipAgent = existing.is_bot_paused === true || existing.state === "handoff";
   } else {
     const { data: created, error } = await db
       .from("conversations")
@@ -317,6 +319,13 @@ Deno.serve(async (req) => {
     role: "user",
     content: userText,
   });
+
+  // If the conversation is already handed off to staff, keep saving customer
+  // messages for the dashboard but do not call the agent or send repeat acks.
+  if (shouldSkipAgent) {
+    await db.from("conversations").update({ is_bot_paused: true }).eq("id", convId);
+    return json({ ok: true, skipped: "human_handoff" });
+  }
 
 
   // Keep typing visible during agent call (refresh every ~4s)
