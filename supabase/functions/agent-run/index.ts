@@ -1032,7 +1032,9 @@ async function runTool(
       order_id: order.id,
       scheduled_for: when.toISOString(),
       scheduled_for_human: args.scheduled_for_human || when.toISOString(),
-      total: subtotal,
+      subtotal,
+      delivery_fee: deliveryFee,
+      total,
       message: `تم حجز الطلب ✅ راح يوصل قبل ${args.scheduled_for_human || when.toISOString()} إن شاء الله.`,
     };
   }
@@ -1140,6 +1142,76 @@ async function runTool(
     } catch (_) { /* never block */ }
     return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
   }
+
+
+  if (name === "file_complaint") {
+    const ALLOWED_TYPES = new Set([
+      "cold_food","missing_item","late","wrong_order","bad_taste","rude_staff","refund_request","other",
+    ]);
+    const rawType = String(args.type || "").trim().toLowerCase();
+    const type = ALLOWED_TYPES.has(rawType) ? rawType : "other";
+    const note = String(args.note || "").trim().slice(0, 1000);
+    if (!note) return { error: "ناقص وصف الشكوى. اطلب من الزبون يوضح أكثر." };
+    let orderId: string | null = null;
+    const candidate = String(args.order_id || "").trim();
+    if (candidate && /^[0-9a-f-]{36}$/i.test(candidate)) {
+      const { data: ord } = await db
+        .from("orders").select("id").eq("id", candidate).eq("restaurant_id", restaurant.id).maybeSingle();
+      if (ord?.id) orderId = ord.id;
+    }
+    if (!orderId && conv.meta?.last_order_id) orderId = conv.meta.last_order_id;
+
+    const { data: complaint, error: cErr } = await db
+      .from("complaints")
+      .insert({
+        restaurant_id: restaurant.id,
+        conversation_id: conv.id,
+        order_id: orderId,
+        channel: conv.channel,
+        customer_handle: conv.customer_handle,
+        customer_name: conv.customer_name,
+        type,
+        note,
+        status: "open",
+      })
+      .select("id")
+      .single();
+    if (cErr) {
+      console.error("file_complaint insert failed:", cErr);
+      return { error: "ما كدرت أسجل الشكوى. حوّل لموظف فوراً." };
+    }
+
+    // Notify branches
+    try {
+      const targetBranches: any[] = (restaurant.__branches || [])
+        .filter((b: any) => b.is_active && b.telegram_chat_id);
+      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      if (LOVABLE_API_KEY && TELEGRAM_API_KEY && targetBranches.length) {
+        const who = conv.customer_name || conv.customer_handle || "زبون";
+        const text = `🚨 شكوى جديدة\nالنوع: ${type}\nالزبون: ${who}\nالطلب: ${orderId || "غير محدد"}\nالنص: ${note}\n— يحتاج تدخّل موظف.`;
+        await Promise.all(targetBranches.map((b) =>
+          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+              "X-Connection-Api-Key": TELEGRAM_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ chat_id: b.telegram_chat_id, text }),
+          }).catch(() => {}),
+        ));
+      }
+    } catch (_) { /* never block */ }
+
+    return {
+      ok: true,
+      complaint_id: complaint.id,
+      message: "سجّلت الشكوى. اعتذر بصدق بسطر واحد ثم استدعِ handoff_to_human فوراً.",
+    };
+  }
+
+
 
 
   if (name === "show_menu") {
@@ -1460,10 +1532,19 @@ Deno.serve(async (req) => {
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,current_prep_minutes")
       .eq("restaurant_id", restaurant.id);
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
+
+    // Load active delivery zones (Sprint 2) — used by resolve_branch + system prompt
+    const { data: zonesData } = await db
+      .from("delivery_zones")
+      .select("id,branch_id,area_name,fee,min_order,eta_minutes,is_active")
+      .eq("restaurant_id", restaurant.id)
+      .eq("is_active", true);
+    const zones = zonesData ?? [];
+    (restaurant as any).__zones = zones;
 
     // Customer memory is always on. Eagerly fetch the profile and inject it into the system prompt.
     let customerProfile: any = { found: false };
@@ -1498,7 +1579,7 @@ Deno.serve(async (req) => {
       });
 
     const llmMessages: any[] = [
-      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
+      { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile, zones) },
       ...cleanHistory.map((m) => {
         const base: any = { role: m.role, content: m.content };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
