@@ -47,6 +47,28 @@ function cartFingerprint(cart: any[], delivery: any, branchId: string | null, zo
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
+// Best-effort Telegram notification to the restaurant owner's personal chat.
+// No-op when the restaurant has not configured owner_telegram_chat_id or the
+// connector creds are missing. Never throws — never blocks the customer reply.
+async function notifyOwner(restaurant: any, text: string): Promise<void> {
+  try {
+    const chatId = (restaurant?.owner_telegram_chat_id || "").toString().trim();
+    if (!chatId) return;
+    const LK = Deno.env.get("LOVABLE_API_KEY");
+    const TG = Deno.env.get("TELEGRAM_API_KEY");
+    if (!LK || !TG) return;
+    await fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LK}`,
+        "X-Connection-Api-Key": TG,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    }).catch(() => {});
+  } catch (_) { /* never block */ }
+}
+
 type CartItem = {
   menu_item_id: string;
   name: string;
