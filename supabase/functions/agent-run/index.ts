@@ -1534,7 +1534,86 @@ async function loadBranchesAndZones(db: any, restaurantId: string): Promise<{ br
 }
 
 
-async function callModel(messages: any[], tools: any) {
+// ===== Sprint 5: PII redaction for agent_logs payloads =====
+// Logs are seen by support/owner; redact phones, long digit runs, and
+// common address-like words. Pure + idempotent so it's safe to wrap any
+// payload right before insert.
+const PHONE_RE = /(\+?\d[\d\s\-()]{7,}\d)/g;
+const LONG_DIGIT_RE = /\b\d{9,}\b/g;
+const ADDRESS_HINT_RE = /(عنوان|address|محله|محلة|زقاق|دار)\s*[:：]\s*[^\n,]{3,}/gi;
+export function redactPii(input: unknown): unknown {
+  if (input == null) return input;
+  if (typeof input === "string") {
+    return input
+      .replace(PHONE_RE, "[redacted_phone]")
+      .replace(LONG_DIGIT_RE, "[redacted_digits]")
+      .replace(ADDRESS_HINT_RE, (_m, k) => `${k}: [redacted_address]`);
+  }
+  if (Array.isArray(input)) return input.map(redactPii);
+  if (typeof input === "object") {
+    const out: any = {};
+    for (const [k, v] of Object.entries(input as any)) {
+      if (/^(phone|customer_phone|delivery_address|address)$/i.test(k) && typeof v === "string") {
+        out[k] = v ? "[redacted]" : v;
+      } else {
+        out[k] = redactPii(v);
+      }
+    }
+    return out;
+  }
+  return input;
+}
+
+// ===== Sprint 5: model tiering =====
+// Cheap model for greetings/menu lookups; full model for orders/handoff/payment.
+// Pure function on the latest user turn — easy to test, easy to revert.
+const HEAVY_INTENT_RE = /(طلب|اطلب|أطلب|اوصل|أوصل|توصيل|دفع|عنوان|الفاتورة|الحساب|بشري|موظف|شكوى|الغ[يى]|cancel|order|delivery|address|payment|invoice|human|agent|complain)/i;
+const FLASH_MODEL = Deno.env.get("AGENT_MODEL_FLASH") ?? "google/gemini-3-flash-preview";
+const PRO_MODEL   = Deno.env.get("AGENT_MODEL_PRO")   ?? MODEL;
+export function pickModel(messages: any[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role !== "user") continue;
+    const txt = typeof m.content === "string"
+      ? m.content
+      : Array.isArray(m.content)
+        ? m.content.map((p: any) => (typeof p?.text === "string" ? p.text : "")).join(" ")
+        : "";
+    return HEAVY_INTENT_RE.test(txt) ? PRO_MODEL : FLASH_MODEL;
+  }
+  return FLASH_MODEL;
+}
+
+// ===== Sprint 5: per-restaurant circuit breaker around the AI gateway =====
+// After N consecutive failures within WINDOW, open the circuit for COOLDOWN.
+// While open, agent-run short-circuits with a fallback message and pauses
+// the conversation so a human can take over (no further model calls).
+const CB_FAIL_THRESHOLD = 3;
+const CB_WINDOW_MS = 60_000;
+const CB_COOLDOWN_MS = 60_000;
+type CbState = { fails: number; firstFailAt: number; openedAt: number };
+const _cb = new Map<string, CbState>();
+export function _resetCircuitBreaker() { _cb.clear(); }
+export function circuitIsOpen(restaurantId: string, now = Date.now()): boolean {
+  const s = _cb.get(restaurantId);
+  if (!s || !s.openedAt) return false;
+  if (now - s.openedAt < CB_COOLDOWN_MS) return true;
+  _cb.delete(restaurantId);
+  return false;
+}
+export function circuitRecordFailure(restaurantId: string, now = Date.now()): boolean {
+  const s = _cb.get(restaurantId);
+  if (!s || now - s.firstFailAt > CB_WINDOW_MS) {
+    _cb.set(restaurantId, { fails: 1, firstFailAt: now, openedAt: 0 });
+    return false;
+  }
+  s.fails++;
+  if (s.fails >= CB_FAIL_THRESHOLD) { s.openedAt = now; return true; }
+  return false;
+}
+export function circuitRecordSuccess(restaurantId: string) { _cb.delete(restaurantId); }
+
+async function callModel(messages: any[], tools: any, modelOverride?: string) {
   const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -1542,7 +1621,7 @@ async function callModel(messages: any[], tools: any) {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: MODEL,
+      model: modelOverride ?? MODEL,
       messages,
       tools,
       tool_choice: "auto",
