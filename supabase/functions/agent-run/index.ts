@@ -1797,7 +1797,24 @@ Deno.serve(async (req) => {
         break;
       }
 
-      const resp = await callModel(llmMessages, activeTools);
+      let resp;
+      try {
+        const chosenModel = pickModel(llmMessages);
+        resp = await callModel(llmMessages, activeTools, chosenModel);
+        circuitRecordSuccess(restaurant.id);
+      } catch (modelErr: any) {
+        const opened = circuitRecordFailure(restaurant.id);
+        if (opened) {
+          try {
+            await db.from("conversations").update({ is_bot_paused: true }).eq("id", conversation_id);
+            await db.from("agent_logs").insert({
+              conversation_id, restaurant_id: restaurant.id, step,
+              kind: "circuit:trip", payload: { error: String(modelErr?.message || modelErr) },
+            });
+          } catch (_) {}
+        }
+        throw modelErr;
+      }
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
