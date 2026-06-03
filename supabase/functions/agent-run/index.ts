@@ -1012,35 +1012,71 @@ async function runTool(
     const addrRaw = String(args.address || "").trim();
     const addr = addrRaw.toLowerCase();
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
+    const allZones: any[] = ((restaurant as any).__zones || []).filter((z: any) => z.is_active);
     if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
+
+    const pickZoneFor = (branchId: string) => {
+      const zs = allZones.filter((z) => z.branch_id === branchId);
+      const match = zs.find((z) => {
+        const a = String(z.area_name || "").toLowerCase().trim();
+        return a && (addr.includes(a) || a.includes(addr));
+      });
+      return match || null;
+    };
+
+    const persist = async (b: any, zone: any, extra: any = {}) => {
+      const zoneMeta = zone
+        ? { id: zone.id, area_name: zone.area_name, fee: Number(zone.fee || 0), min_order: Number(zone.min_order || 0), eta_minutes: zone.eta_minutes ?? null }
+        : null;
+      const newMeta = { ...(conv.meta || {}), branch_id: b.id, delivery_zone: zoneMeta };
+      await db.from("conversations").update({ meta: newMeta }).eq("id", conv.id);
+      conv.meta = newMeta;
+      return {
+        ok: true,
+        branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours, current_prep_minutes: b.current_prep_minutes ?? null },
+        delivery_zone: zoneMeta,
+        ...extra,
+      };
+    };
+
     if (branches.length === 1) {
       const b = branches[0];
-      await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: b.id } }).eq("id", conv.id);
-      conv.meta = { ...(conv.meta || {}), branch_id: b.id };
-      return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
+      return await persist(b, pickZoneFor(b.id));
     }
-    // 1) explicit branch-name match (e.g. customer said "فرع سامراء")
+    // 1) explicit branch-name match
     const nameMatch = branches.find((b: any) => {
       const n = String(b.name || "").toLowerCase();
       return n && (addr.includes(n) || n.includes(addr));
     });
-    if (nameMatch) {
-      await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: nameMatch.id } }).eq("id", conv.id);
-      conv.meta = { ...(conv.meta || {}), branch_id: nameMatch.id };
-      return { ok: true, branch: { id: nameMatch.id, name: nameMatch.name, address: nameMatch.address, min_order: nameMatch.min_order, open_hours: nameMatch.open_hours }, matched_by: "name" };
+    if (nameMatch) return await persist(nameMatch, pickZoneFor(nameMatch.id), { matched_by: "name" });
+
+    // 2) zone-area match across all branches
+    const zoneMatch = allZones.find((z) => {
+      const a = String(z.area_name || "").toLowerCase().trim();
+      return a && (addr.includes(a) || a.includes(addr));
+    });
+    if (zoneMatch) {
+      const b = branches.find((br: any) => br.id === zoneMatch.branch_id);
+      if (b) return await persist(b, zoneMatch, { matched_by: "zone" });
     }
-    // 2) delivery-area match
+
+    // 3) legacy delivery_areas array match
     const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
     if (matches.length === 0) {
-      const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
+      const allAreas = Array.from(new Set([
+        ...branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : [])),
+        ...allZones.map((z) => z.area_name),
+      ])).filter(Boolean);
       const allNames = branches.map((b: any) => b.name);
       return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas, branch_names: allNames };
     }
     const chosen = matches[0];
-    await db.from("conversations").update({ meta: { ...(conv.meta || {}), branch_id: chosen.id } }).eq("id", conv.id);
-    conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
-    return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })), matched_by: "area" };
+    return await persist(chosen, pickZoneFor(chosen.id), {
+      matched_by: "area",
+      alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })),
+    });
   }
+
 
   if (name === "handoff_to_human") {
     const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
