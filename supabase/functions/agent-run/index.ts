@@ -435,7 +435,9 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
 4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
-6) لو ما فهمت قصده بعد محاولتين، أو الزبون متضايق/زعلان، استخدم handoff_to_human فوراً.
+6) استخدم handoff_to_human **فقط** في حالتين: (أ) الزبون طلبها صراحة بكلمات مثل "موظف"، "إنسان"، "حولني"، "بشري"، أو (ب) فشلت أداة حرجة (submit_order/preview_order) بعد محاولة واحدة على الأقل. **ممنوع** استخدامها لمجرد إن الزبون متضايق أو سأل سؤال غريب — أول رد على الانزعاج اعتذار قصير + سؤال محدد لفهم المشكلة. وممنوع تكرر رسالة "حوّلت لموظف" أكثر من مرة بنفس المحادثة.
+14) **ممنوع نهائياً** تذكر أي تفاصيل تقنية للزبون: لا أسماء جداول، لا "قاعدة بيانات"، لا "invalid input"، لا أكواد أخطاء، لا JSON، لا tokens، لا "خلل بالسيستم". إذا أداة رجعت `error`، خذ `user_message` منها (إن وُجد) أو اعتذر بسطر عام مثل: "صار خلل بسيط، ممكن نعيد المحاولة؟". اعتبر تفاصيل الـ error سرّية بالكامل.
+15) **ممنوع تخترع وجود موظف بشري**: لا تقول "الموظف كدامه"، "يثبّت يدوي"، "يراجع الآن"، "بشري دخل بالمحادثة" — إلا إذا استدعيت `handoff_to_human` بنفس هذا الـ run. لا تمثيل ولا أكاذيب تطمين.
 7) المطعم مغلق؟ اعتذر واذكر وقت الافتتاح. ما تأخذ طلب نهائي إلا إذا الزبون يطلب جدولة ضمن الدوام.
 13) الطلبات المجدولة (لوقت لاحق):
    • إذا الزبون قال "بكرة"، "بعد ساعة"، "الساعة كذا"، "للغداء"، "للعشاء" أو أي وقت مستقبلي — اسأله عن الوقت المحدد، ثم بعد preview_order وموافقة الزبون استدعِ schedule_order بدل submit_order.
@@ -706,7 +708,11 @@ async function runTool(
       })
       .select()
       .single();
-    if (error) return { error: error.message };
+    if (error) {
+      console.error("submit_order insert failed:", error);
+      try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "submit_order", error: error.message, payload: { args } }); } catch (_) {}
+      return { error: "ORDER_SUBMIT_FAILED", user_message: "ما كدرت أرسل الطلب الحين، جرّب مرة ثانية بعد لحظة أو اطلب التحويل لموظف." };
+    }
 
     // Consume confirmed_order quota. If denied, cancel the order and tell the user.
     const { data: orderQuota } = await db.rpc("consume_quota", {
@@ -804,7 +810,11 @@ async function runTool(
       })
       .select()
       .single();
-    if (error) return { error: error.message };
+    if (error) {
+      console.error("schedule_order insert failed:", error);
+      try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "schedule_order", error: error.message, payload: { args } }); } catch (_) {}
+      return { error: "ORDER_SCHEDULE_FAILED", user_message: "ما كدرت أحجز الطلب الحين، جرّب مرة ثانية أو اطلب التحويل لموظف." };
+    }
 
     await db
       .from("conversations")
@@ -890,7 +900,7 @@ async function runTool(
         ));
       }
     } catch (_) { /* never block */ }
-    return { ok: true, message: "حوّلت المحادثة لزميل بشري راح يجاوبك خلال دقائق 🙏" };
+    return { ok: true, message: "تم تحويلك لفريق المطعم 🙏 راح يتواصلون وياك بأقرب وقت." };
   }
 
 
