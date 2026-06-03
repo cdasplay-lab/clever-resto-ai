@@ -1529,20 +1529,12 @@ Deno.serve(async (req) => {
       return json({ reply: "", state: conv.state, media: [], skipped: "quota_blocked", reason });
     }
 
-    // Load branches for this restaurant (used by resolve_branch tool + system prompt)
-    const { data: branchesData } = await db
-      .from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,current_prep_minutes")
-      .eq("restaurant_id", restaurant.id);
-    const branches = branchesData ?? [];
+    // Load branches + zones with a small per-worker TTL cache (Sprint 3).
+    // Branches/zones change rarely; this trims ~2 DB roundtrips per turn
+    // under load. Cache is per-instance, so worst-case staleness is BR_TTL_MS.
+    const { branches, zones } = await loadBranchesAndZones(db, restaurant.id);
     (restaurant as any).__branches = branches;
-
-    // Load active delivery zones (Sprint 2) — used by resolve_branch + system prompt
-    const { data: zonesData } = await db
-      .from("delivery_zones")
-      .select("id,branch_id,area_name,fee,min_order,eta_minutes,is_active")
-      .eq("restaurant_id", restaurant.id)
-      .eq("is_active", true);
+    (restaurant as any).__zones = zones;
     const zones = zonesData ?? [];
     (restaurant as any).__zones = zones;
 
