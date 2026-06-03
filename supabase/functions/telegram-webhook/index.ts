@@ -51,12 +51,15 @@ function splitText(text: string, max = TG_MAX_LEN): string[] {
 }
 
 function buildKeyboard(replies: string[]) {
-  if (!Array.isArray(replies) || !replies.length) return undefined;
+  const allowedReplies = Array.isArray(replies)
+    ? replies.filter((reply) => !/معاينة\s*الطلب|المنيو|\bmenu\b|\bpreview\b|🧾|📋/iu.test(reply))
+    : [];
+  if (!allowedReplies.length) return undefined;
   // 2 columns layout
   const rows: { text: string; callback_data: string }[][] = [];
-  for (let i = 0; i < replies.length; i += 2) {
+  for (let i = 0; i < allowedReplies.length; i += 2) {
     rows.push(
-      replies.slice(i, i + 2).map((t) => ({
+      allowedReplies.slice(i, i + 2).map((t) => ({
         text: t,
         callback_data: t.slice(0, 60), // telegram callback_data limit is 64 bytes
       })),
