@@ -943,7 +943,7 @@ async function runTool(
 
 
 
-    return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
+    return { ok: true, order_id: order.id, subtotal, delivery_fee: deliveryFee, total, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
   if (name === "schedule_order") {
