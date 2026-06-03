@@ -412,7 +412,7 @@ function buildCustomerProfileBlock(profile: any): string {
   return lines.join("\n");
 }
 
-function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any) {
+function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfile?: any, zones?: any[]) {
   const cartLines =
     Array.isArray(conv.cart) && conv.cart.length
       ? conv.cart
