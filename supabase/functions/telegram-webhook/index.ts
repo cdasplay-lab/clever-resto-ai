@@ -68,15 +68,19 @@ function buildKeyboard(replies: string[]) {
   return { inline_keyboard: rows };
 }
 
-async function tgSend(chatId: number, text: string, replies?: string[]) {
-  const chunks = splitText(text);
+async function tgSend(chatId: number, text: string, replies?: string[]): Promise<boolean> {
+  const trimmed = (text || "").trim();
+  if (!trimmed) return false; // Never send empty/whitespace-only messages
+  const chunks = splitText(trimmed);
   const kb = buildKeyboard(replies || []);
+  let allOk = true;
   for (let i = 0; i < chunks.length; i++) {
     const body: any = { chat_id: chatId, text: chunks[i] };
-    // Attach keyboard only on the last chunk
     if (i === chunks.length - 1 && kb) body.reply_markup = kb;
-    await tgCall("sendMessage", body);
+    const r = await tgCall("sendMessage", body);
+    if (!r.ok) allOk = false;
   }
+  return allOk;
 }
 
 async function tgSendTyping(chatId: number) {
@@ -87,18 +91,25 @@ async function tgAnswerCallback(callbackId: string) {
   try { await tgCall("answerCallbackQuery", { callback_query_id: callbackId }); } catch (_) {}
 }
 
-async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]) {
+// Returns count of photos actually delivered (so caller knows truth instead of assuming success).
+async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]): Promise<number> {
+  let delivered = 0;
   for (let i = 0; i < items.length; i += 10) {
     const chunk = items.slice(i, i + 10);
-    if (chunk.length === 1) {
-      await tgCall("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
-    } else {
-      await tgCall("sendMediaGroup", {
-        chat_id: chatId,
-        media: chunk.map((m) => ({ type: "photo", media: m.photo_url, caption: m.caption })),
-      });
-    }
+    try {
+      let r: Response;
+      if (chunk.length === 1) {
+        r = await tgCall("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
+      } else {
+        r = await tgCall("sendMediaGroup", {
+          chat_id: chatId,
+          media: chunk.map((m) => ({ type: "photo", media: m.photo_url, caption: m.caption })),
+        });
+      }
+      if (r.ok) delivered += chunk.length;
+    } catch (_) { /* counted as failed */ }
   }
+  return delivered;
 }
 
 Deno.serve(async (req) => {
