@@ -1489,6 +1489,34 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
+    // === Production hardening of the outgoing reply ===
+    finalText = (finalText || "").trim();
+
+    // Suppress consecutive duplicate replies (against the previous assistant turn).
+    if (finalText) {
+      try {
+        const { data: prevAssistants } = await db
+          .from("messages")
+          .select("content,role,created_at")
+          .eq("conversation_id", conversation_id)
+          .eq("role", "assistant")
+          .order("created_at", { ascending: false })
+          .limit(3);
+        const prev = (prevAssistants || [])[1]; // [0] is the one we inserted this run
+        if (prev && typeof prev.content === "string" && prev.content.trim() === finalText) {
+          finalText = "";
+        }
+      } catch (_) { /* dedup must never block delivery */ }
+    }
+
+    // If handoff was called this run, force one short ack and drop any media.
+    const handoffWasCalled = Array.from(toolCallCache.keys()).some((k) => k.startsWith("handoff_to_human:"));
+    if (handoffWasCalled) {
+      finalText = "حوّلتك لزميل بشري، راح يتواصل وياك قريباً.";
+      media.length = 0;
+      quickReplies = [];
+    }
+
     return json({ reply: finalText, state: conv.state, media, quick_replies: sanitizeQuickReplies(quickReplies) });
   } catch (e: any) {
     const msg = e?.message || "error";
