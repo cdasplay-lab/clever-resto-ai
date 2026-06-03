@@ -808,7 +808,11 @@ async function runTool(
       })
       .select()
       .single();
-    if (error) return { error: error.message };
+    if (error) {
+      console.error("schedule_order insert failed:", error);
+      try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "schedule_order", error: error.message, payload: { args } }); } catch (_) {}
+      return { error: "ORDER_SCHEDULE_FAILED", user_message: "ما كدرت أحجز الطلب الحين، جرّب مرة ثانية أو اطلب التحويل لموظف." };
+    }
 
     await db
       .from("conversations")
