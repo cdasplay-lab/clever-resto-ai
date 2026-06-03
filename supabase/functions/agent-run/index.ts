@@ -856,6 +856,7 @@ async function runTool(
       }
     }
 
+    const orderNotes = deliveryFee > 0 ? `أجور التوصيل: ${deliveryFee} ${restaurant.currency}${zone?.area_name ? ` (${zone.area_name})` : ""}` : null;
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -867,7 +868,8 @@ async function runTool(
         delivery_address: delivery.address,
         items: cart,
         subtotal,
-        total: subtotal,
+        total,
+        notes: orderNotes,
         status: "pending",
       })
       .select()
