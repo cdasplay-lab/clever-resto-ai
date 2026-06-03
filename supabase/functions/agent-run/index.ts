@@ -844,6 +844,27 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
+    // Notify branch staff on Telegram (so a real human sees the order even if no
+    // platform webhook is configured). Best-effort, never blocks the customer reply.
+    try {
+      const branches: any[] = (restaurant.__branches || []);
+      const target = branches.find((b: any) => b.id === branchId && b.is_active && b.telegram_chat_id)
+        || branches.find((b: any) => b.is_active && b.telegram_chat_id);
+      const TG_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      const LK = Deno.env.get("LOVABLE_API_KEY");
+      if (target && TG_KEY && LK) {
+        const lines = (cart as CartItem[]).map((c) => `• ${c.qty}× ${c.name}`).join("\n");
+        const txt = `🆕 طلب جديد #${String(order.id).slice(0, 8)}\nالزبون: ${conv.customer_name || conv.customer_handle || "—"}\nالهاتف: ${delivery.phone}\nالعنوان: ${delivery.address}\n${lines}\nالإجمالي: ${subtotal} ${restaurant.currency || "IQD"}`;
+        fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${LK}`, "X-Connection-Api-Key": TG_KEY, "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: target.telegram_chat_id, text: txt }),
+        }).catch(() => {});
+      }
+    } catch (_) {}
+
+
+
     return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
   }
 
