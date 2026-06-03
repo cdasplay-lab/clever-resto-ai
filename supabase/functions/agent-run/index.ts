@@ -792,7 +792,9 @@ async function runTool(
     }
     const delivery = conv.delivery || {};
     const branchId = conv.meta?.branch_id || null;
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const zone = conv.meta?.delivery_zone || null;
+    const deliveryFee = Number(zone?.fee || 0);
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, zone?.id || null, deliveryFee));
     if (currentFp !== pending.fp) {
       // Cart or delivery changed since preview — force a new preview
       await db.from("conversations").update({
@@ -807,9 +809,11 @@ async function runTool(
     }
 
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    const total = subtotal + deliveryFee;
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
+
 
     // === One-shot lock: clear the confirmation token BEFORE inserting the order.
     // If the customer double-taps "نعم" or the model re-calls submit_order, the second
