@@ -958,7 +958,9 @@ async function runTool(
     }
     const delivery = conv.delivery || {};
     const branchId = conv.meta?.branch_id || null;
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const zone = conv.meta?.delivery_zone || null;
+    const deliveryFee = Number(zone?.fee || 0);
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, zone?.id || null, deliveryFee));
     if (currentFp !== pending.fp) {
       await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
@@ -977,6 +979,12 @@ async function runTool(
     if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
 
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+    const total = subtotal + deliveryFee;
+    const feeNote = deliveryFee > 0 ? `أجور التوصيل: ${deliveryFee} ${restaurant.currency}${zone?.area_name ? ` (${zone.area_name})` : ""}` : null;
+    const noteParts = [
+      args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
+      feeNote,
+    ].filter(Boolean);
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -988,10 +996,10 @@ async function runTool(
         delivery_address: delivery.address,
         items: cart,
         subtotal,
-        total: subtotal,
+        total,
         status: "scheduled",
         scheduled_for: when.toISOString(),
-        notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
+        notes: noteParts.length ? noteParts.join(" | ") : null,
       })
       .select()
       .single();
