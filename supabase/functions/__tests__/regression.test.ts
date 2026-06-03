@@ -117,9 +117,8 @@ Deno.test("resolve_branch matches a branch the customer named explicitly", () =>
   ];
   // Customer literally said "اني فرع سامراء الثاني مو الفرع الرئيسي"
   assertEquals(resolveBranchByName("فرع سامراء الثاني", branches), "b-samarra");
-  // Shorter mention also resolves via the includes() match either way.
-  assertEquals(resolveBranchByName("سامراء", branches), null,
-    "partial mention that is not a substring of branch name should not silently match");
+  // A shorter mention that is a substring of the branch name also resolves.
+  assertEquals(resolveBranchByName("سامراء", branches), "b-samarra");
   // Branch name fully contained in customer's longer phrase still matches.
   assertEquals(
     resolveBranchByName("اني من فرع سامراء الثاني تكفون", branches),
