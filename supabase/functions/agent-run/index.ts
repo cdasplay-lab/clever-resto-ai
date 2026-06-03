@@ -1682,9 +1682,21 @@ Deno.serve(async (req) => {
       return json({ reply: "", state: conv.state, media: [], skipped: "quota_blocked", reason });
     }
 
+    // Sprint 5: short-circuit if the breaker is open for this restaurant.
+    if (circuitIsOpen(restaurant.id)) {
+      const fallback = "نواجه ضغط بسيط حالياً، حوّلتك لزميل بشري راح يرد عليك قريباً 🙏";
+      try {
+        await db.from("conversations").update({ is_bot_paused: true }).eq("id", conversation_id);
+        await db.from("messages").insert({ conversation_id, role: "assistant", content: fallback });
+        await db.from("agent_logs").insert({
+          conversation_id, restaurant_id: restaurant.id, step: 0,
+          kind: "circuit:open", payload: {},
+        });
+      } catch (_) {}
+      return json({ reply: fallback, state: conv.state, media: [], quick_replies: [], skipped: "circuit_open" });
+    }
+
     // Load branches + zones with a small per-worker TTL cache (Sprint 3).
-    // Branches/zones change rarely; this trims ~2 DB roundtrips per turn
-    // under load. Cache is per-instance, so worst-case staleness is BR_TTL_MS.
     const { branches, zones } = await loadBranchesAndZones(db, restaurant.id);
     (restaurant as any).__branches = branches;
     (restaurant as any).__zones = zones;
