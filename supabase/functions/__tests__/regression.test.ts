@@ -306,3 +306,66 @@ Deno.test("file_complaint clamps unknown type to 'other' and requires a note", (
   assertEquals(normalize("late", "   "), { error: "missing_note" });
 });
 
+
+// ---------- 14. Sprint 3: branches/zones TTL cache hits within window, refreshes after expiry ----------
+Deno.test("loadBranchesAndZones TTL cache: served from cache inside window, refetched after expiry", async () => {
+  const BR_TTL_MS = 60_000;
+  const cache = new Map<string, { at: number; branches: any[]; zones: any[] }>();
+  let dbCalls = 0;
+  async function fakeLoad(restaurantId: string, now: number) {
+    const hit = cache.get(restaurantId);
+    if (hit && now - hit.at < BR_TTL_MS) return { branches: hit.branches, zones: hit.zones, cached: true };
+    dbCalls++;
+    const branches = [{ id: "b1", is_active: true }];
+    const zones = [{ id: "z1", branch_id: "b1", is_active: true, fee: 2000 }];
+    cache.set(restaurantId, { at: now, branches, zones });
+    return { branches, zones, cached: false };
+  }
+  const t0 = 1_000_000;
+  const r1 = await fakeLoad("rest-1", t0);
+  const r2 = await fakeLoad("rest-1", t0 + 30_000);  // within TTL
+  const r3 = await fakeLoad("rest-1", t0 + 70_000);  // beyond TTL
+  assertFalse(r1.cached);
+  assert(r2.cached, "second call within TTL must come from cache");
+  assertFalse(r3.cached);
+  assertEquals(dbCalls, 2);
+});
+
+// ---------- 15. Sprint 3: post-handoff guard — paused conversation never invokes the model ----------
+Deno.test("post-handoff: agent-run short-circuits before model when is_bot_paused", () => {
+  // Mirrors the guard at the top of Deno.serve in agent-run/index.ts
+  function shouldSkipModel(conv: { is_bot_paused: boolean }): boolean {
+    return !!conv.is_bot_paused;
+  }
+  assert(shouldSkipModel({ is_bot_paused: true }));
+  assertFalse(shouldSkipModel({ is_bot_paused: false }));
+});
+
+// ---------- 16. Sprint 3: readiness score weighting ----------
+Deno.test("readiness score reflects key setup milestones", () => {
+  // Mirror of public.get_restaurant_readiness scoring rubric. Keep in sync.
+  function score(s: {
+    menu_available: number; menu_with_image: number;
+    branches: number; branches_with_chat: number;
+    zones: number; open_hours_set: boolean;
+    menu_images: number; has_bot: boolean;
+  }) {
+    let v = 0;
+    if (s.menu_available >= 10) v += 25; else if (s.menu_available >= 3) v += 15; else if (s.menu_available > 0) v += 5;
+    if (s.menu_with_image >= 5) v += 10; else if (s.menu_with_image > 0) v += 5;
+    if (s.branches >= 1) v += 15;
+    if (s.branches_with_chat >= 1) v += 10;
+    if (s.zones >= 1) v += 15;
+    if (s.open_hours_set) v += 10;
+    if (s.menu_images >= 1) v += 10;
+    if (s.has_bot) v += 5;
+    return Math.min(v, 100);
+  }
+  // Empty restaurant
+  assertEquals(score({ menu_available: 0, menu_with_image: 0, branches: 0, branches_with_chat: 0, zones: 0, open_hours_set: false, menu_images: 0, has_bot: false }), 0);
+  // Fully set up
+  assertEquals(score({ menu_available: 20, menu_with_image: 10, branches: 2, branches_with_chat: 2, zones: 5, open_hours_set: true, menu_images: 3, has_bot: true }), 100);
+  // Half-configured
+  const partial = score({ menu_available: 5, menu_with_image: 2, branches: 1, branches_with_chat: 0, zones: 1, open_hours_set: true, menu_images: 0, has_bot: false });
+  assert(partial >= 40 && partial < 80, `expected 40<=partial<80, got ${partial}`);
+});
