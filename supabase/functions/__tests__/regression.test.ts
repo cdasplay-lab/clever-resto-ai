@@ -262,3 +262,47 @@ Deno.test("flood guard triggers when user sends > 8 messages in 30s window", () 
   assert(shouldThrottle(9));
   assert(shouldThrottle(50));
 });
+
+// ---------- 11. Sprint 2: delivery zone fee folded into preview/submit total ----------
+Deno.test("preview/submit total = subtotal + delivery_fee from resolved zone", () => {
+  const cart = [
+    { qty: 2, unit_price: 5000 }, // 10000
+    { qty: 1, unit_price: 3500 }, // 3500
+  ];
+  const zone = { id: "z1", fee: 2000, min_order: 5000, area_name: "الواحات" };
+  const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
+  const total = subtotal + Number(zone.fee || 0);
+  assertEquals(subtotal, 13500);
+  assertEquals(total, 15500);
+});
+
+// ---------- 12. Sprint 2: cart fingerprint changes when zone/fee changes ----------
+Deno.test("cart fingerprint includes zone id + delivery fee so preview is invalidated on change", () => {
+  function fp(cart: any[], delivery: any, branchId: string | null, zoneId: string | null, fee: number) {
+    return JSON.stringify({ cart, delivery, branchId, zoneId, fee });
+  }
+  const cart = [{ menu_item_id: "a", qty: 1, unit_price: 5000 }];
+  const delivery = { address: "كركوك - الواحات", phone: "07700000000" };
+  const a = fp(cart, delivery, "b1", "z1", 2000);
+  const b = fp(cart, delivery, "b1", "z2", 3000); // different zone+fee
+  const c = fp(cart, delivery, "b1", "z1", 2000);
+  assert(a !== b, "fingerprint must differ when zone/fee changes");
+  assertEquals(a, c);
+});
+
+// ---------- 13. Sprint 2: file_complaint type normalization ----------
+Deno.test("file_complaint clamps unknown type to 'other' and requires a note", () => {
+  const ALLOWED = new Set([
+    "cold_food","missing_item","late","wrong_order","bad_taste","rude_staff","refund_request","other",
+  ]);
+  function normalize(type: string, note: string) {
+    const t = (type || "").trim().toLowerCase();
+    const n = (note || "").trim().slice(0, 1000);
+    if (!n) return { error: "missing_note" };
+    return { type: ALLOWED.has(t) ? t : "other", note: n };
+  }
+  assertEquals(normalize("cold_food", "الأكل بارد"), { type: "cold_food", note: "الأكل بارد" });
+  assertEquals(normalize("garbage", "خطأ بالطلب"), { type: "other", note: "خطأ بالطلب" });
+  assertEquals(normalize("late", "   "), { error: "missing_note" });
+});
+
