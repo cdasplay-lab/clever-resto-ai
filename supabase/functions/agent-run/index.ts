@@ -944,6 +944,15 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
+    // Owner alert (separate from branch chat) — direct ping to the restaurant owner.
+    try {
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      await notifyOwner(
+        restaurant,
+        `✅ طلب جديد #${String(order.id).slice(0,8)}\nالزبون: ${who}\nالإجمالي: ${total} ${restaurant.currency || "IQD"}`,
+      );
+    } catch (_) {}
+
     // Notify branch staff on Telegram (so a real human sees the order even if no
     // platform webhook is configured). Best-effort, never blocks the customer reply.
     try {
