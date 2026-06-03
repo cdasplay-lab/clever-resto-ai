@@ -296,6 +296,20 @@ const TOOLS = [
 // Media to deliver via the channel (filled by show_menu tool)
 type MediaItem = { photo_url: string; caption: string };
 
+const FORBIDDEN_QUICK_REPLY_PATTERNS = [
+  /معاينة\s*الطلب/i,
+  /المنيو/i,
+  /\bmenu\b/i,
+  /\bpreview\b/i,
+  /🧾/u,
+  /📋/u,
+];
+
+function sanitizeQuickReplies(replies: string[]): string[] {
+  if (!Array.isArray(replies)) return [];
+  return replies.filter((reply) => !FORBIDDEN_QUICK_REPLY_PATTERNS.some((pattern) => pattern.test(reply)));
+}
+
 // ---------- System prompt builder ----------
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 function openHoursStatus(open_hours: any): string {
@@ -1453,7 +1467,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
-    return json({ reply: finalText, state: conv.state, media, quick_replies: quickReplies });
+    return json({ reply: finalText, state: conv.state, media, quick_replies: sanitizeQuickReplies(quickReplies) });
   } catch (e: any) {
     const msg = e?.message || "error";
     // Phase 1: log error to agent_logs for the owner's bot-health view
