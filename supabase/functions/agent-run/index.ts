@@ -1460,6 +1460,37 @@ async function runTool(
 }
 
 
+// ===== Sprint 3: per-worker TTL cache for branches + zones =====
+// Branches/zones change rarely. Caching them per restaurant for a short
+// window cuts ~2 DB roundtrips per LLM turn under load. Worst-case
+// staleness = BR_TTL_MS; restart the function (deploy/redeploy) to flush.
+const BR_TTL_MS = 60_000; // 60s
+type BzEntry = { at: number; branches: any[]; zones: any[] };
+const _bzCache = new Map<string, BzEntry>();
+export function _resetBzCache() { _bzCache.clear(); }
+
+async function loadBranchesAndZones(db: any, restaurantId: string): Promise<{ branches: any[]; zones: any[] }> {
+  const now = Date.now();
+  const hit = _bzCache.get(restaurantId);
+  if (hit && now - hit.at < BR_TTL_MS) {
+    return { branches: hit.branches, zones: hit.zones };
+  }
+  const [{ data: branchesData }, { data: zonesData }] = await Promise.all([
+    db.from("branches")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,current_prep_minutes")
+      .eq("restaurant_id", restaurantId),
+    db.from("delivery_zones")
+      .select("id,branch_id,area_name,fee,min_order,eta_minutes,is_active")
+      .eq("restaurant_id", restaurantId)
+      .eq("is_active", true),
+  ]);
+  const branches = branchesData ?? [];
+  const zones = zonesData ?? [];
+  _bzCache.set(restaurantId, { at: now, branches, zones });
+  return { branches, zones };
+}
+
+
 async function callModel(messages: any[], tools: any) {
   const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
