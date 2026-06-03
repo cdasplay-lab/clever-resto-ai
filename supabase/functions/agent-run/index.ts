@@ -1032,7 +1032,9 @@ async function runTool(
       order_id: order.id,
       scheduled_for: when.toISOString(),
       scheduled_for_human: args.scheduled_for_human || when.toISOString(),
-      total: subtotal,
+      subtotal,
+      delivery_fee: deliveryFee,
+      total,
       message: `تم حجز الطلب ✅ راح يوصل قبل ${args.scheduled_for_human || when.toISOString()} إن شاء الله.`,
     };
   }
