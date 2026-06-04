@@ -1069,14 +1069,14 @@ async function runTool(
 
     let q = db
       .from("menu_items")
-      .select("id,name,description,price,category,image_url,is_available")
+      .select("id,name,description,price,category,image_url,is_available,track_stock,stock_qty")
       .eq("restaurant_id", restaurant.id)
       .eq("is_available", true)
       .order("category", { nullsFirst: false })
       .order("name");
     if (args.category) q = q.ilike("category", `%${args.category}%`);
     const { data: items } = await q;
-    const list = items ?? [];
+    const list = (items ?? []).filter((it: any) => !it.track_stock || (it.stock_qty != null && it.stock_qty > 0));
     // Queue media for the channel
     for (const it of list) {
       if (it.image_url) {
