@@ -472,6 +472,7 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
 أنت موظف استقبال طلبات لمطعم "${restaurant.name}". شغلتك الوحيدة: تساعد الزبون يطلب أكل بسرعة وبدون لف.
 - نبرة: ${restaurant.tone}
 - لغة الرد: ${lang}
+- ${nowContextLine()}
 - ${openHoursStatus(effectiveHours)}
 
 ${buildCustomerProfileBlock(customerProfile)}
