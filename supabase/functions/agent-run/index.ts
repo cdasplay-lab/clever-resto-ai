@@ -298,25 +298,80 @@ type MediaItem = { photo_url: string; caption: string };
 
 // ---------- System prompt builder ----------
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const DAY_AR: Record<string, string> = {
+  sun: "الأحد", mon: "الإثنين", tue: "الثلاثاء", wed: "الأربعاء",
+  thu: "الخميس", fri: "الجمعة", sat: "السبت",
+};
+const MONTH_AR = ["كانون الثاني","شباط","آذار","نيسان","أيار","حزيران","تموز","آب","أيلول","تشرين الأول","تشرين الثاني","كانون الأول"];
+
+function baghdadNow() {
+  return new Date(Date.now() + 3 * 60 * 60 * 1000);
+}
+
+function nowContextLine(): string {
+  const now = baghdadNow();
+  const day = DAY_AR[DAY_KEYS[now.getUTCDay()]];
+  const date = `${day} ${now.getUTCDate()} ${MONTH_AR[now.getUTCMonth()]} ${now.getUTCFullYear()}`;
+  const hhmm = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+  return `الوقت الحالي: ${hhmm} (بتوقيت بغداد +03:00) — ${date}`;
+}
+
+function minsBetween(fromHHMM: string, toHHMM: string): number {
+  const [fh, fm] = fromHHMM.split(":").map(Number);
+  const [th, tm] = toHHMM.split(":").map(Number);
+  return (th * 60 + tm) - (fh * 60 + fm);
+}
+function fmtDur(mins: number): string {
+  if (mins < 60) return `${mins} دقيقة`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h} ساعة و${m} دقيقة` : `${h} ساعة`;
+}
+
 function openHoursStatus(open_hours: any): string {
   if (!open_hours || typeof open_hours !== "object" || !Object.keys(open_hours).length) {
-    return "أوقات العمل: غير محددة (افترض مفتوح).";
+    return "ساعات الدوام: غير معرّفة. لا تذكر للزبون أوقات محددة. إذا سأل عن الدوام، قل: 'دوامنا عادة من الصباح للمساء، أأكدلك بثانية' ولا ترفض طلب على أساس الوقت.";
   }
-  // Iraq timezone (Asia/Baghdad, UTC+3, no DST)
-  const now = new Date(Date.now() + 3 * 60 * 60 * 1000);
-  const dayKey = DAY_KEYS[now.getUTCDay()];
+  const now = baghdadNow();
+  const todayIdx = now.getUTCDay();
+  const dayKey = DAY_KEYS[todayIdx];
   const h = open_hours[dayKey];
   const hhmm = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
   const lines = DAY_KEYS.map((k) => {
     const d = open_hours[k];
-    if (!d) return `${k}: —`;
-    return d.closed ? `${k}: مغلق` : `${k}: ${d.open}-${d.close}`;
+    if (!d) return `${DAY_AR[k]}: —`;
+    return d.closed ? `${DAY_AR[k]}: مغلق` : `${DAY_AR[k]}: ${d.open}-${d.close}`;
   }).join(" | ");
-  let status = "أوقات العمل غير محددة لهذا اليوم.";
+
+  let status = "ساعات الدوام لهذا اليوم غير محددة.";
   if (h) {
-    if (h.closed) status = `المطعم اليوم مغلق. الوقت الحالي ${hhmm}.`;
-    else if (hhmm >= h.open && hhmm <= h.close) status = `المطعم مفتوح الآن (${h.open}-${h.close}). الوقت ${hhmm}.`;
-    else status = `المطعم مغلق الآن. دوام اليوم ${h.open}-${h.close}. الوقت ${hhmm}.`;
+    if (h.closed) {
+      let found = false;
+      for (let i = 1; i <= 7; i++) {
+        const k = DAY_KEYS[(todayIdx + i) % 7];
+        const d = open_hours[k];
+        if (d && !d.closed && d.open) {
+          status = `🔴 المطعم اليوم مغلق. أقرب يوم فتح: ${DAY_AR[k]} الساعة ${d.open}.`;
+          found = true; break;
+        }
+      }
+      if (!found) status = `🔴 المطعم اليوم مغلق.`;
+    } else if (hhmm < h.open) {
+      status = `🔴 المطعم مغلق الآن. يفتح اليوم الساعة ${h.open} (بعد ${fmtDur(minsBetween(hhmm, h.open))}).`;
+    } else if (hhmm > h.close) {
+      let found = false;
+      for (let i = 1; i <= 7; i++) {
+        const k = DAY_KEYS[(todayIdx + i) % 7];
+        const d = open_hours[k];
+        if (d && !d.closed && d.open) {
+          status = `🔴 المطعم مغلق الآن (انتهى دوام اليوم ${h.open}-${h.close}). يفتح ${DAY_AR[k]} الساعة ${d.open}.`;
+          found = true; break;
+        }
+      }
+      if (!found) status = `🔴 المطعم مغلق الآن. انتهى دوام اليوم ${h.open}-${h.close}.`;
+    } else {
+      const left = minsBetween(hhmm, h.close);
+      status = `🟢 المطعم مفتوح الآن (${h.open}-${h.close}). متبقي على الإغلاق: ${fmtDur(left)}.`;
+    }
   }
   return `${status}\nجدول الأسبوع: ${lines}`;
 }
