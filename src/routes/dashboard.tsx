@@ -579,7 +579,7 @@ function OptionsEditor({ item, onSaved }: { item: MenuItem; onSaved: () => void 
 }
 
 
-function StockControl({ item, onChanged }: { item: MenuItem; onChanged: () => void }) {
+function StockControl({ item, restaurantId, onChanged }: { item: MenuItem; restaurantId: string; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   if (!item.track_stock) {
     return (
@@ -593,13 +593,13 @@ function StockControl({ item, onChanged }: { item: MenuItem; onChanged: () => vo
     setBusy(true);
     const newQty = Math.max(0, qty + delta);
     // Clear stock alert flag for this item so future low/out alerts can re-fire
-    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", item.restaurant_id).maybeSingle();
+    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", restaurantId).maybeSingle();
     const flags: any = (r as any)?.feature_flags || {};
     const alerts = { ...(flags.stock_alerts || {}) };
     delete alerts[item.id];
     const { error } = await supabase.from("menu_items").update({ stock_qty: newQty }).eq("id", item.id);
     if (!error && r) {
-      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", item.restaurant_id);
+      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", restaurantId);
     }
     setBusy(false);
     if (error) return toast.error(error.message);
@@ -609,13 +609,13 @@ function StockControl({ item, onChanged }: { item: MenuItem; onChanged: () => vo
   async function setStock(value: number) {
     setBusy(true);
     const newQty = Math.max(0, value);
-    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", item.restaurant_id).maybeSingle();
+    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", restaurantId).maybeSingle();
     const flags: any = (r as any)?.feature_flags || {};
     const alerts = { ...(flags.stock_alerts || {}) };
     delete alerts[item.id];
     const { error } = await supabase.from("menu_items").update({ stock_qty: newQty }).eq("id", item.id);
     if (!error && r) {
-      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", item.restaurant_id);
+      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", restaurantId);
     }
     setBusy(false);
     if (error) return toast.error(error.message);
