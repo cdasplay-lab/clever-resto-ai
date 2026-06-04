@@ -1364,8 +1364,89 @@ Deno.serve(async (req) => {
       return json({ reply, state: "collecting_items", media: [], quick_replies: ["📋 المنيو"] });
     }
 
+    // === "where is my order" shortcut: respond with live status + ETA ===
+    const trackTriggers = [
+      "وين طلبي", "وين الطلب", "شصاير بطلبي", "طلبي شصاير", "طلبي وين",
+      "اين طلبي", "تأخر طلبي", "تاخر طلبي", "متى يوصل", "متى يجي",
+      "where is my order", "where's my order", "track order", "order status",
+    ];
+    if (trackTriggers.some((t) => lastUserText.includes(t))) {
+      const { data: lastOrder } = await db
+        .from("orders")
+        .select("id,status,total,created_at,meta")
+        .eq("conversation_id", conversation_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!lastOrder) {
+        const reply = "ما لكيت لك طلب فعّال 🤔 تحب نسوي طلب جديد؟";
+        await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+        return json({ reply, state: conv.state, media: [], quick_replies: ["📋 المنيو"] });
+      }
+      const shortId = String(lastOrder.id).slice(0, 8);
+      const etaMin = Number((lastOrder.meta as any)?.eta_minutes) || 45;
+      const confirmedAt = (lastOrder.meta as any)?.confirmed_at || lastOrder.created_at;
+      const elapsedMin = Math.floor((Date.now() - new Date(confirmedAt).getTime()) / 60000);
+      const remainingMin = Math.max(0, etaMin - elapsedMin);
+      const overdueMin = elapsedMin - etaMin;
 
-    // Guardrails: dedup identical consecutive tool calls + loop breaker
+      let reply = "";
+      switch (lastOrder.status) {
+        case "pending":
+        case "confirmed":
+          reply = `طلبك #${shortId} مستلم وراح يبدي التحضير قريب 🌹\nالتوصيل خلال ~${remainingMin || etaMin} دقيقة.`;
+          break;
+        case "preparing":
+          reply = `طلبك #${shortId} بالتحضير الآن 👨‍🍳\nجاهز خلال ~${remainingMin} دقيقة تقريباً.`;
+          break;
+        case "out_for_delivery":
+          reply = `طلبك #${shortId} بالطريق إليك 🛵\nيوصلك خلال ~${Math.max(5, remainingMin)} دقيقة.`;
+          break;
+        case "completed":
+          reply = `طلبك #${shortId} تسلّم قبل شوية 🙏\nإذا في أي مشكلة كلّي بصراحة.`;
+          break;
+        case "cancelled":
+          reply = `طلبك #${shortId} ملغي ❌\nتحب نسوي طلب جديد؟`;
+          break;
+        case "scheduled":
+          reply = `طلبك #${shortId} مجدول لوقت لاحق ⏰`;
+          break;
+        default:
+          reply = `طلبك #${shortId} — الحالة: ${lastOrder.status}`;
+      }
+      if (overdueMin >= 10 && !["completed", "cancelled"].includes(lastOrder.status)) {
+        reply += `\n\nأعتذر على التأخير 🙏 راح أراجع المطبخ وأرد عليك خلال دقائق.`;
+        // Notify branch/owner about the customer asking
+        try {
+          const branchesArr: any[] = (restaurant as any).__branches || [];
+          const branchChat = (conv.meta as any)?.branch_id
+            ? branchesArr.find((b: any) => b.id === (conv.meta as any).branch_id)?.telegram_chat_id
+            : null;
+          const ownerChat = (restaurant as any).owner_telegram_chat_id;
+          const notifyChat = branchChat || ownerChat;
+          const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+          if (notifyChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+            const who = conv.customer_name || conv.customer_handle || "زبون";
+            await fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+                "X-Connection-Api-Key": TELEGRAM_API_KEY,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                chat_id: notifyChat,
+                text: `⚠️ الزبون ${who} يسأل عن طلبه #${shortId}\nتأخر ${overdueMin} دقيقة عن ETA (${etaMin} دقيقة).\nالحالة: ${lastOrder.status}`,
+              }),
+            }).catch(() => {});
+          }
+        } catch (_) {}
+      }
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: conv.state, media: [], quick_replies: [] });
+    }
+
+
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
 
