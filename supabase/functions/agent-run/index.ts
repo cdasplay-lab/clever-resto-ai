@@ -197,6 +197,30 @@ const TOOLS = [
   {
     type: "function",
     function: {
+      name: "cancel_order",
+      description:
+        "ألغِ آخر طلب للزبون. يشتغل فقط لو الطلب لسه بحالة pending (ما تأكد من الفرع) أو scheduled (مجدول لوقت لاحق). يرجّع المخزون ويخبر الفرع تلقائياً. ممنوع استدعاؤه لطلبات confirmed/preparing/out_for_delivery — بهاي الحالة استخدم handoff_to_human.",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: { type: "string", description: "سبب الإلغاء كما ذكره الزبون (اختياري)" },
+        },
+        additionalProperties: false,
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "modify_order",
+      description:
+        "عدّل آخر طلب للزبون: يلغي الطلب الحالي ويرجّع أصنافه للسلة عشان الزبون يقدر يضيف/يحذف/يغيّر. بعدها لازم تعيد preview_order ثم submit_order/schedule_order حسب الحالة. يشتغل فقط لو الطلب pending/scheduled. للطلبات اللي تأكدت من الفرع استخدم handoff_to_human.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "handoff_to_human",
       description: "حوّل المحادثة لموظف بشري لما تكون غير متأكد أو الزبون يطلب ذلك.",
       parameters: {
