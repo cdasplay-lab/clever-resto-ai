@@ -794,10 +794,55 @@ async function runTool(
       return { error: "عذراً، المطعم وصل لحدّه الشهري من الطلبات. حاول لاحقاً." };
     }
 
-    // Atomically decrement stock for any tracked items
+    // Atomically decrement stock for any tracked items + alert manager on low/out
     try {
       const stockItems = (cart as CartItem[]).map((c) => ({ menu_item_id: c.menu_item_id, qty: c.qty }));
       await db.rpc("decrement_stock", { _items: stockItems });
+      // Check post-decrement stock and notify owner (one alert per state-change)
+      const trackedIds = stockItems.map((s) => s.menu_item_id);
+      if (trackedIds.length) {
+        const { data: postRows } = await db
+          .from("menu_items")
+          .select("id,name,track_stock,stock_qty")
+          .in("id", trackedIds);
+        const LOW_THRESHOLD = 3;
+        const alertsState = ((restaurant as any).feature_flags?.stock_alerts) || {};
+        const newState: Record<string, string> = { ...alertsState };
+        const toNotify: { name: string; qty: number; level: "out" | "low" }[] = [];
+        for (const r of (postRows || [])) {
+          if (!(r as any).track_stock) continue;
+          const qty = Number((r as any).stock_qty ?? 0);
+          const level = qty <= 0 ? "out" : (qty <= LOW_THRESHOLD ? "low" : null);
+          if (!level) continue;
+          if (alertsState[(r as any).id] === level) continue; // already alerted at this level
+          toNotify.push({ name: (r as any).name, qty, level });
+          newState[(r as any).id] = level;
+        }
+        if (toNotify.length) {
+          const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+          const ownerChat = (restaurant as any).owner_telegram_chat_id;
+          if (ownerChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+            const lines = toNotify.map((a) =>
+              a.level === "out" ? `🔴 نفد: ${a.name}` : `⚠️ منخفض: ${a.name} (متبقي ${a.qty})`
+            );
+            fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+                "X-Connection-Api-Key": TELEGRAM_API_KEY,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                chat_id: ownerChat,
+                text: `📦 تنبيه مخزون:\n${lines.join("\n")}\n\nأعد التعبئة من لوحة التحكم.`,
+              }),
+            }).catch(() => {});
+          }
+          // Persist alert state to avoid duplicate notifications
+          const mergedFlags = { ...((restaurant as any).feature_flags || {}), stock_alerts: newState };
+          db.from("restaurants").update({ feature_flags: mergedFlags }).eq("id", restaurant.id).then(() => {});
+        }
+      }
     } catch (_) { /* don't block the order */ }
 
     // === Compute ETA (prep + delivery) and save to order.meta ===
