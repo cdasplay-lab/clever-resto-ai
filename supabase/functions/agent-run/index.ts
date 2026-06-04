@@ -444,8 +444,8 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
 6) استخدم handoff_to_human **فقط** في حالتين: (أ) الزبون طلبها صراحة بكلمات مثل "موظف"، "إنسان"، "حولني"، "بشري"، أو (ب) فشلت أداة حرجة (submit_order/preview_order) بعد محاولة واحدة على الأقل. **ممنوع** استخدامها لمجرد إن الزبون متضايق أو سأل سؤال غريب — أول رد على الانزعاج اعتذار قصير + سؤال محدد لفهم المشكلة. وممنوع تكرر رسالة "حوّلت لموظف" أكثر من مرة بنفس المحادثة.
-14) **ممنوع نهائياً** تذكر أي تفاصيل تقنية للزبون: لا أسماء جداول، لا "قاعدة بيانات"، لا "invalid input"، لا أكواد أخطاء، لا JSON، لا tokens، لا "خلل بالسيستم". إذا أداة رجعت `error`، خذ `user_message` منها (إن وُجد) أو اعتذر بسطر عام مثل: "صار خلل بسيط، ممكن نعيد المحاولة؟". اعتبر تفاصيل الـ error سرّية بالكامل.
-15) **ممنوع تخترع وجود موظف بشري**: لا تقول "الموظف كدامه"، "يثبّت يدوي"، "يراجع الآن"، "بشري دخل بالمحادثة" — إلا إذا استدعيت `handoff_to_human` بنفس هذا الـ run. لا تمثيل ولا أكاذيب تطمين.
+14) **ممنوع نهائياً** تذكر أي تفاصيل تقنية للزبون: لا أسماء جداول، لا "قاعدة بيانات"، لا "invalid input"، لا أكواد أخطاء، لا JSON، لا tokens، لا "خلل بالسيستم". إذا أداة رجعت \`error\`، خذ \`user_message\` منها (إن وُجد) أو اعتذر بسطر عام مثل: "صار خلل بسيط، ممكن نعيد المحاولة؟". اعتبر تفاصيل الـ error سرّية بالكامل.
+15) **ممنوع تخترع وجود موظف بشري**: لا تقول "الموظف كدامه"، "يثبّت يدوي"، "يراجع الآن"، "بشري دخل بالمحادثة" — إلا إذا استدعيت \`handoff_to_human\` بنفس هذا الـ run. لا تمثيل ولا أكاذيب تطمين.
 7) المطعم مغلق؟ اعتذر واذكر وقت الافتتاح. ما تأخذ طلب نهائي إلا إذا الزبون يطلب جدولة ضمن الدوام.
 13) الطلبات المجدولة (لوقت لاحق):
    • إذا الزبون قال "بكرة"، "بعد ساعة"، "الساعة كذا"، "للغداء"، "للعشاء" أو أي وقت مستقبلي — اسأله عن الوقت المحدد، ثم بعد preview_order وموافقة الزبون استدعِ schedule_order بدل submit_order.
@@ -739,6 +739,30 @@ async function runTool(
       await db.rpc("decrement_stock", { _items: stockItems });
     } catch (_) { /* don't block the order */ }
 
+    // === Compute ETA (prep + delivery) and save to order.meta ===
+    let etaMinutes = 45; // default fallback
+    try {
+      const branchesArr: any[] = (restaurant as any).__branches || [];
+      const branchObj = branchId ? branchesArr.find((b: any) => b.id === branchId) : null;
+      const prep = Number(branchObj?.current_prep_minutes) || 25;
+      let deliveryEta = 20;
+      const area = (delivery.area || delivery.address || "").toString().toLowerCase();
+      if (branchId && area) {
+        const { data: zones } = await db
+          .from("delivery_zones")
+          .select("area_name,eta_minutes")
+          .eq("branch_id", branchId)
+          .eq("is_active", true);
+        const matched = (zones || []).find((z: any) => area.includes(String(z.area_name).toLowerCase()));
+        if (matched && matched.eta_minutes) deliveryEta = Number(matched.eta_minutes);
+      }
+      etaMinutes = Math.max(15, prep + deliveryEta);
+    } catch (_) { /* keep default */ }
+
+    const confirmedAtIso = new Date().toISOString();
+    await db.from("orders").update({
+      meta: { eta_minutes: etaMinutes, confirmed_at: confirmedAtIso },
+    }).eq("id", order.id);
 
     await db
       .from("conversations")
@@ -766,7 +790,14 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
-    return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
+    const shortId = order.id.slice(0, 8);
+    return {
+      ok: true,
+      order_id: order.id,
+      total: subtotal,
+      eta_minutes: etaMinutes,
+      message: `✅ تم استلام طلبك #${shortId}.\nالتوصيل خلال ~${etaMinutes} دقيقة تقريباً.\nراح نخبرك بكل خطوة 🌹`,
+    };
   }
 
   if (name === "schedule_order") {
@@ -1333,8 +1364,89 @@ Deno.serve(async (req) => {
       return json({ reply, state: "collecting_items", media: [], quick_replies: ["📋 المنيو"] });
     }
 
+    // === "where is my order" shortcut: respond with live status + ETA ===
+    const trackTriggers = [
+      "وين طلبي", "وين الطلب", "شصاير بطلبي", "طلبي شصاير", "طلبي وين",
+      "اين طلبي", "تأخر طلبي", "تاخر طلبي", "متى يوصل", "متى يجي",
+      "where is my order", "where's my order", "track order", "order status",
+    ];
+    if (trackTriggers.some((t) => lastUserText.includes(t))) {
+      const { data: lastOrder } = await db
+        .from("orders")
+        .select("id,status,total,created_at,meta")
+        .eq("conversation_id", conversation_id)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (!lastOrder) {
+        const reply = "ما لكيت لك طلب فعّال 🤔 تحب نسوي طلب جديد؟";
+        await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+        return json({ reply, state: conv.state, media: [], quick_replies: ["📋 المنيو"] });
+      }
+      const shortId = String(lastOrder.id).slice(0, 8);
+      const etaMin = Number((lastOrder.meta as any)?.eta_minutes) || 45;
+      const confirmedAt = (lastOrder.meta as any)?.confirmed_at || lastOrder.created_at;
+      const elapsedMin = Math.floor((Date.now() - new Date(confirmedAt).getTime()) / 60000);
+      const remainingMin = Math.max(0, etaMin - elapsedMin);
+      const overdueMin = elapsedMin - etaMin;
 
-    // Guardrails: dedup identical consecutive tool calls + loop breaker
+      let reply = "";
+      switch (lastOrder.status) {
+        case "pending":
+        case "confirmed":
+          reply = `طلبك #${shortId} مستلم وراح يبدي التحضير قريب 🌹\nالتوصيل خلال ~${remainingMin || etaMin} دقيقة.`;
+          break;
+        case "preparing":
+          reply = `طلبك #${shortId} بالتحضير الآن 👨‍🍳\nجاهز خلال ~${remainingMin} دقيقة تقريباً.`;
+          break;
+        case "out_for_delivery":
+          reply = `طلبك #${shortId} بالطريق إليك 🛵\nيوصلك خلال ~${Math.max(5, remainingMin)} دقيقة.`;
+          break;
+        case "completed":
+          reply = `طلبك #${shortId} تسلّم قبل شوية 🙏\nإذا في أي مشكلة كلّي بصراحة.`;
+          break;
+        case "cancelled":
+          reply = `طلبك #${shortId} ملغي ❌\nتحب نسوي طلب جديد؟`;
+          break;
+        case "scheduled":
+          reply = `طلبك #${shortId} مجدول لوقت لاحق ⏰`;
+          break;
+        default:
+          reply = `طلبك #${shortId} — الحالة: ${lastOrder.status}`;
+      }
+      if (overdueMin >= 10 && !["completed", "cancelled"].includes(lastOrder.status)) {
+        reply += `\n\nأعتذر على التأخير 🙏 راح أراجع المطبخ وأرد عليك خلال دقائق.`;
+        // Notify branch/owner about the customer asking
+        try {
+          const branchesArr: any[] = (restaurant as any).__branches || [];
+          const branchChat = (conv.meta as any)?.branch_id
+            ? branchesArr.find((b: any) => b.id === (conv.meta as any).branch_id)?.telegram_chat_id
+            : null;
+          const ownerChat = (restaurant as any).owner_telegram_chat_id;
+          const notifyChat = branchChat || ownerChat;
+          const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+          if (notifyChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+            const who = conv.customer_name || conv.customer_handle || "زبون";
+            await fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+                "X-Connection-Api-Key": TELEGRAM_API_KEY,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                chat_id: notifyChat,
+                text: `⚠️ الزبون ${who} يسأل عن طلبه #${shortId}\nتأخر ${overdueMin} دقيقة عن ETA (${etaMin} دقيقة).\nالحالة: ${lastOrder.status}`,
+              }),
+            }).catch(() => {});
+          }
+        } catch (_) {}
+      }
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: conv.state, media: [], quick_replies: [] });
+    }
+
+
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
 
