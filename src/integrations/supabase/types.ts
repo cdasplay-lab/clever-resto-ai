@@ -663,6 +663,7 @@ export type Database = {
           external_order_id: string | null
           id: string
           items: Json
+          meta: Json
           notes: string | null
           restaurant_id: string
           scheduled_for: string | null
@@ -682,6 +683,7 @@ export type Database = {
           external_order_id?: string | null
           id?: string
           items: Json
+          meta?: Json
           notes?: string | null
           restaurant_id: string
           scheduled_for?: string | null
@@ -701,6 +703,7 @@ export type Database = {
           external_order_id?: string | null
           id?: string
           items?: Json
+          meta?: Json
           notes?: string | null
           restaurant_id?: string
           scheduled_for?: string | null
