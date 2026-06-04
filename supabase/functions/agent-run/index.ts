@@ -739,6 +739,30 @@ async function runTool(
       await db.rpc("decrement_stock", { _items: stockItems });
     } catch (_) { /* don't block the order */ }
 
+    // === Compute ETA (prep + delivery) and save to order.meta ===
+    let etaMinutes = 45; // default fallback
+    try {
+      const branchesArr: any[] = (restaurant as any).__branches || [];
+      const branchObj = branchId ? branchesArr.find((b: any) => b.id === branchId) : null;
+      const prep = Number(branchObj?.current_prep_minutes) || 25;
+      let deliveryEta = 20;
+      const area = (delivery.area || delivery.address || "").toString().toLowerCase();
+      if (branchId && area) {
+        const { data: zones } = await db
+          .from("delivery_zones")
+          .select("area_name,eta_minutes")
+          .eq("branch_id", branchId)
+          .eq("is_active", true);
+        const matched = (zones || []).find((z: any) => area.includes(String(z.area_name).toLowerCase()));
+        if (matched && matched.eta_minutes) deliveryEta = Number(matched.eta_minutes);
+      }
+      etaMinutes = Math.max(15, prep + deliveryEta);
+    } catch (_) { /* keep default */ }
+
+    const confirmedAtIso = new Date().toISOString();
+    await db.from("orders").update({
+      meta: { eta_minutes: etaMinutes, confirmed_at: confirmedAtIso },
+    }).eq("id", order.id);
 
     await db
       .from("conversations")
@@ -766,7 +790,14 @@ async function runTool(
       }).catch(() => {});
     } catch (_) {}
 
-    return { ok: true, order_id: order.id, total: subtotal, message: "تم إرسال الطلب للمطبخ ✅" };
+    const shortId = order.id.slice(0, 8);
+    return {
+      ok: true,
+      order_id: order.id,
+      total: subtotal,
+      eta_minutes: etaMinutes,
+      message: `✅ تم استلام طلبك #${shortId}.\nالتوصيل خلال ~${etaMinutes} دقيقة تقريباً.\nراح نخبرك بكل خطوة 🌹`,
+    };
   }
 
   if (name === "schedule_order") {
