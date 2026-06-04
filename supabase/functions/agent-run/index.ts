@@ -1022,6 +1022,127 @@ async function runTool(
     };
   }
 
+  if (name === "cancel_order" || name === "modify_order") {
+    const lastOrderId = conv.meta?.last_order_id;
+    if (!lastOrderId) {
+      return { error: "ما عندي طلب سابق بهذي المحادثة لألغيه/أعدله." };
+    }
+    const { data: ord } = await db
+      .from("orders")
+      .select("id,status,items,customer_phone,delivery_address,branch_id,scheduled_for,total")
+      .eq("id", lastOrderId)
+      .eq("restaurant_id", restaurant.id)
+      .maybeSingle();
+    if (!ord) return { error: "ما لكيت الطلب." };
+    const cancellable = ord.status === "pending" || ord.status === "scheduled";
+    if (!cancellable) {
+      return {
+        error: "الطلب صار قيد التحضير ولا أكدر ألغيه/أعدله تلقائياً.",
+        user_message: "للأسف الطلب صار قيد التحضير من الفرع، راح أحوّلك لموظف بشري.",
+        needs_handoff: true,
+      };
+    }
+    const items = Array.isArray(ord.items) ? ord.items : [];
+
+    // Cancel the order
+    const reason = name === "cancel_order"
+      ? (String(args.reason || "").trim() || "إلغاء بطلب الزبون")
+      : "تعديل بطلب الزبون";
+    await db.from("orders")
+      .update({ status: "cancelled", notes: reason })
+      .eq("id", ord.id);
+
+    // Restock tracked items (only if was pending — scheduled didn't decrement)
+    if (ord.status === "pending" && items.length) {
+      try {
+        for (const it of items) {
+          const mid = (it as any).menu_item_id;
+          const qty = Number((it as any).qty || 0);
+          if (!mid || qty <= 0) continue;
+          const { data: mi } = await db
+            .from("menu_items")
+            .select("id,track_stock,stock_qty")
+            .eq("id", mid)
+            .maybeSingle();
+          if (mi && (mi as any).track_stock) {
+            const newQty = Number((mi as any).stock_qty || 0) + qty;
+            await db.from("menu_items").update({ stock_qty: newQty }).eq("id", mid);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // Notify branch via telegram (best effort)
+    try {
+      const branchesArr: any[] = (restaurant as any).__branches || [];
+      const branch = ord.branch_id ? branchesArr.find((b: any) => b.id === ord.branch_id) : null;
+      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+      const shortId = String(ord.id).slice(0, 8);
+      const action = name === "cancel_order" ? "❌ إلغاء طلب" : "✏️ تعديل طلب";
+      const text = `${action} #${shortId}\nالزبون: ${conv.customer_name || conv.customer_handle || "—"}\nالسبب: ${reason}\nالإجمالي السابق: ${ord.total} ${restaurant.currency}`;
+      const targets: string[] = [];
+      if (branch?.telegram_chat_id) targets.push(branch.telegram_chat_id);
+      if ((restaurant as any).owner_telegram_chat_id) targets.push((restaurant as any).owner_telegram_chat_id);
+      if (LOVABLE_API_KEY && TELEGRAM_API_KEY && targets.length) {
+        await Promise.all(targets.map((chat_id) =>
+          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+              "X-Connection-Api-Key": TELEGRAM_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ chat_id, text }),
+          }).catch(() => {}),
+        ));
+      }
+    } catch (_) {}
+
+    if (name === "cancel_order") {
+      await db.from("conversations").update({
+        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: null },
+        state: "greeting",
+      }).eq("id", conv.id);
+      return {
+        ok: true,
+        message: `تم إلغاء طلبك ✅\nإذا تحب تطلب من جديد، أنا موجود.`,
+      };
+    }
+
+    // modify_order: restore items to cart and let agent re-collect
+    const restoredCart: CartItem[] = items.map((it: any) => ({
+      menu_item_id: it.menu_item_id,
+      name: it.name,
+      qty: Number(it.qty || 1),
+      unit_price: Number(it.unit_price || 0),
+      notes: it.notes,
+      selected_options: it.selected_options,
+    }));
+    const restoredDelivery: Delivery = {
+      address: ord.delivery_address || conv.delivery?.address,
+      phone: ord.customer_phone || conv.delivery?.phone,
+    };
+    conv.cart = restoredCart;
+    conv.delivery = restoredDelivery;
+    await db.from("conversations").update({
+      cart: restoredCart,
+      delivery: restoredDelivery,
+      state: "collecting_items",
+      meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: null },
+    }).eq("id", conv.id);
+
+    const summary = restoredCart.map((c) => `• ${c.qty} × ${c.name}`).join("\n");
+    return {
+      ok: true,
+      cart: restoredCart,
+      message: `رجعت أصناف الطلب للسلة:\n${summary}\nشنو تحب تعدّل؟ (تضيف/تحذف/تغيّر الكمية)`,
+      instruction: "بعد ما يخلّص الزبون التعديلات، استدعِ preview_order من جديد ثم submit_order أو schedule_order حسب الحالة.",
+    };
+  }
+
+
+
   if (name === "resolve_branch") {
     const addr = String(args.address || "").trim().toLowerCase();
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
