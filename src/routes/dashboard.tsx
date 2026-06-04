@@ -579,6 +579,85 @@ function OptionsEditor({ item, onSaved }: { item: MenuItem; onSaved: () => void 
 }
 
 
+function StockControl({ item, onChanged }: { item: MenuItem; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!item.track_stock) {
+    return (
+      <div className="mt-2 text-xs text-muted-foreground">
+        المخزون غير متتبع — فعّله من "تعديل" لتحديد كمية.
+      </div>
+    );
+  }
+  const qty = Number(item.stock_qty ?? 0);
+  async function addStock(delta: number) {
+    setBusy(true);
+    const newQty = Math.max(0, qty + delta);
+    // Clear stock alert flag for this item so future low/out alerts can re-fire
+    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", item.restaurant_id).maybeSingle();
+    const flags: any = (r as any)?.feature_flags || {};
+    const alerts = { ...(flags.stock_alerts || {}) };
+    delete alerts[item.id];
+    const { error } = await supabase.from("menu_items").update({ stock_qty: newQty }).eq("id", item.id);
+    if (!error && r) {
+      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", item.restaurant_id);
+    }
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success(`تم التحديث — متبقي ${newQty}`);
+    onChanged();
+  }
+  async function setStock(value: number) {
+    setBusy(true);
+    const newQty = Math.max(0, value);
+    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", item.restaurant_id).maybeSingle();
+    const flags: any = (r as any)?.feature_flags || {};
+    const alerts = { ...(flags.stock_alerts || {}) };
+    delete alerts[item.id];
+    const { error } = await supabase.from("menu_items").update({ stock_qty: newQty }).eq("id", item.id);
+    if (!error && r) {
+      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", item.restaurant_id);
+    }
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    toast.success(`تم الضبط — متبقي ${newQty}`);
+    onChanged();
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+      {qty <= 0 ? (
+        <Badge variant="destructive">نفد المخزون</Badge>
+      ) : qty <= 3 ? (
+        <Badge className="bg-orange-500 hover:bg-orange-500">منخفض: {qty}</Badge>
+      ) : (
+        <Badge variant="secondary">متبقي: {qty}</Badge>
+      )}
+      <span className="text-muted-foreground">تعبئة سريعة:</span>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => addStock(5)}>+5</Button>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => addStock(10)}>+10</Button>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => addStock(20)}>+20</Button>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => addStock(50)}>+50</Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={busy}
+        onClick={() => {
+          const v = window.prompt("اضبط الكمية المتوفرة:", String(qty));
+          if (v == null) return;
+          const n = Number(v);
+          if (Number.isFinite(n)) setStock(n);
+        }}
+      >
+        ضبط…
+      </Button>
+      {qty > 0 && (
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setStock(0)}>
+          صفّر
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(item.name);
