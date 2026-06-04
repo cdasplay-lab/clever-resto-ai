@@ -4,7 +4,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 const DELAY_THRESHOLD_MIN = 15;
-const ACTIVE_STATUSES = ["confirmed", "preparing", "out_for_delivery"];
+const ACTIVE_STATUSES = ["confirmed", "preparing", "out_for_delivery"] as const;
 const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
 
 async function tgSend(
