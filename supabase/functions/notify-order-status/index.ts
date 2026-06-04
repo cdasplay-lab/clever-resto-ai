@@ -23,14 +23,18 @@ async function tgSend(chatId: string | number, text: string) {
   });
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: "قيد الاستلام",
-  confirmed: "تم تأكيد طلبك ✅",
-  preparing: "طلبك قيد التحضير 👨‍🍳",
-  out_for_delivery: "طلبك بالطريق إليك 🛵",
-  completed: "تم تسليم طلبك. شكراً 🙏",
-  cancelled: "تم إلغاء طلبك ❌",
-};
+function statusMessage(status: string, etaRemaining: number | null): string {
+  const eta = etaRemaining !== null && etaRemaining > 0 ? ` (يوصلك خلال ~${etaRemaining} دقيقة)` : "";
+  switch (status) {
+    case "pending": return "طلبك مستلم، قيد المراجعة 🧾";
+    case "confirmed": return `تم تأكيد طلبك ✅${eta}`;
+    case "preparing": return `طلبك قيد التحضير 👨‍🍳${eta}`;
+    case "out_for_delivery": return `طلبك بالطريق إليك 🛵${etaRemaining ? ` خلال ~${Math.max(5, etaRemaining)} دقيقة` : ""}`;
+    case "completed": return "تم تسليم طلبك. شكراً لاختيارنا 🙏";
+    case "cancelled": return "تم إلغاء طلبك ❌\nإذا تحب تطلب من جديد، أنا موجود.";
+    default: return status;
+  }
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
