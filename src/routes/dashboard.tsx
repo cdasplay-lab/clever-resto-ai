@@ -491,6 +491,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
                       <Button variant="ghost" size="icon" onClick={() => del(it.id)}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   </div>
+                  <StockControl item={it} onChanged={load} />
                   <OptionsEditor item={it} onSaved={load} />
                 </div>
               ))}
