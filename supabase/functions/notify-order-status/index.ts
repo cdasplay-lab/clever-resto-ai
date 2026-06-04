@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     const db = admin();
     const { data: order } = await db
       .from("orders")
-      .select("id,status,total,restaurant_id,conversation_id")
+      .select("id,status,total,restaurant_id,conversation_id,created_at,meta")
       .eq("id", order_id)
       .maybeSingle();
     if (!order) return json({ error: "order not found" }, 404);
@@ -78,8 +78,19 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (!conv) return json({ ok: true, skipped: "no_conversation" });
 
-    const label = STATUS_LABELS[order.status] || order.status;
-    const text = `📦 تحديث طلبك من ${rest.name}\n${label}\nالإجمالي: ${order.total} ${rest.currency}`;
+    // Compute remaining ETA from order.meta
+    const meta = (order as any).meta || {};
+    const etaTotal = Number(meta.eta_minutes) || 0;
+    const confirmedAt = meta.confirmed_at || order.created_at;
+    let etaRemaining: number | null = null;
+    if (etaTotal > 0) {
+      const elapsed = Math.floor((Date.now() - new Date(confirmedAt).getTime()) / 60000);
+      etaRemaining = Math.max(0, etaTotal - elapsed);
+    }
+
+    const shortId = String(order.id).slice(0, 8);
+    const label = statusMessage(order.status, etaRemaining);
+    const text = `📦 تحديث طلبك #${shortId} من ${rest.name}\n${label}\nالإجمالي: ${order.total} ${rest.currency}`;
 
     if (conv.channel === "telegram") {
       await tgSend(conv.external_chat_id, text);
