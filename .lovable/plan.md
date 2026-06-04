@@ -1,29 +1,66 @@
-## المشكلة
+# متابعة الطلب (Order Tracking) — المرحلة الأولى، النقطة الأولى فقط
 
-الزبون رجع بطلب جديد، لكن البوت دمج طلبه الجديد مع الطلب القديم (اللي كان بالسلة من جلسة سابقة وما تأكد). من الصورة: البوت أظهر بالأول طلب 56000 (سلطة + معكرونة + ...)، الزبون قال "هذا طلب قديم"، البوت اعتذر وحذف القديم يدوياً. هذا ما يجب أن يتكرر — البوت لازم يعرف لوحده.
+## الهدف
+لما الزبون يأكد طلبه، البوت يعطيه ETA واضح، ويخبره تلقائياً بكل تغيير حالة (تأكيد → تحضير → بالطريق → تم التسليم)، ويرد على سؤاله "وين طلبي؟" بمعلومة دقيقة بدون تدخل بشري.
 
-## السبب الجذري
+## السلوك المطلوب
 
-`telegram-webhook/index.ts` (سطر 230) يعيد استخدام نفس `conversation` لنفس `chat_id` للأبد. السلة (`conv.cart`) محفوظة بقاعدة البيانات وتُمسح فقط بعد `submit_order` ناجح (سطر 739). إذا الزبون عاين طلب وما أكمل (سواء أغلق البوت أو رجع بعد ساعات أو أيام)، السلة القديمة تبقى وتتراكم مع طلبه الجديد.
+### 1. عند تأكيد الطلب (submit_order ناجح)
+- البوت يحسب ETA = `branch.current_prep_minutes` + `delivery_zone.eta_minutes` (لو ما متوفر، يستخدم default 45 دقيقة).
+- يرسل للزبون: "✅ تم استلام طلبك #1234. التوصيل خلال ~45 دقيقة. راح نخبرك بكل خطوة 🌹"
+- يحفظ `eta_minutes` و `confirmed_at` بـ `orders.meta`.
 
-## الحل
+### 2. عند تغيير الحالة من الداشبورد
+الـ edge function `notify-order-status` موجود أصلاً ويبعث رسائل، بس ناقصه:
+- ETA محدّث مع كل تغيير ("تحضير: جاهز خلال 20 دقيقة"، "بالطريق: يوصلك خلال 15 دقيقة").
+- وقت التسليم الفعلي وقت `completed` ("تم التسليم 🙏 شكراً، نتمنى نشوفك مرة ثانية").
+- معالجة `delayed` (حالة جديدة) — لما يتأخر، البوت يبعث اعتذار + ETA جديد.
 
-### 1. إعادة تعيين تلقائية بعد فترة خمول
-بـ `telegram-webhook` بعد ما يلكي conversation موجودة: اقرأ `last_message_at` أو `updated_at`، وإذا الفرق > **3 ساعات** والسلة فيها أصناف (state != "submitted")، امسح `cart`, `delivery`, و `meta.pending_confirmation` قبل تمرير الرسالة للوكيل.
+### 3. لما الزبون يسأل "وين طلبي؟"
+- short-circuit بـ `agent-run`: لو الرسالة تحتوي "وين طلبي"، "طلبي شصاير"، "تأخر"، "where is my order"...
+- يجيب آخر طلب للزبون من نفس الـ conversation (آخر 6 ساعات).
+- يرد بحسب الحالة الحالية:
+  - `pending/confirmed`: "طلبك مستلم وراح يبدي التحضير قريب، ETA ~X دقيقة"
+  - `preparing`: "طلبك بالتحضير 👨‍🍳، جاهز خلال ~X دقيقة"
+  - `out_for_delivery`: "طلبك بالطريق إليك 🛵، يوصلك خلال ~X دقيقة"
+  - `completed`: "طلبك تسلّم قبل شوية، لو في مشكلة كلّي بصراحة 🌹"
+  - `cancelled`: "طلبك ملغي، تحب نسوي طلب جديد؟"
+- لو الوقت تجاوز ETA بـ 10 دقائق ولسا ما `completed`: يضيف "إذا تأخر زيادة راح أراجع المطبخ وأرد عليك خلال دقائق" + يسجل تنبيه للمدير.
 
-### 2. أمر صريح لإعادة البدء
-بـ `agent-run/index.ts` بقسم short-circuits (حوالي سطر 1298)، أضف كلمات تطلق `reset`:
-- `طلب جديد`، `ابدأ من جديد`، `جديد`، `ريستارت`، `restart`، `new order`، `start over`.
-- عند الإطلاق: امسح `cart` و `delivery` و `pending_confirmation`، ورد بـ "تمام، بدينا من جديد 🌹 شنو تحب تطلب؟".
+### 4. تنبيه التأخير التلقائي
+- cron كل 5 دقائق (pg_cron → `/api/public/check-delays`):
+  - يجيب الطلبات `status IN (confirmed, preparing, out_for_delivery)` اللي تجاوزت ETA + 15 دقيقة.
+  - يبعث للزبون: "نعتذر، طلبك يحتاج وقت إضافي. راح يوصلك خلال ~X دقيقة 🙏"
+  - يبعث للمدير على Telegram: "⚠️ طلب #1234 متأخر — مرّ عليه X دقيقة"
+  - يحط `meta.delay_notified = true` حتى ما يتكرر.
 
-### 3. إعلام الـ LLM بعمر السلة
-بـ system prompt (حوالي سطر 372 حيث `cartLines`): إذا السلة من جلسة سابقة (last_message_at > ساعة)، أضف ملاحظة قبل ملخص السلة: *"⚠️ هذه سلة من جلسة سابقة. اسأل الزبون أولاً: 'تكمّل طلبك السابق لو نبدأ من جديد؟' قبل ما تضيف أي شي جديد."*
+## التغييرات التقنية
 
-## الملفات المتأثرة
+### قاعدة البيانات (migration)
+- إضافة `meta jsonb DEFAULT '{}'` لجدول `orders` (لتخزين eta_minutes, confirmed_at, delay_notified, etc.).
+- إضافة قيمة `'delayed'` للـ enum `order_status` (اختياري — أو نستخدم meta.is_delayed).
 
-- `supabase/functions/telegram-webhook/index.ts` — إضافة منطق إعادة التعيين عند الخمول (سطور ~230-232).
-- `supabase/functions/agent-run/index.ts`:
-  - قسم short-circuits (~سطر 1298) — أمر "طلب جديد".
-  - بناء system prompt (~سطر 372) — تنبيه عمر السلة.
+### Edge functions
+- **`agent-run/index.ts`**: 
+  - بعد `submit_order` ناجح (~سطر 739) → احسب ETA واحفظ بـ meta + أضف للرد رسالة الـ ETA.
+  - short-circuits (~سطر 1308) → كشف "وين طلبي" والرد من DB.
+- **`notify-order-status/index.ts`**: 
+  - حدّث `STATUS_LABELS` لتشمل ETA ديناميكي.
+- **جديد: `check-delays/index.ts`** (مع server route عام `/api/public/check-delays`):
+  - يفحص الطلبات المتأخرة + يبعث تنبيهات للزبون والمدير.
+- **cron job**: pg_cron يستدعي endpoint كل 5 دقائق.
 
-تأكيد التنفيذ؟
+### الملفات المتأثرة
+- `supabase/functions/agent-run/index.ts` (نقطتين)
+- `supabase/functions/notify-order-status/index.ts`
+- `supabase/functions/check-delays/index.ts` (جديد) — أو نخليها server route بـ TanStack تحت `src/routes/api/public/check-delays.ts`
+- migration لإضافة `orders.meta` و cron job
+
+## أسئلة مهمة قبل التنفيذ
+
+1. **default ETA**: لو الفرع ما عنده `current_prep_minutes` ولا منطقة التوصيل عندها `eta_minutes`، نستخدم كم دقيقة افتراضي؟ (اقتراحي: 45)
+2. **حد التأخير قبل التنبيه التلقائي**: 10 دقائق بعد ETA؟ 15؟ 20؟
+3. **تنبيه المدير عند التأخير**: على Telegram (`owner_telegram_chat_id`)؟ أو على branch chat (`branches.telegram_chat_id`)؟
+4. **حالة "delayed"**: نضيفها للـ enum أو نكتفي بـ `meta.is_delayed`؟
+
+تأكيد + جواب الأسئلة وأبدي بالتنفيذ.
