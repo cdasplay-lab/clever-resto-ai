@@ -1107,7 +1107,7 @@ async function runTool(
     const newMeta = {
       ...(conv.meta || {}),
       pending_confirmation: { token, fp, created_at: new Date().toISOString() },
-      ...(checkoutSuggestions.length ? { checkout_upsell_offered: true } : {}),
+      ...(offeredSomething ? { checkout_upsell_offered: true } : {}),
     };
     await db.from("conversations").update({ meta: newMeta, state: "confirm" }).eq("id", conv.id);
     conv.meta = newMeta;
@@ -1124,8 +1124,9 @@ async function runTool(
       total: subtotal,
       currency: restaurant.currency,
       checkout_suggestions: checkoutSuggestions,
-      instruction: checkoutSuggestions.length
-        ? `${checkoutNote} بعد رد الزبون على العرض (لو وافق استدعِ add_to_cart ثم preview_order من جديد، لو رفض كمّل)، اعرض ملخّص الطلب حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد موافقته على التأكيد.`
+      combo_suggestion: comboSuggestion,
+      instruction: offeredSomething
+        ? `${checkoutNote} بعد رد الزبون (لو وافق نفّذ الأدوات المطلوبة ثم preview_order من جديد، لو رفض كمّل)، اعرض ملخّص الطلب حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد موافقته على التأكيد.`
         : "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
     };
   }
