@@ -757,6 +757,27 @@ function getFrequentlyBoughtWith(fbt: FBTEntry, sourceItemId: string): Array<{ m
   return out.sort((a, b) => b.score - a.score).slice(0, 5);
 }
 
+// Aggregate FBT scores across multiple source items (cart). Returns top item ids
+// not already in the cart, sorted by summed score desc.
+function getCheckoutFBT(fbt: FBTEntry, cartItemIds: string[], excludeIds: Set<string>): Array<{ menu_item_id: string; score: number }> {
+  const agg = new Map<string, number>();
+  for (const srcId of cartItemIds) {
+    const sourceCount = fbt.sourceCounts.get(srcId) || 0;
+    if (sourceCount < 3) continue;
+    const co = fbt.coCounts.get(srcId);
+    if (!co) continue;
+    for (const [otherId, count] of co.entries()) {
+      if (excludeIds.has(otherId)) continue;
+      const score = count / sourceCount;
+      if (score >= 0.15) agg.set(otherId, (agg.get(otherId) || 0) + score);
+    }
+  }
+  return [...agg.entries()]
+    .map(([menu_item_id, score]) => ({ menu_item_id, score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+}
+
 // Infer an upsell target category from the item's own category, when no manual
 // upsell_category is set. Returns a list of candidate category keywords to try.
 function inferUpsellCategory(cat: string | null | undefined): string[] {
@@ -951,11 +972,79 @@ async function runTool(
     }
     const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
     const token = `ord_${fp.slice(0, 16)}`;
-    await db.from("conversations").update({
-      meta: { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } },
-      state: "confirm",
-    }).eq("id", conv.id);
-    conv.meta = { ...(conv.meta || {}), pending_confirmation: { token, fp, created_at: new Date().toISOString() } };
+
+    // ===== Checkout-time upsell (once per conversation) =====
+    let checkoutSuggestions: any[] = [];
+    let checkoutNote: string | null = null;
+    if (!conv.meta?.checkout_upsell_offered && cart.length > 0) {
+      const inCartIds = new Set(cart.map((c) => c.menu_item_id));
+      let pickedIds: string[] = [];
+      let dataDriven = false;
+      try {
+        const fbt = await loadFBT(db, restaurant.id);
+        if (fbt) {
+          const ranked = getCheckoutFBT(fbt, [...inCartIds], inCartIds);
+          if (ranked.length) {
+            pickedIds = ranked.map((r) => r.menu_item_id);
+            dataDriven = true;
+          }
+        }
+      } catch (_) { /* ignore */ }
+      // Fallback: inferred categories from cart items' own categories.
+      if (!pickedIds.length) {
+        const { data: cartMis } = await db
+          .from("menu_items")
+          .select("id,category")
+          .in("id", [...inCartIds])
+          .eq("restaurant_id", restaurant.id);
+        const cartCats = new Set<string>();
+        (cartMis || []).forEach((m: any) => { if (m.category) cartCats.add(String(m.category).toLowerCase()); });
+        const wantCats = new Set<string>();
+        for (const c of cartCats) inferUpsellCategory(c).forEach((x) => wantCats.add(x));
+        if (wantCats.size) {
+          const orFilter = [...wantCats].map((c) => `category.ilike.%${c}%`).join(",");
+          const { data: cand } = await db
+            .from("menu_items")
+            .select("id,name,price,category,track_stock,stock_qty")
+            .eq("restaurant_id", restaurant.id)
+            .eq("is_available", true)
+            .or(orFilter)
+            .limit(10);
+          pickedIds = (cand || [])
+            .filter((s: any) => !inCartIds.has(s.id))
+            .filter((s: any) => !s.track_stock || (s.stock_qty != null && s.stock_qty > 0))
+            .filter((s: any) => !cartCats.has((s.category || "").toLowerCase()))
+            .slice(0, 3)
+            .map((s: any) => s.id);
+        }
+      }
+      if (pickedIds.length) {
+        const { data: items } = await db
+          .from("menu_items")
+          .select("id,name,price,track_stock,stock_qty,is_available")
+          .in("id", pickedIds)
+          .eq("restaurant_id", restaurant.id);
+        const byId = new Map((items || []).map((i: any) => [i.id, i]));
+        checkoutSuggestions = pickedIds
+          .map((id) => byId.get(id))
+          .filter((s: any) => s && s.is_available && (!s.track_stock || (s.stock_qty != null && s.stock_qty > 0)))
+          .slice(0, 2)
+          .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
+        if (checkoutSuggestions.length) {
+          checkoutNote = dataDriven
+            ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
+            : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
+        }
+      }
+    }
+
+    const newMeta = {
+      ...(conv.meta || {}),
+      pending_confirmation: { token, fp, created_at: new Date().toISOString() },
+      ...(checkoutSuggestions.length ? { checkout_upsell_offered: true } : {}),
+    };
+    await db.from("conversations").update({ meta: newMeta, state: "confirm" }).eq("id", conv.id);
+    conv.meta = newMeta;
 
     const lines = cart.map((c) => {
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
@@ -968,7 +1057,10 @@ async function runTool(
       summary,
       total: subtotal,
       currency: restaurant.currency,
-      instruction: "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
+      checkout_suggestions: checkoutSuggestions,
+      instruction: checkoutSuggestions.length
+        ? `${checkoutNote} بعد رد الزبون على العرض (لو وافق استدعِ add_to_cart ثم preview_order من جديد، لو رفض كمّل)، اعرض ملخّص الطلب حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد موافقته على التأكيد.`
+        : "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
     };
   }
 
