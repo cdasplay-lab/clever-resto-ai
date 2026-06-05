@@ -696,6 +696,29 @@ ${cartLines}
 }
 
 // ---------- Tool execution ----------
+// Infer an upsell target category from the item's own category, when no manual
+// upsell_category is set. Returns a list of candidate category keywords to try.
+function inferUpsellCategory(cat: string | null | undefined): string[] {
+  const c = (cat || "").toLowerCase().trim();
+  if (!c) return ["مشروب", "drink", "beverage", "عصير", "مشروبات"];
+  const has = (...ks: string[]) => ks.some((k) => c.includes(k));
+  if (has("برجر", "burger", "ساندويتش", "ساندوتش", "sandwich", "شاورما", "wrap", "wrap"))
+    return ["بطاطا", "fries", "مقبلات", "sides", "مشروب", "drink", "عصير", "مشروبات", "beverage"];
+  if (has("بيتزا", "pizza"))
+    return ["مقبلات", "sides", "appetizer", "مشروب", "drink", "عصير", "مشروبات"];
+  if (has("دجاج", "chicken", "مشاوي", "grill", "كباب", "kebab", "ستيك", "steak"))
+    return ["سلطة", "salad", "بطاطا", "fries", "مشروب", "drink", "مشروبات"];
+  if (has("بطاطا", "fries", "مقبلات", "sides", "appetizer", "سلطة", "salad"))
+    return ["مشروب", "drink", "عصير", "مشروبات", "beverage"];
+  if (has("مشروب", "drink", "عصير", "juice", "beverage", "مشروبات"))
+    return ["حلى", "حلويات", "dessert", "sweet", "sweets"];
+  if (has("حلى", "حلويات", "dessert", "sweet"))
+    return ["مشروب", "drink", "عصير", "مشروبات", "قهوة", "coffee", "شاي", "tea"];
+  if (has("فطور", "breakfast", "بريك"))
+    return ["مشروب", "قهوة", "coffee", "شاي", "tea", "عصير", "juice"];
+  return ["مشروب", "drink", "عصير", "مشروبات", "beverage"];
+}
+
 async function runTool(
   db: ReturnType<typeof admin>,
   conv: any,
@@ -748,7 +771,7 @@ async function runTool(
   if (name === "add_to_cart") {
     const { data: item, error } = await db
       .from("menu_items")
-      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category")
+      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category,category")
       .eq("id", args.menu_item_id)
       .eq("restaurant_id", restaurant.id)
       .maybeSingle();
@@ -810,7 +833,7 @@ async function runTool(
       cart,
       total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0),
       upsell_category: item.upsell_category || null,
-      hint: item.upsell_category ? `استدعِ suggest_upsell بـ for_menu_item_id="${item.id}" لاقتراح إضافة لطيفة (مرة واحدة بالمحادثة فقط).` : undefined,
+      hint: `استدعِ suggest_upsell بـ for_menu_item_id="${item.id}" لاقتراح إضافة لطيفة (مرة واحدة بالمحادثة فقط).`,
     };
   }
 
@@ -1553,23 +1576,36 @@ async function runTool(
       .eq("id", args.for_menu_item_id)
       .eq("restaurant_id", restaurant.id)
       .maybeSingle();
-    const targetCat = (src as any)?.upsell_category;
-    if (!targetCat) return { ok: true, suggestions: [], note: "ما اكو فئة مقترحة لهذا الصنف." };
+    // Manual setting wins; otherwise infer from the item's own category.
+    const manualCat = (src as any)?.upsell_category as string | null | undefined;
+    const srcCat = (src as any)?.category as string | null | undefined;
+    const candidates: string[] = manualCat ? [manualCat] : inferUpsellCategory(srcCat);
 
-    // Don't suggest if already in cart from same category
+    // Don't suggest items already in the cart, and exclude the source item itself.
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     const inCartIds = new Set(cart.map((c) => c.menu_item_id));
+    inCartIds.add(args.for_menu_item_id);
 
-    const { data: suggestions } = await db
-      .from("menu_items")
-      .select("id,name,price,category,track_stock,stock_qty")
-      .eq("restaurant_id", restaurant.id)
-      .eq("is_available", true)
-      .ilike("category", `%${targetCat}%`)
-      .order("price", { ascending: true })
-      .limit(5);
+    // Try each candidate keyword until we get matches.
+    let suggestions: any[] = [];
+    for (const cat of candidates) {
+      const { data } = await db
+        .from("menu_items")
+        .select("id,name,price,category,track_stock,stock_qty")
+        .eq("restaurant_id", restaurant.id)
+        .eq("is_available", true)
+        .ilike("category", `%${cat}%`)
+        .order("price", { ascending: true })
+        .limit(5);
+      if (data && data.length) {
+        // Exclude same category as the source item to avoid suggesting another burger after a burger.
+        const usable = data.filter((s: any) => !srcCat || (s.category || "").toLowerCase() !== srcCat.toLowerCase());
+        if (usable.length) { suggestions = usable; break; }
+        if (!suggestions.length) suggestions = data;
+      }
+    }
 
-    const filtered = (suggestions ?? [])
+    const filtered = suggestions
       .filter((s: any) => !inCartIds.has(s.id))
       .filter((s: any) => !s.track_stock || (s.stock_qty != null && s.stock_qty > 0))
       .slice(0, 3)
