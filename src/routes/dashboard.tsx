@@ -701,6 +701,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
         track_stock: trackStock,
         stock_qty: trackStock ? Math.max(0, Number(stockQty) || 0) : null,
         upsell_category: upsellCategory.trim() || null,
+        search_aliases: aliases.split(/[،,\n]/).map((s) => s.trim()).filter(Boolean),
       })
       .eq("id", item.id);
     setSaving(false);
