@@ -207,6 +207,9 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
       min_order: Number(b.min_order) || 0,
       telegram_chat_id: b.telegram_chat_id || null,
       is_active: b.is_active,
+      google_maps_url: b.google_maps_url,
+      latitude: b.latitude,
+      longitude: b.longitude,
     }).eq("id", b.id);
     setSaving(false);
     if (error) return toast.error(error.message);
