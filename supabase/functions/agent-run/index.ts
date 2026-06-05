@@ -357,6 +357,22 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "send_restaurant_location",
+      description: "أرسل موقع المطعم (أو الفرع المختار إذا تم تحديده) للزبون كنقطة جغرافية حقيقية. استخدمها لما يسأل الزبون 'وين موقعكم'، 'دزلي اللوكيشن'، 'فين المطعم'، أو يطلب يجي بنفسه (pickup).",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_customer_location",
+      description: "اطلب من الزبون يشارك موقعه الجغرافي. استخدمها لما تحتاج عنوان التوصيل ولم يعطه الزبون أو لما يصعب وصفه نصياً. على Telegram يظهر للزبون زر مباشر لمشاركة موقعه.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
 ] as const;
 
 // ---------- Complaint keyword detection ----------
