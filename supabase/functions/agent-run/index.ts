@@ -696,6 +696,29 @@ ${cartLines}
 }
 
 // ---------- Tool execution ----------
+// Infer an upsell target category from the item's own category, when no manual
+// upsell_category is set. Returns a list of candidate category keywords to try.
+function inferUpsellCategory(cat: string | null | undefined): string[] {
+  const c = (cat || "").toLowerCase().trim();
+  if (!c) return ["مشروب", "drink", "beverage", "عصير", "مشروبات"];
+  const has = (...ks: string[]) => ks.some((k) => c.includes(k));
+  if (has("برجر", "burger", "ساندويتش", "ساندوتش", "sandwich", "شاورما", "wrap", "wrap"))
+    return ["بطاطا", "fries", "مقبلات", "sides", "مشروب", "drink", "عصير", "مشروبات", "beverage"];
+  if (has("بيتزا", "pizza"))
+    return ["مقبلات", "sides", "appetizer", "مشروب", "drink", "عصير", "مشروبات"];
+  if (has("دجاج", "chicken", "مشاوي", "grill", "كباب", "kebab", "ستيك", "steak"))
+    return ["سلطة", "salad", "بطاطا", "fries", "مشروب", "drink", "مشروبات"];
+  if (has("بطاطا", "fries", "مقبلات", "sides", "appetizer", "سلطة", "salad"))
+    return ["مشروب", "drink", "عصير", "مشروبات", "beverage"];
+  if (has("مشروب", "drink", "عصير", "juice", "beverage", "مشروبات"))
+    return ["حلى", "حلويات", "dessert", "sweet", "sweets"];
+  if (has("حلى", "حلويات", "dessert", "sweet"))
+    return ["مشروب", "drink", "عصير", "مشروبات", "قهوة", "coffee", "شاي", "tea"];
+  if (has("فطور", "breakfast", "بريك"))
+    return ["مشروب", "قهوة", "coffee", "شاي", "tea", "عصير", "juice"];
+  return ["مشروب", "drink", "عصير", "مشروبات", "beverage"];
+}
+
 async function runTool(
   db: ReturnType<typeof admin>,
   conv: any,
