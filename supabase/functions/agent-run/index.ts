@@ -808,6 +808,7 @@ async function runTool(
   name: string,
   args: any,
   media: MediaItem[],
+  customerProfile?: any,
 ): Promise<any> {
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
