@@ -59,7 +59,9 @@ type MenuItem = {
   track_stock?: boolean;
   stock_qty?: number | null;
   upsell_category?: string | null;
+  search_aliases?: string[] | null;
 };
+type _Pad = {
 type Order = {
   id: string;
   customer_name: string | null;
