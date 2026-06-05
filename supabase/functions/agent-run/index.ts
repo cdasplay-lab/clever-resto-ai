@@ -45,6 +45,28 @@ function cartFingerprint(cart: any[], delivery: any, branchId: string | null): s
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
+// Arabic text normalizer: strips diacritics, unifies alef/ya/ta, collapses repeats.
+// Mirrors public.normalize_ar() in SQL for consistent matching client/edge side.
+function normalizeArabic(input: string): string {
+  if (!input) return "";
+  let s = input.toLowerCase();
+  // Remove diacritics (tashkeel)
+  s = s.replace(/[\u064B-\u0652\u0670]/g, "");
+  // Unify alef variants
+  s = s.replace(/[\u0623\u0625\u0622\u0671]/g, "\u0627");
+  // Alef maksura -> ya
+  s = s.replace(/\u0649/g, "\u064A");
+  // Ta marbuta -> ha
+  s = s.replace(/\u0629/g, "\u0647");
+  // Remove tatweel
+  s = s.replace(/\u0640/g, "");
+  // Collapse 3+ repeats of any char to 2
+  s = s.replace(/(.)\1{2,}/g, "$1$1");
+  // Collapse whitespace
+  s = s.replace(/\s+/g, " ").trim();
+  return s;
+}
+
 type CartItem = {
   menu_item_id: string;
   name: string;
