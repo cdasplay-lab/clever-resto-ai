@@ -2208,7 +2208,7 @@ Deno.serve(async (req) => {
             });
             try {
               result = await withTimeout(
-                runTool(db, conv, restaurant, name, args, media),
+                runTool(db, conv, restaurant, name, args, media, customerProfile),
                 PER_TOOL_TIMEOUT_MS,
                 name,
               );
