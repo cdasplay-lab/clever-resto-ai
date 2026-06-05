@@ -2035,6 +2035,43 @@ async function runTool(
     };
   }
 
+  if (name === "send_restaurant_location") {
+    const branchId = conv.meta?.branch_id;
+    const branches: any[] = (restaurant as any).__branches || [];
+    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    const src: any = branch || restaurant;
+    const lat = Number(src.latitude);
+    const lng = Number(src.longitude);
+    const url = src.google_maps_url || (Number.isFinite(lat) && Number.isFinite(lng) ? `https://maps.google.com/?q=${lat},${lng}` : null);
+    if (!url) {
+      return { error: "no_location_set", user_message: "موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا للاستفسار." };
+    }
+    const label = branch ? `فرع ${branch.name}` : restaurant.name;
+    const isTelegram = conv.channel === "telegram";
+    if (isTelegram && Number.isFinite(lat) && Number.isFinite(lng)) {
+      actions.push({ type: "send_location", lat, lng, title: label, address: src.address || null });
+    }
+    return {
+      ok: true, lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, url, label,
+      note: isTelegram && Number.isFinite(lat) && Number.isFinite(lng)
+        ? `تم إرسال الموقع كخريطة. اكتب سطر قصير فقط مثل: "هذا موقع ${label} 📍".`
+        : `اكتب للزبون: "هذا موقع ${label} 📍\n${url}".`,
+    };
+  }
+
+  if (name === "request_customer_location") {
+    const isTelegram = conv.channel === "telegram";
+    if (isTelegram) {
+      actions.push({ type: "request_location", text: "شارك موقعك من الزر اللي تحت 👇" });
+    }
+    return {
+      ok: true,
+      note: isTelegram
+        ? "ظهرله زر مشاركة الموقع. لا ترسل نص إضافي — الزر يكفي."
+        : "اكتب للزبون: 'دزلنا موقعك على Google Maps لو اكتبلنا اسم الشارع والمنطقة بالتفصيل.'",
+    };
+  }
+
   return { error: "unknown tool" };
 }
 
