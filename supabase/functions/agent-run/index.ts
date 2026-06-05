@@ -696,6 +696,67 @@ ${cartLines}
 }
 
 // ---------- Tool execution ----------
+// ---- Frequently-bought-together cache (module-scope, 10-min TTL) ----
+type FBTEntry = { sourceCounts: Map<string, number>; coCounts: Map<string, Map<string, number>>; expiresAt: number };
+const fbtCache = new Map<string, FBTEntry>();
+const FBT_TTL_MS = 10 * 60 * 1000;
+
+async function loadFBT(db: any, restaurantId: string): Promise<FBTEntry | null> {
+  const cached = fbtCache.get(restaurantId);
+  if (cached && cached.expiresAt > Date.now()) return cached;
+
+  const sinceIso = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: orders } = await db
+    .from("orders")
+    .select("items,status,created_at")
+    .eq("restaurant_id", restaurantId)
+    .in("status", ["confirmed", "preparing", "out_for_delivery", "completed"])
+    .gte("created_at", sinceIso)
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (!orders || orders.length < 10) {
+    // Not enough data — cache an empty entry to avoid re-querying
+    const empty: FBTEntry = { sourceCounts: new Map(), coCounts: new Map(), expiresAt: Date.now() + FBT_TTL_MS };
+    fbtCache.set(restaurantId, empty);
+    return empty;
+  }
+
+  const sourceCounts = new Map<string, number>();
+  const coCounts = new Map<string, Map<string, number>>();
+  for (const o of orders) {
+    const items: any[] = Array.isArray(o.items) ? o.items : [];
+    const ids = Array.from(new Set(items.map((i) => i?.menu_item_id).filter(Boolean) as string[]));
+    if (ids.length < 1) continue;
+    for (const id of ids) sourceCounts.set(id, (sourceCounts.get(id) || 0) + 1);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = 0; j < ids.length; j++) {
+        if (i === j) continue;
+        const a = ids[i], b = ids[j];
+        let inner = coCounts.get(a);
+        if (!inner) { inner = new Map(); coCounts.set(a, inner); }
+        inner.set(b, (inner.get(b) || 0) + 1);
+      }
+    }
+  }
+  const entry: FBTEntry = { sourceCounts, coCounts, expiresAt: Date.now() + FBT_TTL_MS };
+  fbtCache.set(restaurantId, entry);
+  return entry;
+}
+
+function getFrequentlyBoughtWith(fbt: FBTEntry, sourceItemId: string): Array<{ menu_item_id: string; score: number; count: number }> {
+  const sourceCount = fbt.sourceCounts.get(sourceItemId) || 0;
+  if (sourceCount < 3) return []; // need item to appear in at least 3 orders
+  const co = fbt.coCounts.get(sourceItemId);
+  if (!co) return [];
+  const out: Array<{ menu_item_id: string; score: number; count: number }> = [];
+  for (const [otherId, count] of co.entries()) {
+    const score = count / sourceCount;
+    if (score >= 0.2) out.push({ menu_item_id: otherId, score, count });
+  }
+  return out.sort((a, b) => b.score - a.score).slice(0, 5);
+}
+
 // Infer an upsell target category from the item's own category, when no manual
 // upsell_category is set. Returns a list of candidate category keywords to try.
 function inferUpsellCategory(cat: string | null | undefined): string[] {
