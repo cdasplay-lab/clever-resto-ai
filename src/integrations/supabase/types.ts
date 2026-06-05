@@ -560,6 +560,7 @@ export type Database = {
           options: Json
           price: number
           restaurant_id: string
+          search_aliases: string[]
           stock_qty: number | null
           track_stock: boolean
           updated_at: string
@@ -577,6 +578,7 @@ export type Database = {
           options?: Json
           price: number
           restaurant_id: string
+          search_aliases?: string[]
           stock_qty?: number | null
           track_stock?: boolean
           updated_at?: string
@@ -594,6 +596,7 @@ export type Database = {
           options?: Json
           price?: number
           restaurant_id?: string
+          search_aliases?: string[]
           stock_qty?: number | null
           track_stock?: boolean
           updated_at?: string
@@ -1004,6 +1007,45 @@ export type Database = {
         }
         Relationships: []
       }
+      unmatched_queries: {
+        Row: {
+          conversation_id: string | null
+          count: number
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          normalized_text: string
+          query_text: string
+          resolved_at: string | null
+          resolved_to_item_id: string | null
+          restaurant_id: string
+        }
+        Insert: {
+          conversation_id?: string | null
+          count?: number
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          normalized_text: string
+          query_text: string
+          resolved_at?: string | null
+          resolved_to_item_id?: string | null
+          restaurant_id: string
+        }
+        Update: {
+          conversation_id?: string | null
+          count?: number
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          normalized_text?: string
+          query_text?: string
+          resolved_at?: string | null
+          resolved_to_item_id?: string | null
+          restaurant_id?: string
+        }
+        Relationships: []
+      }
       usage_counters: {
         Row: {
           ai_replies_used: number
@@ -1126,7 +1168,24 @@ export type Database = {
         Returns: boolean
       }
       is_platform_admin: { Args: { _user_id: string }; Returns: boolean }
+      normalize_ar: { Args: { t: string }; Returns: string }
       recall_customer: { Args: { _conversation_id: string }; Returns: Json }
+      search_menu_fuzzy: {
+        Args: {
+          p_limit?: number
+          p_query: string
+          p_restaurant_id: string
+          p_threshold?: number
+        }
+        Returns: {
+          category: string
+          description: string
+          id: string
+          name: string
+          price: number
+          similarity: number
+        }[]
+      }
       search_menu_items: {
         Args: { p_limit?: number; p_query: string; p_restaurant_id: string }
         Returns: {
@@ -1142,6 +1201,8 @@ export type Database = {
         Args: { _status: string; _sub_id: string }
         Returns: undefined
       }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
       try_mark_update: {
         Args: { _channel: string; _key: string }
         Returns: boolean
