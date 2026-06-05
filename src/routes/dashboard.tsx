@@ -262,6 +262,7 @@ function RestaurantManager({
             <TabsTrigger value="social">ستوري/تعليقات</TabsTrigger>
             <TabsTrigger value="marketing">تسويق</TabsTrigger>
             <TabsTrigger value="combos">كومبوهات</TabsTrigger>
+            <TabsTrigger value="complaints">الشكاوى</TabsTrigger>
 
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
