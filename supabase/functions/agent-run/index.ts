@@ -748,7 +748,7 @@ async function runTool(
   if (name === "add_to_cart") {
     const { data: item, error } = await db
       .from("menu_items")
-      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category")
+      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category,category")
       .eq("id", args.menu_item_id)
       .eq("restaurant_id", restaurant.id)
       .maybeSingle();
