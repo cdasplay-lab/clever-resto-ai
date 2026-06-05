@@ -684,6 +684,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
       setTrackStock(!!item.track_stock);
       setStockQty(Number(item.stock_qty ?? 0));
       setUpsellCategory(item.upsell_category ?? "");
+      setAliases((item.search_aliases ?? []).join("، "));
     }
   }, [open, item]);
 
