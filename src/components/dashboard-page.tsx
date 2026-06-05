@@ -40,6 +40,9 @@ type Restaurant = {
   open_hours: OpenHours | null;
   menu_image_url: string | null;
   menu_image_urls: string[] | null;
+  google_maps_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 type MenuOptionChoice = { name: string; price_delta?: number };
 type MenuOptionGroup = { name: string; type: "single" | "multi"; required?: boolean; choices: MenuOptionChoice[] };
