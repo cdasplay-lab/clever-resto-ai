@@ -1328,6 +1328,19 @@ async function runTool(
     return { ok: true, message: "تم تحويلك لفريق المطعم 🙏 راح يتواصلون وياك بأقرب وقت." };
   }
 
+  if (name === "create_complaint") {
+    const type = String(args.type || "other");
+    const note = String(args.note || "").trim().slice(0, 500);
+    const res = await escalateComplaint(db, conv, restaurant, type, note);
+    return {
+      ...res,
+      message: "وصلت شكوتك للمسؤول 🙏 راح يتواصل وياك بأقرب وقت.",
+      stop: true,
+    };
+  }
+
+
+
 
   if (name === "show_menu") {
     // If the restaurant uploaded menu images, send them all (no captions, no text).
