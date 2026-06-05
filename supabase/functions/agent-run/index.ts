@@ -314,7 +314,134 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "create_complaint",
+      description:
+        "افتح شكوى رسمية لما الزبون يشتكي من جودة/تأخير/نقص/خطأ بالطلب أو سوء معاملة. الأداة توقف البوت تلقائياً، تنبّه المدير والفرع، وترد على الزبون. استخدمها فوراً ولا تعد بأي تعويض من جهتك.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            enum: ["late", "cold", "missing", "wrong", "quality", "rude", "other"],
+            description: "نوع الشكوى",
+          },
+          note: { type: "string", description: "تلخيص قصير جداً لما قاله الزبون" },
+        },
+        required: ["type", "note"],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
+
+// ---------- Complaint keyword detection ----------
+const COMPLAINT_PATTERNS: Array<{ re: RegExp; type: string }> = [
+  { re: /(تأخ?ر|متأخ?ر|ما\s*وصل|ما\s*جاني|late|never\s*arrived|delay)/i, type: "late" },
+  { re: /(بارد|cold)/i, type: "cold" },
+  { re: /(ناقص|نسيتو[ام]?|missing|forgot)/i, type: "missing" },
+  { re: /(غلط|غير\s*صحيح|خطأ|wrong\s*order)/i, type: "wrong" },
+  { re: /(سيء|سيئ|قذر|عفن|منته[يى]|حشرة|spoiled|disgusting|rotten|bug)/i, type: "quality" },
+  { re: /(مهين|قليل\s*أدب|rude|insult)/i, type: "rude" },
+  { re: /(شكوى|أشتكي|اشتكي|راح\s*أبلّ?غ|راح\s*ابلغ|نصب|مسروق|complaint|complain|refund|scam)/i, type: "other" },
+];
+
+function detectComplaint(text: string): string | null {
+  if (!text || text.length < 3) return null;
+  for (const p of COMPLAINT_PATTERNS) if (p.re.test(text)) return p.type;
+  return null;
+}
+
+const COMPLAINT_TYPE_AR: Record<string, string> = {
+  late: "تأخير", cold: "طعام بارد", missing: "صنف ناقص",
+  wrong: "طلب غلط", quality: "جودة سيئة", rude: "سوء معاملة", other: "شكوى عامة",
+};
+
+async function escalateComplaint(
+  db: ReturnType<typeof admin>,
+  conv: any,
+  restaurant: any,
+  type: string,
+  note: string,
+): Promise<{ ok: true; complaint_id: string }> {
+  const typeAr = COMPLAINT_TYPE_AR[type] || "شكوى";
+
+  // Find last order if any
+  const { data: lastOrder } = await db
+    .from("orders")
+    .select("id,total,status,branch_id")
+    .eq("conversation_id", conv.id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // Insert complaint
+  const { data: comp } = await db
+    .from("complaints")
+    .insert({
+      restaurant_id: restaurant.id,
+      conversation_id: conv.id,
+      order_id: lastOrder?.id ?? null,
+      type,
+      note: note || typeAr,
+      status: "open",
+      channel: conv.channel,
+      customer_name: conv.customer_name,
+      customer_handle: conv.customer_handle,
+    })
+    .select("id")
+    .single();
+
+  // Pause bot + flag handoff
+  await db.from("conversations").update({
+    is_bot_paused: true,
+    state: "handoff",
+    meta: {
+      ...(conv.meta || {}),
+      handoff_reason: `complaint:${type}`,
+      handoff_at: new Date().toISOString(),
+      complaint_id: comp?.id,
+    },
+  }).eq("id", conv.id);
+
+  // Telegram notify owner + branch
+  try {
+    const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+    const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+    if (LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+      const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active && b.telegram_chat_id);
+      const branchChat = lastOrder?.branch_id
+        ? branches.find((b: any) => b.id === lastOrder.branch_id)?.telegram_chat_id
+        : null;
+      const chats = new Set<string>();
+      if (restaurant.owner_telegram_chat_id) chats.add(restaurant.owner_telegram_chat_id);
+      if (branchChat) chats.add(branchChat);
+      else branches.forEach((b: any) => chats.add(b.telegram_chat_id));
+
+      const who = conv.customer_name || conv.customer_handle || "زبون";
+      const orderLine = lastOrder
+        ? `\nالطلب: #${String(lastOrder.id).slice(0, 8)} — ${lastOrder.total} ${restaurant.currency} (${lastOrder.status})`
+        : "";
+      const text = `🚨 شكوى جديدة — ${restaurant.name}\nالزبون: ${who} (${conv.channel} ${conv.customer_handle || ""})\nالنوع: ${typeAr}${orderLine}\nالنص: "${note || "—"}"\n— البوت متوقّف. افتحها من لوحة التحكم > الشكاوى.`;
+
+      await Promise.all(Array.from(chats).map((chat) =>
+        fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+            "X-Connection-Api-Key": TELEGRAM_API_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ chat_id: chat, text }),
+        }).catch(() => {}),
+      ));
+    }
+  } catch (_) { /* never block */ }
+
+  return { ok: true, complaint_id: comp?.id || "" };
+}
 
 
 // Media to deliver via the channel (filled by show_menu tool)
@@ -556,6 +683,9 @@ ${branchRule}
    • إذا الزبون قال "ألغي الطلب"، "ما أريده"، "اشطب الطلب" → استدعِ cancel_order مباشرة (آخر طلب فقط). إذا الأداة رجعت خطأ يقول إن الطلب صار بالتحضير، اعتذر واستدعِ handoff_to_human.
    • إذا الزبون قال "أريد أعدّل الطلب"، "زيدلي شي"، "غيّر صنف"، "احذف صنف بعد ما أكدت" → استدعِ modify_order. الأداة ترجّع أصناف الطلب للسلة وتلغي الطلب الأصلي. بعدها ساعد الزبون يضيف/يحذف اللي يريد، ثم preview_order من جديد ثم submit_order أو schedule_order حسب الحالة.
    • لا تعد الزبون بأي إلغاء/تعديل بدون ما تستدعي الأداة فعلاً.
+17) الشكاوى:
+   • إذا الزبون اشتكى من جودة/تأخير/نقص/خطأ بالطلب أو سوء معاملة → استدعِ create_complaint مباشرة مع type مناسب وnote مختصر. لا تعتذر طويلاً ولا تعد بتعويض من نفسك ولا تحاول تحلّها لحالك.
+   • الأداة راح توقف البوت تلقائياً وتنبّه المدير، فاكتفِ برد قصير جداً واحد بعدها.
 
 # السياق الحالي (Context)
 السلة:
@@ -1198,6 +1328,19 @@ async function runTool(
     return { ok: true, message: "تم تحويلك لفريق المطعم 🙏 راح يتواصلون وياك بأقرب وقت." };
   }
 
+  if (name === "create_complaint") {
+    const type = String(args.type || "other");
+    const note = String(args.note || "").trim().slice(0, 500);
+    const res = await escalateComplaint(db, conv, restaurant, type, note);
+    return {
+      ...res,
+      message: "وصلت شكوتك للمسؤول 🙏 راح يتواصل وياك بأقرب وقت.",
+      stop: true,
+    };
+  }
+
+
+
 
   if (name === "show_menu") {
     // If the restaurant uploaded menu images, send them all (no captions, no text).
@@ -1601,6 +1744,18 @@ Deno.serve(async (req) => {
       await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
       return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
     }
+
+    // === Complaint keyword shortcut: escalate, stop bot, no LLM call ===
+    const rawLastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim() : "";
+    const complaintType = detectComplaint(rawLastUserText);
+    if (complaintType) {
+      await escalateComplaint(db, conv, restaurant, complaintType, rawLastUserText.slice(0, 300));
+      const reply = "آسفين هواي على اللي صار 🙏 وصلت شكوتك للمسؤول وراح يتواصل وياك خلال دقائق.";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: "handoff", media: [], quick_replies: [] });
+    }
+
+
 
     // === "new order" shortcut: clear cart so returning customer starts fresh ===
     const newOrderTriggers = [

@@ -15,6 +15,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
+import { Route as ApiPublicCheckComplaintsRouteImport } from './routes/api/public/check-complaints'
 
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
@@ -46,6 +47,12 @@ const ApiPublicCheckDelaysRoute = ApiPublicCheckDelaysRouteImport.update({
   path: '/api/public/check-delays',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicCheckComplaintsRoute =
+  ApiPublicCheckComplaintsRouteImport.update({
+    id: '/api/public/check-complaints',
+    path: '/api/public/check-complaints',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -53,6 +60,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
 }
 export interface FileRoutesByTo {
@@ -61,6 +69,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
 }
 export interface FileRoutesById {
@@ -70,6 +79,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
 }
 export interface FileRouteTypes {
@@ -80,6 +90,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/dashboard'
     | '/reset-password'
+    | '/api/public/check-complaints'
     | '/api/public/check-delays'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -88,6 +99,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/dashboard'
     | '/reset-password'
+    | '/api/public/check-complaints'
     | '/api/public/check-delays'
   id:
     | '__root__'
@@ -96,6 +108,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/dashboard'
     | '/reset-password'
+    | '/api/public/check-complaints'
     | '/api/public/check-delays'
   fileRoutesById: FileRoutesById
 }
@@ -105,6 +118,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   DashboardRoute: typeof DashboardRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  ApiPublicCheckComplaintsRoute: typeof ApiPublicCheckComplaintsRoute
   ApiPublicCheckDelaysRoute: typeof ApiPublicCheckDelaysRoute
 }
 
@@ -152,6 +166,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCheckDelaysRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/check-complaints': {
+      id: '/api/public/check-complaints'
+      path: '/api/public/check-complaints'
+      fullPath: '/api/public/check-complaints'
+      preLoaderRoute: typeof ApiPublicCheckComplaintsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -161,6 +182,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   DashboardRoute: DashboardRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  ApiPublicCheckComplaintsRoute: ApiPublicCheckComplaintsRoute,
   ApiPublicCheckDelaysRoute: ApiPublicCheckDelaysRoute,
 }
 export const routeTree = rootRouteImport

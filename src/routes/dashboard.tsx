@@ -22,6 +22,7 @@ import { SocialTab } from "@/components/social-tab";
 import { MarketingTab } from "@/components/marketing-tab";
 import { CombosTab } from "@/components/combos-tab";
 import { AnalyticsTab } from "@/components/analytics-tab";
+import { ComplaintsTab } from "@/components/complaints-tab";
 
 
 
@@ -261,6 +262,7 @@ function RestaurantManager({
             <TabsTrigger value="social">ستوري/تعليقات</TabsTrigger>
             <TabsTrigger value="marketing">تسويق</TabsTrigger>
             <TabsTrigger value="combos">كومبوهات</TabsTrigger>
+            <TabsTrigger value="complaints">الشكاوى</TabsTrigger>
 
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
@@ -277,6 +279,7 @@ function RestaurantManager({
           <TabsContent value="social"><SocialTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="marketing"><MarketingTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="combos"><CombosTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="complaints"><ComplaintsTab restaurantId={restaurant.id} /></TabsContent>
 
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
