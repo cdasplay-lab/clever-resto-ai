@@ -1293,6 +1293,16 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
 
             <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
             <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>موقع المطعم على الخريطة</Label>
+              <MapsLocationField
+                url={r.google_maps_url}
+                lat={r.latitude}
+                lng={r.longitude}
+                onChange={(u, lat, lng) => setR({ ...r, google_maps_url: u, latitude: lat, longitude: lng })}
+              />
+              <p className="text-xs text-muted-foreground">افتح Google Maps → اضغط على الموقع → "مشاركة" → "نسخ الرابط" والصقه هنا. البوت راح يدزه للزبون لما يطلب الموقع.</p>
+            </div>
             <div className="space-y-2 md:col-span-2"><Label>رابط Webhook لمنصتك (يُرسل إليه الطلب المؤكد)</Label><Input value={r.platform_webhook_url ?? ""} onChange={(e) => setR({ ...r, platform_webhook_url: e.target.value })} placeholder="https://your-saas.com/api/incoming-order" /></div>
             <div className="space-y-2 md:col-span-2"><Label>سر Webhook (للتحقق من التوقيع HMAC-SHA256)</Label><Input value={r.platform_webhook_secret ?? ""} onChange={(e) => setR({ ...r, platform_webhook_secret: e.target.value })} placeholder="optional" /></div>
           </div>
