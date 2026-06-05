@@ -1647,22 +1647,49 @@ async function runTool(
     const inCartIds = new Set(cart.map((c) => c.menu_item_id));
     inCartIds.add(args.for_menu_item_id);
 
-    // Try each candidate keyword until we get matches.
     let suggestions: any[] = [];
-    for (const cat of candidates) {
-      const { data } = await db
-        .from("menu_items")
-        .select("id,name,price,category,track_stock,stock_qty")
-        .eq("restaurant_id", restaurant.id)
-        .eq("is_available", true)
-        .ilike("category", `%${cat}%`)
-        .order("price", { ascending: true })
-        .limit(5);
-      if (data && data.length) {
-        // Exclude same category as the source item to avoid suggesting another burger after a burger.
-        const usable = data.filter((s: any) => !srcCat || (s.category || "").toLowerCase() !== srcCat.toLowerCase());
-        if (usable.length) { suggestions = usable; break; }
-        if (!suggestions.length) suggestions = data;
+    let dataDriven = false;
+
+    // 1) Try frequently-bought-together from past orders.
+    try {
+      const fbt = await loadFBT(db, restaurant.id);
+      if (fbt) {
+        const fbtRanked = getFrequentlyBoughtWith(fbt, args.for_menu_item_id);
+        const fbtIds = fbtRanked.map((x) => x.menu_item_id).filter((id) => !inCartIds.has(id));
+        if (fbtIds.length) {
+          const { data: items } = await db
+            .from("menu_items")
+            .select("id,name,price,category,track_stock,stock_qty,is_available")
+            .in("id", fbtIds)
+            .eq("restaurant_id", restaurant.id);
+          const byId = new Map((items || []).map((i: any) => [i.id, i]));
+          const ranked = fbtRanked
+            .map((r) => byId.get(r.menu_item_id))
+            .filter((s: any) => s && s.is_available && (!s.track_stock || (s.stock_qty != null && s.stock_qty > 0)));
+          if (ranked.length) {
+            suggestions = ranked;
+            dataDriven = true;
+          }
+        }
+      }
+    } catch (_) { /* fall through */ }
+
+    // 2) Fallback: manual upsell_category, then inferred categories.
+    if (!suggestions.length) {
+      for (const cat of candidates) {
+        const { data } = await db
+          .from("menu_items")
+          .select("id,name,price,category,track_stock,stock_qty")
+          .eq("restaurant_id", restaurant.id)
+          .eq("is_available", true)
+          .ilike("category", `%${cat}%`)
+          .order("price", { ascending: true })
+          .limit(5);
+        if (data && data.length) {
+          const usable = data.filter((s: any) => !srcCat || (s.category || "").toLowerCase() !== srcCat.toLowerCase());
+          if (usable.length) { suggestions = usable; break; }
+          if (!suggestions.length) suggestions = data;
+        }
       }
     }
 
@@ -1675,8 +1702,11 @@ async function runTool(
     return {
       ok: true,
       suggestions: filtered,
+      data_driven: dataDriven,
       note: filtered.length
-        ? "اعرض اقتراحاً واحداً فقط بسطر لطيف ومختصر، مثل: 'تحب نضيفلك [اسم] بـ [سعر]؟'. لا تلحّ لو الزبون رفض."
+        ? (dataDriven
+            ? "هذا اقتراح شائع جداً مع هذا الصنف بناءً على طلبات سابقة. اعرضه بثقة بسطر قصير، مثلاً: 'الناس عادة ياخذونه ويا [اسم]، تحب نضيفه بـ [سعر]؟'. لا تلحّ لو الزبون رفض."
+            : "اعرض اقتراحاً واحداً فقط بسطر لطيف ومختصر، مثل: 'تحب نضيفلك [اسم] بـ [سعر]؟'. لا تلحّ لو الزبون رفض.")
         : "ما اكو اقتراح مناسب الآن. كمّل الطلب بشكل طبيعي.",
     };
   }
