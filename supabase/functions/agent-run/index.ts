@@ -833,7 +833,7 @@ async function runTool(
       cart,
       total: cart.reduce((s, i) => s + i.qty * i.unit_price, 0),
       upsell_category: item.upsell_category || null,
-      hint: item.upsell_category ? `استدعِ suggest_upsell بـ for_menu_item_id="${item.id}" لاقتراح إضافة لطيفة (مرة واحدة بالمحادثة فقط).` : undefined,
+      hint: `استدعِ suggest_upsell بـ for_menu_item_id="${item.id}" لاقتراح إضافة لطيفة (مرة واحدة بالمحادثة فقط).`,
     };
   }
 
