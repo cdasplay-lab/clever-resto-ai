@@ -1,97 +1,73 @@
 ## الهدف
-الوكيل يفهم الزبون حتى لو كتب الصنف بلهجة عراقية، بخطأ إملائي، باختصار، أو بكلمة شعبية.
+نضيف موقع المطعم (رابط Google Maps + إحداثيات) للمطعم الرئيسي ولكل فرع، ونخلي البوت يدزه للزبون عند الحاجة، ويطلب موقع الزبون عند التوصيل.
 
-## الطبقات الأربع
+## 1. قاعدة البيانات (migration)
+نضيف على جدول `restaurants` وجدول `branches`:
+- `google_maps_url` (text) — الرابط اللي يلصقه صاحب المطعم
+- `latitude` (numeric) — مستخرج تلقائياً من الرابط
+- `longitude` (numeric) — مستخرج تلقائياً من الرابط
 
-### 1) Normalizer نصي (edge function)
-helper جديد `normalizeArabic(text)` بـ`agent-run/index.ts` يطبّع النص قبل أي بحث:
-- يشيل التشكيل (الفتحة، الكسرة، الضمة، الشدة، السكون)
-- يوحّد الألف: أ/إ/آ/ٱ → ا
-- يوحّد الياء: ى → ي
-- يوحّد التاء: ة → ه (للمطابقة فقط، لا يغيّر النص الأصلي)
-- يشيل التطويل (ـ) وتكرار الحروف ("بيييتزا" → "بيتزا")
-- يخلي الأرقام والمسافات نظيفة
-- lowercase للإنكليزي ("Pizza" = "pizza")
+نضيف على جدول `conversations` (داخل `delivery` jsonb الموجود):
+- نخزن `customer_location: { lat, lng, address }` لما الزبون يدز موقعه
 
-يطبّق على: النص الوارد + أسماء الأصناف + الـaliases قبل المقارنة.
+ما نحتاج جداول جديدة.
 
-### 2) Migration: pg_trgm + search_aliases + جدول unmatched
+## 2. لوحة التحكم (UI)
 
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
+### تبويب "الإعدادات" (المطعم):
+- خانة جديدة: **"موقع المطعم على الخريطة"**
+- Input واحد يلصق فيه رابط Google Maps (مثل `https://maps.google.com/?q=33.31,44.36` أو `https://maps.app.goo.gl/...`)
+- زر "تحقق" يستخرج الإحداثيات ويعرض preview صغير (نص "📍 33.31, 44.36")
+- لو الرابط مختصر (`maps.app.goo.gl`) — نطلب من المستخدم يفتحه ويلصق الرابط الكامل، أو نوضح إنه يفتح الرابط بالمتصفح ويرجع ينسخه
 
-ALTER TABLE menu_items 
-  ADD COLUMN search_aliases text[] NOT NULL DEFAULT '{}';
+### تبويب "الفروع":
+- نفس الخانة لكل فرع بشكل منفصل (داخل dialog تعديل الفرع)
 
--- index لتسريع fuzzy matching
-CREATE INDEX menu_items_name_trgm_idx 
-  ON menu_items USING gin (name gin_trgm_ops);
+### استخراج الإحداثيات (frontend helper):
+دالة `parseMapsUrl(url)` تتعامل مع:
+- `?q=lat,lng` أو `?ll=lat,lng`
+- `/@lat,lng,zoom`
+- `/place/.../@lat,lng,...`
+- إذا ما طلع شي → خطأ واضح: "ما كدرنا نستخرج الإحداثيات، افتح الرابط بـ Google Maps واختر Share → نسخ الرابط"
 
--- جدول للأسئلة اللي ما لكينا لها صنف
-CREATE TABLE unmatched_queries (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  restaurant_id uuid NOT NULL,
-  conversation_id uuid,
-  query_text text NOT NULL,
-  normalized_text text NOT NULL,
-  resolved_to_item_id uuid, -- لو حُل لاحقاً
-  count int NOT NULL DEFAULT 1,
-  first_seen_at timestamptz NOT NULL DEFAULT now(),
-  last_seen_at timestamptz NOT NULL DEFAULT now()
-);
--- + GRANTs + RLS owners + index على (restaurant_id, normalized_text)
-```
+## 3. البوت (`agent-run/index.ts`)
 
-دالة بحث جديدة `search_menu_fuzzy(restaurant_id, query_normalized, threshold)` ترجع أعلى التطابقات حسب `similarity()` على الاسم + الـaliases + الـdescription.
+### tool جديد: `send_restaurant_location`
+- يجيب موقع الفرع (لو محدد) أو موقع المطعم الرئيسي
+- يدز للزبون رسالة فيها:
+  - رابط Google Maps
+  - إحداثيات (للعرض)
+  - عبر Telegram: يدز `sendLocation` API (latitude/longitude) — يطلع كخريطة حقيقية
+  - عبر WhatsApp/Instagram/Facebook: يدز الرابط نصاً
 
-### 3) منطق بحث متدرّج في `agent-run`
+### tool جديد: `request_customer_location`
+- يطلب من الزبون موقعه
+- Telegram: يدز ReplyKeyboard فيه زر "📍 شارك موقعك" (request_location: true)
+- باقي القنوات: رسالة نصية "دزلنا موقعك على Google Maps أو اكتب الشارع والمنطقة"
 
-داخل tool `search_menu` (واللي يستخدمه `add_to_cart` لما الزبون يذكر اسم):
+### استقبال موقع الزبون (`telegram-webhook/index.ts`):
+- لو الرسالة فيها `location` (Telegram يدزها كـ object فيها lat/lng):
+  - نخزنها بـ `conversations.delivery.customer_location`
+  - نمرر للـ AI كنص: "الزبون شارك موقعه: lat,lng → https://maps.google.com/?q=lat,lng"
 
-```
-1. normalize(query)
-2. exact match على name normalized أو aliases normalized → رجّع
-3. fuzzy: pg_trgm similarity ≥ 0.4 → رجّع أعلى 3
-4. لو ما لكى شي → AI fallback:
-   - مرّر للـAI: query + قائمة [{id, name, category}] للأصناف المتوفرة
-   - استخدم google/gemini-3-flash-preview مع tool call
-   - يرجع menu_item_id الأقرب دلالياً أو null
-5. لو AI رجع null → سجّل بـunmatched_queries (upsert + count++)
-   ورد على الزبون "ما لكيت — هل تقصد X أو Y؟" مع أقرب 2 من fuzzy
-```
+### الـ system prompt:
+نضيف توجيهات للـ AI:
+- "إذا الزبون سأل وين المطعم/الفرع → استدعِ `send_restaurant_location`"
+- "إذا طلب توصيل وما عندنا موقعه → استدعِ `request_customer_location`"
+- "إذا الزبون كتب اسم شارع/منطقة فقط → خزنه بالطلب كـ delivery_address"
 
-### 4) UI بسيط — Aliases + Unmatched
+## 4. عرض موقع الزبون بالطلبات
+بتبويب "الطلبات" → عند فتح الطلب: لو فيه `customer_location` نعرض زر "📍 افتح بالخريطة" يفتح `https://maps.google.com/?q=lat,lng`.
 
-تبويب جديد بـدashboard أو إضافة على `menu` tab:
+## التقنيات
+- **لا نحتاج Google Maps connector** — نستعمل الروابط والإحداثيات فقط (الـ parsing نص بسيط، والـ Telegram sendLocation مجاني)
+- كل التغييرات على ملفات موجودة + migration واحد
+- لو لاحقاً تريد خريطة تفاعلية لاختيار الموقع، نضيف Google Maps connector بمرحلة ثانية
 
-**أ. حقل aliases بكل صنف**: input للأسماء البديلة (chips). صاحب المطعم يكتب "تكه, تيكا, تكة" → يصير كلهم يلكطون نفس الصنف.
-
-**ب. قسم "كلمات ما فهمناها"**: جدول من `unmatched_queries` مرتب بـcount تنازلي. كل صف عليه:
-- النص اللي كتبه الزبون
-- عدد المرات
-- زر "اربط بصنف" → dropdown أصناف، يختار → يضيف للـaliases تلقائياً ويعلّم الـrow resolved
-
-## ملفات تتغير
-
-1. **migration** جديد: pg_trgm + search_aliases + unmatched_queries + search_menu_fuzzy()
-2. **`supabase/functions/agent-run/index.ts`**:
-   - helper `normalizeArabic()`
-   - تعديل `search_menu` للمنطق المتدرّج
-   - AI fallback call
-   - تسجيل unmatched
-3. **`src/components/menu-tab.tsx`** (أو الموجود): حقل aliases على كل صنف
-4. **`src/components/menu-tab.tsx`** أو tab جديد `unmatched-tab.tsx`: قائمة الكلمات + ربط
-
-## نقاط مهمة
-
-- النصوص الأصلية تبقى كما هي بالـDB؛ التطبيع فقط للمقارنة (للـsearch_aliases نخزن المُطبّع مسبقاً للسرعة).
-- threshold = 0.4 (متوازن: ما يلكط ضوضاء، ويلكط الأخطاء الشائعة).
-- AI fallback محدود بـ20 صنف max بالـprompt (تكلفة + سرعة).
-- نشر `agent-run` بعد التعديل.
-
-## النتيجة
-- "بيتزه مارغريتا" → يلكط "بيتزا مارغريتا" (fuzzy)
-- "تكه" → يلكط "تكة دجاج" (alias)
-- "اكلة شعبية" → AI يقترح "قوزي" (دلالي)
-- "بييييتزا" → يلكط "بيتزا" (normalizer)
-- اللي ما ينحل → يظهر لصاحب المطعم ليربطه بضغطة
+## الملفات اللي راح تتغير
+- migration جديد (إضافة الأعمدة)
+- `src/components/dashboard-page.tsx` (خانة موقع المطعم بالإعدادات)
+- `src/components/branches-tab.tsx` (خانة موقع الفرع)
+- `supabase/functions/agent-run/index.ts` (الـ tools الجديدة + system prompt)
+- `supabase/functions/telegram-webhook/index.ts` (التقاط location من Telegram)
+- `src/integrations/supabase/types.ts` (تلقائياً بعد الـ migration)

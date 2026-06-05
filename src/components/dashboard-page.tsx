@@ -8,7 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil, MapPin } from "lucide-react";
+import { MapsLocationField } from "@/components/maps-location-field";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -40,6 +41,9 @@ type Restaurant = {
   open_hours: OpenHours | null;
   menu_image_url: string | null;
   menu_image_urls: string[] | null;
+  google_maps_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 type MenuOptionChoice = { name: string; price_delta?: number };
 type MenuOptionGroup = { name: string; type: "single" | "multi"; required?: boolean; choices: MenuOptionChoice[] };
@@ -1197,6 +1201,9 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
       platform_webhook_url: r.platform_webhook_url, platform_webhook_secret: r.platform_webhook_secret,
       menu_image_url: r.menu_image_url,
       menu_image_urls: r.menu_image_urls ?? [],
+      google_maps_url: r.google_maps_url,
+      latitude: r.latitude,
+      longitude: r.longitude,
     }).eq("id", r.id).select().single();
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -1286,6 +1293,16 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
 
             <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
             <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>موقع المطعم على الخريطة</Label>
+              <MapsLocationField
+                url={r.google_maps_url}
+                lat={r.latitude}
+                lng={r.longitude}
+                onChange={(u, lat, lng) => setR({ ...r, google_maps_url: u, latitude: lat, longitude: lng })}
+              />
+              <p className="text-xs text-muted-foreground">افتح Google Maps → اضغط على الموقع → "مشاركة" → "نسخ الرابط" والصقه هنا. البوت راح يدزه للزبون لما يطلب الموقع.</p>
+            </div>
             <div className="space-y-2 md:col-span-2"><Label>رابط Webhook لمنصتك (يُرسل إليه الطلب المؤكد)</Label><Input value={r.platform_webhook_url ?? ""} onChange={(e) => setR({ ...r, platform_webhook_url: e.target.value })} placeholder="https://your-saas.com/api/incoming-order" /></div>
             <div className="space-y-2 md:col-span-2"><Label>سر Webhook (للتحقق من التوقيع HMAC-SHA256)</Label><Input value={r.platform_webhook_secret ?? ""} onChange={(e) => setR({ ...r, platform_webhook_secret: e.target.value })} placeholder="optional" /></div>
           </div>

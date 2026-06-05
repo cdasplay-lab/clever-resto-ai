@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Pencil, MapPin, Phone, Clock } from "lucide-react";
+import { MapsLocationField } from "@/components/maps-location-field";
 
 type DayHours = { open: string; close: string; closed: boolean };
 type OpenHours = Record<string, DayHours>;
@@ -22,6 +23,9 @@ export type Branch = {
   min_order: number;
   is_active: boolean;
   telegram_chat_id: string | null;
+  google_maps_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 const DAYS: { key: string; label: string }[] = [
@@ -203,6 +207,9 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
       min_order: Number(b.min_order) || 0,
       telegram_chat_id: b.telegram_chat_id || null,
       is_active: b.is_active,
+      google_maps_url: b.google_maps_url,
+      latitude: b.latitude,
+      longitude: b.longitude,
     }).eq("id", b.id);
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -219,6 +226,15 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
             <div className="space-y-1"><Label>الاسم</Label><Input value={b.name} onChange={(e) => setB({ ...b, name: e.target.value })} /></div>
             <div className="space-y-1"><Label>الهاتف</Label><Input value={b.phone ?? ""} onChange={(e) => setB({ ...b, phone: e.target.value })} /></div>
             <div className="space-y-1 md:col-span-2"><Label>عنوان الفرع</Label><Input value={b.address ?? ""} onChange={(e) => setB({ ...b, address: e.target.value })} /></div>
+            <div className="space-y-1 md:col-span-2">
+              <Label>موقع الفرع على الخريطة (Google Maps)</Label>
+              <MapsLocationField
+                url={b.google_maps_url}
+                lat={b.latitude}
+                lng={b.longitude}
+                onChange={(u, lat, lng) => setB({ ...b, google_maps_url: u, latitude: lat, longitude: lng })}
+              />
+            </div>
             <div className="space-y-1"><Label>الحد الأدنى للطلب</Label><Input type="number" value={b.min_order} onChange={(e) => setB({ ...b, min_order: Number(e.target.value) })} /></div>
             <div className="space-y-1"><Label>Telegram chat للإشعارات (اختياري)</Label><Input value={b.telegram_chat_id ?? ""} onChange={(e) => setB({ ...b, telegram_chat_id: e.target.value })} /></div>
           </div>

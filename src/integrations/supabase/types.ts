@@ -154,8 +154,11 @@ export type Database = {
           created_at: string
           current_prep_minutes: number | null
           delivery_areas: Json
+          google_maps_url: string | null
           id: string
           is_active: boolean
+          latitude: number | null
+          longitude: number | null
           min_order: number
           name: string
           open_hours: Json
@@ -169,8 +172,11 @@ export type Database = {
           created_at?: string
           current_prep_minutes?: number | null
           delivery_areas?: Json
+          google_maps_url?: string | null
           id?: string
           is_active?: boolean
+          latitude?: number | null
+          longitude?: number | null
           min_order?: number
           name: string
           open_hours?: Json
@@ -184,8 +190,11 @@ export type Database = {
           created_at?: string
           current_prep_minutes?: number | null
           delivery_areas?: Json
+          google_maps_url?: string | null
           id?: string
           is_active?: boolean
+          latitude?: number | null
+          longitude?: number | null
           min_order?: number
           name?: string
           open_hours?: Json
@@ -883,10 +892,13 @@ export type Database = {
           description: string | null
           facebook_page: string | null
           feature_flags: Json
+          google_maps_url: string | null
           id: string
           instagram_handle: string | null
           is_active: boolean
           language: string
+          latitude: number | null
+          longitude: number | null
           menu_image_url: string | null
           menu_image_urls: string[]
           min_order: number
@@ -908,10 +920,13 @@ export type Database = {
           description?: string | null
           facebook_page?: string | null
           feature_flags?: Json
+          google_maps_url?: string | null
           id?: string
           instagram_handle?: string | null
           is_active?: boolean
           language?: string
+          latitude?: number | null
+          longitude?: number | null
           menu_image_url?: string | null
           menu_image_urls?: string[]
           min_order?: number
@@ -933,10 +948,13 @@ export type Database = {
           description?: string | null
           facebook_page?: string | null
           feature_flags?: Json
+          google_maps_url?: string | null
           id?: string
           instagram_handle?: string | null
           is_active?: boolean
           language?: string
+          latitude?: number | null
+          longitude?: number | null
           menu_image_url?: string | null
           menu_image_urls?: string[]
           min_order?: number

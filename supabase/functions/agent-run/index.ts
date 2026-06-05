@@ -357,6 +357,22 @@ const TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "send_restaurant_location",
+      description: "أرسل موقع المطعم (أو الفرع المختار إذا تم تحديده) للزبون كنقطة جغرافية حقيقية. استخدمها لما يسأل الزبون 'وين موقعكم'، 'دزلي اللوكيشن'، 'فين المطعم'، أو يطلب يجي بنفسه (pickup).",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_customer_location",
+      description: "اطلب من الزبون يشارك موقعه الجغرافي. استخدمها لما تحتاج عنوان التوصيل ولم يعطه الزبون أو لما يصعب وصفه نصياً. على Telegram يظهر للزبون زر مباشر لمشاركة موقعه.",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
 ] as const;
 
 // ---------- Complaint keyword detection ----------
@@ -830,6 +846,7 @@ async function runTool(
   name: string,
   args: any,
   media: MediaItem[],
+  actions: any[],
   customerProfile?: any,
 ): Promise<any> {
   if (name === "search_menu") {
@@ -2015,6 +2032,43 @@ async function runTool(
             ? "هذا اقتراح شائع جداً مع هذا الصنف بناءً على طلبات سابقة. اعرضه بثقة بسطر قصير، مثلاً: 'الناس عادة ياخذونه ويا [اسم]، تحب نضيفه بـ [سعر]؟'. لا تلحّ لو الزبون رفض."
             : "اعرض اقتراحاً واحداً فقط بسطر لطيف ومختصر، مثل: 'تحب نضيفلك [اسم] بـ [سعر]؟'. لا تلحّ لو الزبون رفض.")
         : "ما اكو اقتراح مناسب الآن. كمّل الطلب بشكل طبيعي.",
+    };
+  }
+
+  if (name === "send_restaurant_location") {
+    const branchId = conv.meta?.branch_id;
+    const branches: any[] = (restaurant as any).__branches || [];
+    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    const src: any = branch || restaurant;
+    const lat = Number(src.latitude);
+    const lng = Number(src.longitude);
+    const url = src.google_maps_url || (Number.isFinite(lat) && Number.isFinite(lng) ? `https://maps.google.com/?q=${lat},${lng}` : null);
+    if (!url) {
+      return { error: "no_location_set", user_message: "موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا للاستفسار." };
+    }
+    const label = branch ? `فرع ${branch.name}` : restaurant.name;
+    const isTelegram = conv.channel === "telegram";
+    if (isTelegram && Number.isFinite(lat) && Number.isFinite(lng)) {
+      actions.push({ type: "send_location", lat, lng, title: label, address: src.address || null });
+    }
+    return {
+      ok: true, lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, url, label,
+      note: isTelegram && Number.isFinite(lat) && Number.isFinite(lng)
+        ? `تم إرسال الموقع كخريطة. اكتب سطر قصير فقط مثل: "هذا موقع ${label} 📍".`
+        : `اكتب للزبون: "هذا موقع ${label} 📍\n${url}".`,
+    };
+  }
+
+  if (name === "request_customer_location") {
+    const isTelegram = conv.channel === "telegram";
+    if (isTelegram) {
+      actions.push({ type: "request_location", text: "شارك موقعك من الزر اللي تحت 👇" });
+    }
+    return {
+      ok: true,
+      note: isTelegram
+        ? "ظهرله زر مشاركة الموقع. لا ترسل نص إضافي — الزر يكفي."
+        : "اكتب للزبون: 'دزلنا موقعك على Google Maps لو اكتبلنا اسم الشارع والمنطقة بالتفصيل.'",
     };
   }
 
