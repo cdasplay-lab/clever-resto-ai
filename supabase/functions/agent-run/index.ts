@@ -854,8 +854,135 @@ async function runTool(
         .eq("is_available", true)
         .ilike("name", `%${q}%`)
         .limit(5);
-      results = data ?? [];
+  if (name === "search_menu") {
+    const q = String(args.query || "").trim();
+    if (!q) return { error: "empty query" };
+    const nq = normalizeArabic(q);
+    let results: any[] = [];
+    let matchSource: string = "embedding";
+
+    // 1) Embedding search (semantic)
+    try {
+      const vec = await embedText(q);
+      const { data, error } = await db.rpc("search_menu_items", {
+        p_restaurant_id: restaurant.id,
+        p_query: vec,
+        p_limit: 5,
+      });
+      if (!error && data && data.length) {
+        // Require decent semantic similarity to avoid noise
+        const filtered = (data as any[]).filter((r) => (r.similarity ?? 0) >= 0.55);
+        if (filtered.length) { results = filtered; matchSource = "embedding"; }
+      }
+    } catch (_) { /* fall through */ }
+
+    // 2) Fuzzy (pg_trgm) on normalized name + aliases
+    if (!results.length) {
+      try {
+        const { data, error } = await db.rpc("search_menu_fuzzy", {
+          p_restaurant_id: restaurant.id,
+          p_query: q,
+          p_threshold: 0.3,
+          p_limit: 5,
+        });
+        if (!error && data && data.length) { results = data as any[]; matchSource = "fuzzy"; }
+      } catch (_) { /* fall through */ }
     }
+
+    // 3) Simple ILIKE fallback
+    if (!results.length) {
+      const { data } = await db
+        .from("menu_items")
+        .select("id,name,description,price,is_available,category")
+        .eq("restaurant_id", restaurant.id)
+        .eq("is_available", true)
+        .ilike("name", `%${q}%`)
+        .limit(5);
+      if (data && data.length) { results = data; matchSource = "ilike"; }
+    }
+
+    // 4) AI semantic fallback — pass a compact menu list and ask the model to pick the closest item
+    if (!results.length) {
+      try {
+        const { data: menuList } = await db
+          .from("menu_items")
+          .select("id,name,category")
+          .eq("restaurant_id", restaurant.id)
+          .eq("is_available", true)
+          .limit(60);
+        if (menuList && menuList.length) {
+          const compact = menuList.map((m: any) => `${m.id}|${m.name}${m.category ? ` (${m.category})` : ""}`).join("\n");
+          const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "google/gemini-3-flash-preview",
+              messages: [
+                { role: "system", content: "أنت مساعد لمطابقة طلبات الزبائن بالعربية العراقية مع أصناف منيو. الزبون قد يستخدم لهجة أو أخطاء إملائية أو اختصارات. ارجع أقرب صنف دلالياً أو null إذا ما اكو شي قريب." },
+                { role: "user", content: `طلب الزبون: "${q}"\n\nالمنيو (id|name):\n${compact}\n\nاختر الـid الأقرب أو null.` },
+              ],
+              tools: [{
+                type: "function",
+                function: {
+                  name: "pick_item",
+                  description: "Return the closest matching menu_item_id, or null if none.",
+                  parameters: {
+                    type: "object",
+                    properties: { menu_item_id: { type: ["string","null"] }, confidence: { type: "number" } },
+                    required: ["menu_item_id"],
+                    additionalProperties: false,
+                  },
+                },
+              }],
+              tool_choice: { type: "function", function: { name: "pick_item" } },
+            }),
+          });
+          if (aiRes.ok) {
+            const j = await aiRes.json();
+            const args0 = j?.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+            const parsed = args0 ? JSON.parse(args0) : null;
+            const picked = parsed?.menu_item_id;
+            const conf = Number(parsed?.confidence ?? 0.7);
+            if (picked && conf >= 0.5) {
+              const { data: row } = await db
+                .from("menu_items")
+                .select("id,name,description,price,is_available,category")
+                .eq("id", picked)
+                .eq("restaurant_id", restaurant.id)
+                .maybeSingle();
+              if (row) { results = [row]; matchSource = "ai"; }
+            }
+          }
+        }
+      } catch (_) { /* fall through */ }
+    }
+
+    // 5) Log unmatched query so owner can train the system
+    if (!results.length && nq) {
+      try {
+        // upsert by (restaurant_id, normalized_text)
+        const { data: existing } = await db
+          .from("unmatched_queries")
+          .select("id,count")
+          .eq("restaurant_id", restaurant.id)
+          .eq("normalized_text", nq)
+          .is("resolved_to_item_id", null)
+          .maybeSingle();
+        if (existing) {
+          await db.from("unmatched_queries")
+            .update({ count: (existing.count || 1) + 1, last_seen_at: new Date().toISOString(), query_text: q, conversation_id: conv.id })
+            .eq("id", existing.id);
+        } else {
+          await db.from("unmatched_queries").insert({
+            restaurant_id: restaurant.id,
+            conversation_id: conv.id,
+            query_text: q,
+            normalized_text: nq,
+          });
+        }
+      } catch (_) { /* ignore */ }
+    }
+
     // Enrich with options + stock info
     if (results.length) {
       const ids = results.map((r: any) => r.id);
@@ -870,28 +997,8 @@ async function runTool(
         return { ...r, options: e.options || [], track_stock: !!e.track_stock, stock_qty: e.stock_qty, upsell_category: e.upsell_category || null, out_of_stock };
       });
     }
-    return { results };
+    return { results, match_source: matchSource };
   }
-
-  if (name === "add_to_cart") {
-    const { data: item, error } = await db
-      .from("menu_items")
-      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category,category")
-      .eq("id", args.menu_item_id)
-      .eq("restaurant_id", restaurant.id)
-      .maybeSingle();
-    if (error || !item) return { error: "صنف غير موجود" };
-    if (!item.is_available) return { error: "هذا الصنف غير متوفر حالياً" };
-
-    // Validate required option groups
-    const groups: any[] = Array.isArray(item.options) ? item.options : [];
-    const selected: { group: string; choice: string }[] = Array.isArray(args.selected_options) ? args.selected_options : [];
-    for (const g of groups) {
-      if (g.required) {
-        const has = selected.some((s) => s.group === g.name);
-        if (!has) return { error: `لازم تختار من مجموعة "${g.name}" قبل الإضافة`, missing_group: g.name, choices: g.choices };
-      }
-    }
 
     // Stock check (cart-aware)
     if (item.track_stock) {
