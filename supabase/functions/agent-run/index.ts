@@ -757,6 +757,27 @@ function getFrequentlyBoughtWith(fbt: FBTEntry, sourceItemId: string): Array<{ m
   return out.sort((a, b) => b.score - a.score).slice(0, 5);
 }
 
+// Aggregate FBT scores across multiple source items (cart). Returns top item ids
+// not already in the cart, sorted by summed score desc.
+function getCheckoutFBT(fbt: FBTEntry, cartItemIds: string[], excludeIds: Set<string>): Array<{ menu_item_id: string; score: number }> {
+  const agg = new Map<string, number>();
+  for (const srcId of cartItemIds) {
+    const sourceCount = fbt.sourceCounts.get(srcId) || 0;
+    if (sourceCount < 3) continue;
+    const co = fbt.coCounts.get(srcId);
+    if (!co) continue;
+    for (const [otherId, count] of co.entries()) {
+      if (excludeIds.has(otherId)) continue;
+      const score = count / sourceCount;
+      if (score >= 0.15) agg.set(otherId, (agg.get(otherId) || 0) + score);
+    }
+  }
+  return [...agg.entries()]
+    .map(([menu_item_id, score]) => ({ menu_item_id, score }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
+}
+
 // Infer an upsell target category from the item's own category, when no manual
 // upsell_category is set. Returns a list of candidate category keywords to try.
 function inferUpsellCategory(cat: string | null | undefined): string[] {
