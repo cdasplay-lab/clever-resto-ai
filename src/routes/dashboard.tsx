@@ -299,7 +299,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   async function load() {
     const { data } = await supabase
       .from("menu_items")
-      .select("id,name,description,category,price,is_available,image_url,options,track_stock,stock_qty,upsell_category")
+      .select("id,name,description,category,price,is_available,image_url,options,track_stock,stock_qty,upsell_category,search_aliases")
       .eq("restaurant_id", restaurantId)
       .order("category", { nullsFirst: false })
       .order("name");
