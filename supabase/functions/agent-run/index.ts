@@ -1576,23 +1576,36 @@ async function runTool(
       .eq("id", args.for_menu_item_id)
       .eq("restaurant_id", restaurant.id)
       .maybeSingle();
-    const targetCat = (src as any)?.upsell_category;
-    if (!targetCat) return { ok: true, suggestions: [], note: "ما اكو فئة مقترحة لهذا الصنف." };
+    // Manual setting wins; otherwise infer from the item's own category.
+    const manualCat = (src as any)?.upsell_category as string | null | undefined;
+    const srcCat = (src as any)?.category as string | null | undefined;
+    const candidates: string[] = manualCat ? [manualCat] : inferUpsellCategory(srcCat);
 
-    // Don't suggest if already in cart from same category
+    // Don't suggest items already in the cart, and exclude the source item itself.
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     const inCartIds = new Set(cart.map((c) => c.menu_item_id));
+    inCartIds.add(args.for_menu_item_id);
 
-    const { data: suggestions } = await db
-      .from("menu_items")
-      .select("id,name,price,category,track_stock,stock_qty")
-      .eq("restaurant_id", restaurant.id)
-      .eq("is_available", true)
-      .ilike("category", `%${targetCat}%`)
-      .order("price", { ascending: true })
-      .limit(5);
+    // Try each candidate keyword until we get matches.
+    let suggestions: any[] = [];
+    for (const cat of candidates) {
+      const { data } = await db
+        .from("menu_items")
+        .select("id,name,price,category,track_stock,stock_qty")
+        .eq("restaurant_id", restaurant.id)
+        .eq("is_available", true)
+        .ilike("category", `%${cat}%`)
+        .order("price", { ascending: true })
+        .limit(5);
+      if (data && data.length) {
+        // Exclude same category as the source item to avoid suggesting another burger after a burger.
+        const usable = data.filter((s: any) => !srcCat || (s.category || "").toLowerCase() !== srcCat.toLowerCase());
+        if (usable.length) { suggestions = usable; break; }
+        if (!suggestions.length) suggestions = data;
+      }
+    }
 
-    const filtered = (suggestions ?? [])
+    const filtered = suggestions
       .filter((s: any) => !inCartIds.has(s.id))
       .filter((s: any) => !s.track_stock || (s.stock_qty != null && s.stock_qty > 0))
       .slice(0, 3)
