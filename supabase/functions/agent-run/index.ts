@@ -978,6 +978,26 @@ async function runTool(
     return { results, match_source: matchSource };
   }
 
+  if (name === "add_to_cart") {
+    const { data: item, error } = await db
+      .from("menu_items")
+      .select("id,name,price,is_available,options,track_stock,stock_qty,upsell_category,category")
+      .eq("id", args.menu_item_id)
+      .eq("restaurant_id", restaurant.id)
+      .maybeSingle();
+    if (error || !item) return { error: "صنف غير موجود" };
+    if (!item.is_available) return { error: "هذا الصنف غير متوفر حالياً" };
+
+    // Validate required option groups
+    const groups: any[] = Array.isArray(item.options) ? item.options : [];
+    const selected: { group: string; choice: string }[] = Array.isArray(args.selected_options) ? args.selected_options : [];
+    for (const g of groups) {
+      if (g.required) {
+        const has = selected.some((s) => s.group === g.name);
+        if (!has) return { error: `لازم تختار من مجموعة "${g.name}" قبل الإضافة`, missing_group: g.name, choices: g.choices };
+      }
+    }
+
     // Stock check (cart-aware)
     if (item.track_stock) {
       const cartExisting: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
