@@ -846,6 +846,7 @@ async function runTool(
   name: string,
   args: any,
   media: MediaItem[],
+  actions: any[],
   customerProfile?: any,
 ): Promise<any> {
   if (name === "search_menu") {
