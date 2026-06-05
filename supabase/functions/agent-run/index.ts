@@ -1745,6 +1745,18 @@ Deno.serve(async (req) => {
       return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
     }
 
+    // === Complaint keyword shortcut: escalate, stop bot, no LLM call ===
+    const rawLastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim() : "";
+    const complaintType = detectComplaint(rawLastUserText);
+    if (complaintType) {
+      await escalateComplaint(db, conv, restaurant, complaintType, rawLastUserText.slice(0, 300));
+      const reply = "آسفين هواي على اللي صار 🙏 وصلت شكوتك للمسؤول وراح يتواصل وياك خلال دقائق.";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: "handoff", media: [], quick_replies: [] });
+    }
+
+
+
     // === "new order" shortcut: clear cart so returning customer starts fresh ===
     const newOrderTriggers = [
       "طلب جديد", "اطلب جديد", "ابدأ من جديد", "ابدا من جديد", "من جديد",
