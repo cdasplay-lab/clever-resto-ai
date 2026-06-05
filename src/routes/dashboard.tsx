@@ -61,7 +61,7 @@ type MenuItem = {
   upsell_category?: string | null;
   search_aliases?: string[] | null;
 };
-type _Pad = {
+
 type Order = {
   id: string;
   customer_name: string | null;
