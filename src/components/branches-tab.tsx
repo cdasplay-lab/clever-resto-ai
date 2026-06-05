@@ -22,6 +22,9 @@ export type Branch = {
   min_order: number;
   is_active: boolean;
   telegram_chat_id: string | null;
+  google_maps_url: string | null;
+  latitude: number | null;
+  longitude: number | null;
 };
 
 const DAYS: { key: string; label: string }[] = [
