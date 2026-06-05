@@ -750,6 +750,17 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
             />
             <p className="text-xs text-muted-foreground">اكتب اسم فئة موجودة بمنيوك. الوكيل يقترح صنف منها مرة واحدة بعد إضافة هذا الصنف.</p>
           </div>
+
+          <div className="space-y-1">
+            <Label>مرادفات / أسماء بديلة (اختياري)</Label>
+            <Textarea
+              value={aliases}
+              onChange={(e) => setAliases(e.target.value)}
+              placeholder="مثال: تكه، تيكا، تكة دجاج"
+              rows={2}
+            />
+            <p className="text-xs text-muted-foreground">افصل بفاصلة. الوكيل يفهم هاي الكلمات على أنها نفس الصنف — مفيد للهجات والأخطاء الإملائية.</p>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>إلغاء</Button>
