@@ -1,41 +1,48 @@
-## Auto-Upsell بدون إعداد يدوي
+## Upsell مبني على بيانات الطلبات السابقة (Frequently Bought Together)
 
-### المشكلة
-حالياً `suggest_upsell` يعتمد على `upsell_category` المُعيّن يدوياً لكل صنف. أغلب الأصناف ما عندها هذا الحقل → الاقتراح ما ينطلق أبداً.
+### الفكرة
+نتعلم من جدول `orders` شنو الزبائن يطلبونه مع بعض. لما الزبون يضيف صنف للسلة، نقترح الصنف الأكثر ارتباطاً به تاريخياً بدل اقتراح عام من الفئة.
 
-### الحل
-نخلّي النظام يستنتج فئة الاقتراح تلقائياً من فئة الصنف الأصلي بخريطة افتراضية. الإعداد اليدوي يبقى موجود ويغلب الافتراضي إذا كان مضبوطاً.
+### الترتيب بالأولوية داخل `suggest_upsell`
+1. **Co-occurrence من orders** (الجديد) — لو طلع نتيجة قوية، نستخدمها.
+2. **Manual `upsell_category`** (موجود حالياً).
+3. **Inferred category** (سويناه بالخطوة السابقة) — fallback.
 
-### خريطة الاستنتاج (داخل الكود)
-نبني `inferUpsellCategory(category)` بمطابقة بسيطة (lowercase + يحتوي):
-- برجر / burger / ساندويتش / sandwich → مشروب أو بطاطا
-- بيتزا / pizza → مشروب أو مقبلات
-- شاورما / wrap → مشروب أو بطاطا
-- دجاج / chicken / مشاوي / grill → مشروب أو سلطة
-- بطاطا / fries / مقبلات / sides → مشروب
-- سلطة / salad → مشروب
-- مشروب / drink / عصير / juice → حلى أو حلويات
-- حلى / dessert / حلويات / sweet → مشروب
-- بريك فاست / فطور / breakfast → مشروب (شاي/قهوة)
-- افتراضي (لو ما طابق) → مشروب
+### المنطق
+
+**أ. Materialized helper بالـedge function** — ما اكو جدول جديد، نحسب on-the-fly مع cache بسيط:
+
+داخل `runTool` لـ`suggest_upsell`:
+- نجيب آخر 200 طلب confirmed/delivered للمطعم خلال آخر 90 يوم.
+- نبني خريطة: لكل صنف، شنو الأصناف اللي تكرّرت معاه بنفس الطلب وكم مرة.
+- نحسب score: `count(co-occurrence) / count(orders that contain source_item)`.
+- نأخذ أعلى 5 أصناف بـscore ≥ 0.2 (يعني 20%+ من طلبات هاي الصنف فيها هذا المقترح).
+- نفلتر: مو بالسلة، متوفر، مو نفس الصنف.
+
+**ب. Cache بسيط بالذاكرة** — Edge functions stateless لكن invocation واحد قد يخدم عدة tool calls بنفس الـconversation. نخزن النتيجة بـ`Map<restaurant_id, {data, expiresAt}>` بـmodule scope مع TTL 10 دقائق. لو ضاع cache بين invocations مو مشكلة، الحساب رخيص (200 طلب فقط).
+
+**ج. Threshold للحماية**:
+- لو عدد الطلبات < 10، نتجاوز الخطوة 1 ونروح للـ inferred (ما عندنا بيانات كافية).
+- لو ما طلع شي بـscore ≥ 0.2، نروح للـ inferred.
 
 ### التغييرات في `agent-run/index.ts`
 
-1. **إضافة helper** قبل `runTool`:
-   ```ts
-   function inferUpsellCategory(cat: string | null): string | null { ... }
-   ```
+1. **Helper جديد** `getFrequentlyBoughtWith(db, restaurantId, sourceItemId)`:
+   - يقرأ من cache أو يحسب من `orders` (`status in ('confirmed','preparing','delivering','delivered')`, `created_at > now - 90d`).
+   - يرجع `Array<{ menu_item_id, score, count }>` مرتبة تنازلياً.
 
-2. **سطر 812-813** (بعد add_to_cart): لو `upsell_category` مو موجود، استخدم `inferUpsellCategory(item.category)`. لو رجّع شي، نمرّر hint للوكيل بنفس الصيغة الحالية.
+2. **داخل `suggest_upsell`** (السطر ~1572):
+   - قبل ما نروح للـ `inferUpsellCategory`، نستدعي `getFrequentlyBoughtWith`.
+   - لو رجع نتائج، نجيب تفاصيل الأصناف من `menu_items`، نفلتر (متوفر، مو بالسلة، stock OK)، ونرجع أعلى 3.
+   - لو ما رجع شي، نكمل بالمنطق الموجود (manual ثم inferred).
 
-3. **سطر 1556** (داخل `suggest_upsell`): نفس المنطق — لو `targetCat` فاضي، نحسب من `src.category`. لو ضل فاضي، نرجع `[]` بدون تغيير.
-
-4. **تطابق الفئات بمرونة**: بدل `ilike('%targetCat%')` فقط، نضيف fallback: لو ما حصلنا نتائج بالفئة المستنتجة (مثلاً "مشروب")، نحاول مرادفات شائعة (`drink`, `beverage`, `عصير`, `مشروبات`) بـ `or()`.
+3. **note للوكيل**: نضيف إشارة لو الاقتراح مبني على بيانات: 
+   `"اقتراح شائع مع هذا الصنف — اعرضه بثقة، مثلاً: 'الناس عادة ياخذونه ويا [اسم]، تحب نضيفه؟'"`.
 
 ### بدون تغييرات DB
-ما اكو migration. كل المنطق بالـedge function فقط.
+كل الحساب بالـedge function. ما اكو migration.
 
 ### النتيجة
-- أي صنف الآن يولّد اقتراح أوتوماتيكي حتى لو المطعم ما ضبط `upsell_category`.
-- المطاعم اللي ضبطت الحقل يدوياً ما يتأثرون — إعدادهم يغلب.
-- نشر edge function `agent-run` بعد التعديل.
+- مطاعم عندها بيانات تاريخية → اقتراحاتها دقيقة جداً ومخصصة لكل صنف.
+- مطاعم جديدة → ترجع تلقائياً للـ inferred categories (الموجود).
+- نشر `agent-run` بعد التعديل.
