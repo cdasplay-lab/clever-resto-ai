@@ -976,72 +976,138 @@ async function runTool(
     // ===== Checkout-time upsell (once per conversation) =====
     let checkoutSuggestions: any[] = [];
     let checkoutNote: string | null = null;
+    let comboSuggestion: any = null;
     if (!conv.meta?.checkout_upsell_offered && cart.length > 0) {
       const inCartIds = new Set(cart.map((c) => c.menu_item_id));
-      let pickedIds: string[] = [];
-      let dataDriven = false;
+      const cartQtyById = new Map<string, number>();
+      for (const c of cart) cartQtyById.set(c.menu_item_id, (cartQtyById.get(c.menu_item_id) || 0) + c.qty);
+
+      // 0) Combo suggestion: if cart already covers most of a combo and combo saves money, offer it.
       try {
-        const fbt = await loadFBT(db, restaurant.id);
-        if (fbt) {
-          const ranked = getCheckoutFBT(fbt, [...inCartIds], inCartIds);
-          if (ranked.length) {
-            pickedIds = ranked.map((r) => r.menu_item_id);
-            dataDriven = true;
+        const { data: combos } = await db
+          .from("combos")
+          .select("id,name,price,items,description")
+          .eq("restaurant_id", restaurant.id)
+          .eq("is_active", true);
+        const candidates: Array<{ combo: any; savings: number; coverage: number; missingIds: string[] }> = [];
+        for (const cmb of combos || []) {
+          const cItems: { menu_item_id: string; qty: number }[] = Array.isArray(cmb.items) ? cmb.items : [];
+          if (!cItems.length) continue;
+          const totalQty = cItems.reduce((s, i) => s + (i.qty || 1), 0);
+          let coveredQty = 0;
+          const missingIds: string[] = [];
+          for (const ci of cItems) {
+            const need = ci.qty || 1;
+            const have = cartQtyById.get(ci.menu_item_id) || 0;
+            coveredQty += Math.min(need, have);
+            if (have < need) missingIds.push(ci.menu_item_id);
           }
+          const coverage = coveredQty / totalQty;
+          if (coverage < 0.6) continue;
+          // Compute MSRP of covered portion to estimate savings vs combo price.
+          const { data: msrpItems } = await db
+            .from("menu_items")
+            .select("id,price")
+            .in("id", cItems.map((i) => i.menu_item_id))
+            .eq("restaurant_id", restaurant.id);
+          const priceById = new Map((msrpItems || []).map((m: any) => [m.id, Number(m.price) || 0]));
+          let coveredMsrp = 0;
+          for (const ci of cItems) {
+            const need = ci.qty || 1;
+            const have = cartQtyById.get(ci.menu_item_id) || 0;
+            coveredMsrp += (priceById.get(ci.menu_item_id) || 0) * Math.min(need, have);
+          }
+          const savings = coveredMsrp - Number(cmb.price);
+          if (savings > 0) candidates.push({ combo: cmb, savings, coverage, missingIds });
+        }
+        candidates.sort((a, b) => b.savings - a.savings);
+        if (candidates.length) {
+          const best = candidates[0];
+          comboSuggestion = {
+            id: best.combo.id,
+            name: best.combo.name,
+            price: Number(best.combo.price),
+            savings: Math.round(best.savings),
+            coverage_pct: Math.round(best.coverage * 100),
+            full_match: best.missingIds.length === 0,
+          };
         }
       } catch (_) { /* ignore */ }
-      // Fallback: inferred categories from cart items' own categories.
-      if (!pickedIds.length) {
-        const { data: cartMis } = await db
-          .from("menu_items")
-          .select("id,category")
-          .in("id", [...inCartIds])
-          .eq("restaurant_id", restaurant.id);
-        const cartCats = new Set<string>();
-        (cartMis || []).forEach((m: any) => { if (m.category) cartCats.add(String(m.category).toLowerCase()); });
-        const wantCats = new Set<string>();
-        for (const c of cartCats) inferUpsellCategory(c).forEach((x) => wantCats.add(x));
-        if (wantCats.size) {
-          const orFilter = [...wantCats].map((c) => `category.ilike.%${c}%`).join(",");
-          const { data: cand } = await db
+
+      // If no combo match, try item-level upsell (FBT then inferred categories).
+      if (!comboSuggestion) {
+        let pickedIds: string[] = [];
+        let dataDriven = false;
+        try {
+          const fbt = await loadFBT(db, restaurant.id);
+          if (fbt) {
+            const ranked = getCheckoutFBT(fbt, [...inCartIds], inCartIds);
+            if (ranked.length) {
+              pickedIds = ranked.map((r) => r.menu_item_id);
+              dataDriven = true;
+            }
+          }
+        } catch (_) { /* ignore */ }
+        if (!pickedIds.length) {
+          const { data: cartMis } = await db
             .from("menu_items")
-            .select("id,name,price,category,track_stock,stock_qty")
-            .eq("restaurant_id", restaurant.id)
-            .eq("is_available", true)
-            .or(orFilter)
-            .limit(10);
-          pickedIds = (cand || [])
-            .filter((s: any) => !inCartIds.has(s.id))
-            .filter((s: any) => !s.track_stock || (s.stock_qty != null && s.stock_qty > 0))
-            .filter((s: any) => !cartCats.has((s.category || "").toLowerCase()))
-            .slice(0, 3)
-            .map((s: any) => s.id);
+            .select("id,category")
+            .in("id", [...inCartIds])
+            .eq("restaurant_id", restaurant.id);
+          const cartCats = new Set<string>();
+          (cartMis || []).forEach((m: any) => { if (m.category) cartCats.add(String(m.category).toLowerCase()); });
+          const wantCats = new Set<string>();
+          for (const c of cartCats) inferUpsellCategory(c).forEach((x) => wantCats.add(x));
+          if (wantCats.size) {
+            const orFilter = [...wantCats].map((c) => `category.ilike.%${c}%`).join(",");
+            const { data: cand } = await db
+              .from("menu_items")
+              .select("id,name,price,category,track_stock,stock_qty")
+              .eq("restaurant_id", restaurant.id)
+              .eq("is_available", true)
+              .or(orFilter)
+              .limit(10);
+            pickedIds = (cand || [])
+              .filter((s: any) => !inCartIds.has(s.id))
+              .filter((s: any) => !s.track_stock || (s.stock_qty != null && s.stock_qty > 0))
+              .filter((s: any) => !cartCats.has((s.category || "").toLowerCase()))
+              .slice(0, 3)
+              .map((s: any) => s.id);
+          }
         }
-      }
-      if (pickedIds.length) {
-        const { data: items } = await db
-          .from("menu_items")
-          .select("id,name,price,track_stock,stock_qty,is_available")
-          .in("id", pickedIds)
-          .eq("restaurant_id", restaurant.id);
-        const byId = new Map((items || []).map((i: any) => [i.id, i]));
-        checkoutSuggestions = pickedIds
-          .map((id) => byId.get(id))
-          .filter((s: any) => s && s.is_available && (!s.track_stock || (s.stock_qty != null && s.stock_qty > 0)))
-          .slice(0, 2)
-          .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
-        if (checkoutSuggestions.length) {
-          checkoutNote = dataDriven
-            ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
-            : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
+        if (pickedIds.length) {
+          const { data: items } = await db
+            .from("menu_items")
+            .select("id,name,price,track_stock,stock_qty,is_available")
+            .in("id", pickedIds)
+            .eq("restaurant_id", restaurant.id);
+          const byId = new Map((items || []).map((i: any) => [i.id, i]));
+          checkoutSuggestions = pickedIds
+            .map((id) => byId.get(id))
+            .filter((s: any) => s && s.is_available && (!s.track_stock || (s.stock_qty != null && s.stock_qty > 0)))
+            .slice(0, 2)
+            .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
+          if (checkoutSuggestions.length) {
+            checkoutNote = dataDriven
+              ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
+              : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
+          }
         }
       }
     }
 
+    if (comboSuggestion) {
+      checkoutNote = comboSuggestion.full_match
+        ? `بدّل الأصناف اللي بالسلة بكومبو "${comboSuggestion.name}" يوفّر للزبون حوالي ${comboSuggestion.savings} ${restaurant.currency}. اعرض بسطر لطيف، مثل: 'لو تحوّلها كومبو "${comboSuggestion.name}" بـ ${comboSuggestion.price} توفّر ${comboSuggestion.savings} ${restaurant.currency} — أبدّلها؟'. لو وافق، أزل الأصناف المكرّرة بـ remove_from_cart ثم استدعِ add_combo_to_cart ثم preview_order. لو رفض كمّل ولا تكرر.`
+        : `كومبو "${comboSuggestion.name}" بـ ${comboSuggestion.price} ${restaurant.currency} يكمّل طلب الزبون ويوفّر له تقريباً ${comboSuggestion.savings} ${restaurant.currency} مقارنة بأخذها مفرّقة. اعرض بسطر واحد، مثل: 'بدل ما تاخذها مفرّقة، كومبو "${comboSuggestion.name}" بـ ${comboSuggestion.price} يطلعلك أوفر بـ ${comboSuggestion.savings} — تحوّلها كومبو؟'. لو وافق، استبدل الأصناف المكرّرة وأضِف الكومبو ثم preview_order. لو رفض كمّل ولا تكرر.`;
+    }
+
+    const offeredSomething = !!comboSuggestion || checkoutSuggestions.length > 0;
+
     const newMeta = {
       ...(conv.meta || {}),
       pending_confirmation: { token, fp, created_at: new Date().toISOString() },
-      ...(checkoutSuggestions.length ? { checkout_upsell_offered: true } : {}),
+      ...(offeredSomething ? { checkout_upsell_offered: true } : {}),
     };
     await db.from("conversations").update({ meta: newMeta, state: "confirm" }).eq("id", conv.id);
     conv.meta = newMeta;
@@ -1058,8 +1124,9 @@ async function runTool(
       total: subtotal,
       currency: restaurant.currency,
       checkout_suggestions: checkoutSuggestions,
-      instruction: checkoutSuggestions.length
-        ? `${checkoutNote} بعد رد الزبون على العرض (لو وافق استدعِ add_to_cart ثم preview_order من جديد، لو رفض كمّل)، اعرض ملخّص الطلب حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد موافقته على التأكيد.`
+      combo_suggestion: comboSuggestion,
+      instruction: offeredSomething
+        ? `${checkoutNote} بعد رد الزبون (لو وافق نفّذ الأدوات المطلوبة ثم preview_order من جديد، لو رفض كمّل)، اعرض ملخّص الطلب حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد موافقته على التأكيد.`
         : "اعرض هذا الملخّص للزبون حرفياً ثم اسأله: 'أأكد الطلب؟ (نعم/لا)'. لا تستدعِ submit_order إلا بعد ما يقول نعم/أكد/تمام.",
     };
   }
