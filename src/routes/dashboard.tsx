@@ -672,6 +672,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
   const [trackStock, setTrackStock] = useState<boolean>(!!item.track_stock);
   const [stockQty, setStockQty] = useState<number>(Number(item.stock_qty ?? 0));
   const [upsellCategory, setUpsellCategory] = useState<string>(item.upsell_category ?? "");
+  const [aliases, setAliases] = useState<string>((item.search_aliases ?? []).join("، "));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
