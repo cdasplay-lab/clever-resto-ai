@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Pencil, MapPin, Phone, Clock } from "lucide-react";
+import { MapsLocationField } from "@/components/maps-location-field";
 
 type DayHours = { open: string; close: string; closed: boolean };
 type OpenHours = Record<string, DayHours>;
