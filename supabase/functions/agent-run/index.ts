@@ -835,28 +835,6 @@ async function runTool(
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
     if (!q) return { error: "empty query" };
-    let results: any[] = [];
-    // Try embedding search first
-    try {
-      const vec = await embedText(q);
-      const { data, error } = await db.rpc("search_menu_items", {
-        p_restaurant_id: restaurant.id,
-        p_query: vec,
-        p_limit: 5,
-      });
-      if (!error && data && data.length) results = data;
-    } catch (_) { /* fall through to text search */ }
-    if (!results.length) {
-      const { data } = await db
-        .from("menu_items")
-        .select("id,name,description,price,is_available,category")
-        .eq("restaurant_id", restaurant.id)
-        .eq("is_available", true)
-        .ilike("name", `%${q}%`)
-        .limit(5);
-  if (name === "search_menu") {
-    const q = String(args.query || "").trim();
-    if (!q) return { error: "empty query" };
     const nq = normalizeArabic(q);
     let results: any[] = [];
     let matchSource: string = "embedding";
