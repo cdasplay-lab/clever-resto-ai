@@ -808,6 +808,7 @@ async function runTool(
   name: string,
   args: any,
   media: MediaItem[],
+  customerProfile?: any,
 ): Promise<any> {
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
@@ -1034,20 +1035,38 @@ async function runTool(
         }
       } catch (_) { /* ignore */ }
 
-      // If no combo match, try item-level upsell (FBT then inferred categories).
+      // If no combo match, try item-level upsell: personalized → FBT → inferred.
       if (!comboSuggestion) {
         let pickedIds: string[] = [];
         let dataDriven = false;
+        let personalized = false;
+
+        // 1) Personalized: this customer's own repeat favorites (≥2 past orders).
         try {
-          const fbt = await loadFBT(db, restaurant.id);
-          if (fbt) {
-            const ranked = getCheckoutFBT(fbt, [...inCartIds], inCartIds);
-            if (ranked.length) {
-              pickedIds = ranked.map((r) => r.menu_item_id);
-              dataDriven = true;
-            }
+          const favs: any[] = Array.isArray(customerProfile?.favorites) ? customerProfile.favorites : [];
+          const favIds = favs
+            .filter((f) => f && f.menu_item_id && Number(f.total_qty || 0) >= 2 && !inCartIds.has(f.menu_item_id))
+            .slice(0, 5)
+            .map((f) => f.menu_item_id);
+          if (favIds.length) {
+            pickedIds = favIds;
+            personalized = true;
           }
         } catch (_) { /* ignore */ }
+
+        // 2) Cross-customer FBT.
+        if (!pickedIds.length) {
+          try {
+            const fbt = await loadFBT(db, restaurant.id);
+            if (fbt) {
+              const ranked = getCheckoutFBT(fbt, [...inCartIds], inCartIds);
+              if (ranked.length) {
+                pickedIds = ranked.map((r) => r.menu_item_id);
+                dataDriven = true;
+              }
+            }
+          } catch (_) { /* ignore */ }
+        }
         if (!pickedIds.length) {
           const { data: cartMis } = await db
             .from("menu_items")
@@ -1088,9 +1107,11 @@ async function runTool(
             .slice(0, 2)
             .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
           if (checkoutSuggestions.length) {
-            checkoutNote = dataDriven
-              ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
-              : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
+            checkoutNote = personalized
+              ? `الزبون عادةً يطلب هذا الصنف. اعرض بسطر دافئ ومخصّص، مثل: '${customerProfile?.name ? "أبو/أم " + customerProfile.name + "، " : ""}شفت إنك دائماً تاخذ [اسم] — أضيفه ويا طلبك بـ [سعر]؟'. لو رفض كمّل ولا تكرر.`
+              : dataDriven
+                ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
+                : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
           }
         }
       }
@@ -2207,7 +2228,7 @@ Deno.serve(async (req) => {
             });
             try {
               result = await withTimeout(
-                runTool(db, conv, restaurant, name, args, media),
+                runTool(db, conv, restaurant, name, args, media, customerProfile),
                 PER_TOOL_TIMEOUT_MS,
                 name,
               );
