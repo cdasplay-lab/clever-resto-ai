@@ -59,7 +59,9 @@ type MenuItem = {
   track_stock?: boolean;
   stock_qty?: number | null;
   upsell_category?: string | null;
+  search_aliases?: string[] | null;
 };
+
 type Order = {
   id: string;
   customer_name: string | null;
@@ -297,7 +299,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   async function load() {
     const { data } = await supabase
       .from("menu_items")
-      .select("id,name,description,category,price,is_available,image_url,options,track_stock,stock_qty,upsell_category")
+      .select("id,name,description,category,price,is_available,image_url,options,track_stock,stock_qty,upsell_category,search_aliases")
       .eq("restaurant_id", restaurantId)
       .order("category", { nullsFirst: false })
       .order("name");
@@ -670,6 +672,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
   const [trackStock, setTrackStock] = useState<boolean>(!!item.track_stock);
   const [stockQty, setStockQty] = useState<number>(Number(item.stock_qty ?? 0));
   const [upsellCategory, setUpsellCategory] = useState<string>(item.upsell_category ?? "");
+  const [aliases, setAliases] = useState<string>((item.search_aliases ?? []).join("، "));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -681,6 +684,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
       setTrackStock(!!item.track_stock);
       setStockQty(Number(item.stock_qty ?? 0));
       setUpsellCategory(item.upsell_category ?? "");
+      setAliases((item.search_aliases ?? []).join("، "));
     }
   }, [open, item]);
 
@@ -697,6 +701,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
         track_stock: trackStock,
         stock_qty: trackStock ? Math.max(0, Number(stockQty) || 0) : null,
         upsell_category: upsellCategory.trim() || null,
+        search_aliases: aliases.split(/[،,\n]/).map((s) => s.trim()).filter(Boolean),
       })
       .eq("id", item.id);
     setSaving(false);
@@ -744,6 +749,17 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
               placeholder="مثلاً: مشروبات — الوكيل يقترح صنف من هذي الفئة بعد إضافة الصنف"
             />
             <p className="text-xs text-muted-foreground">اكتب اسم فئة موجودة بمنيوك. الوكيل يقترح صنف منها مرة واحدة بعد إضافة هذا الصنف.</p>
+          </div>
+
+          <div className="space-y-1">
+            <Label>مرادفات / أسماء بديلة (اختياري)</Label>
+            <Textarea
+              value={aliases}
+              onChange={(e) => setAliases(e.target.value)}
+              placeholder="مثال: تكه، تيكا، تكة دجاج"
+              rows={2}
+            />
+            <p className="text-xs text-muted-foreground">افصل بفاصلة. الوكيل يفهم هاي الكلمات على أنها نفس الصنف — مفيد للهجات والأخطاء الإملائية.</p>
           </div>
         </div>
         <DialogFooter>

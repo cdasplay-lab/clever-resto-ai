@@ -1,48 +1,97 @@
-## Upsell مبني على بيانات الطلبات السابقة (Frequently Bought Together)
+## الهدف
+الوكيل يفهم الزبون حتى لو كتب الصنف بلهجة عراقية، بخطأ إملائي، باختصار، أو بكلمة شعبية.
 
-### الفكرة
-نتعلم من جدول `orders` شنو الزبائن يطلبونه مع بعض. لما الزبون يضيف صنف للسلة، نقترح الصنف الأكثر ارتباطاً به تاريخياً بدل اقتراح عام من الفئة.
+## الطبقات الأربع
 
-### الترتيب بالأولوية داخل `suggest_upsell`
-1. **Co-occurrence من orders** (الجديد) — لو طلع نتيجة قوية، نستخدمها.
-2. **Manual `upsell_category`** (موجود حالياً).
-3. **Inferred category** (سويناه بالخطوة السابقة) — fallback.
+### 1) Normalizer نصي (edge function)
+helper جديد `normalizeArabic(text)` بـ`agent-run/index.ts` يطبّع النص قبل أي بحث:
+- يشيل التشكيل (الفتحة، الكسرة، الضمة، الشدة، السكون)
+- يوحّد الألف: أ/إ/آ/ٱ → ا
+- يوحّد الياء: ى → ي
+- يوحّد التاء: ة → ه (للمطابقة فقط، لا يغيّر النص الأصلي)
+- يشيل التطويل (ـ) وتكرار الحروف ("بيييتزا" → "بيتزا")
+- يخلي الأرقام والمسافات نظيفة
+- lowercase للإنكليزي ("Pizza" = "pizza")
 
-### المنطق
+يطبّق على: النص الوارد + أسماء الأصناف + الـaliases قبل المقارنة.
 
-**أ. Materialized helper بالـedge function** — ما اكو جدول جديد، نحسب on-the-fly مع cache بسيط:
+### 2) Migration: pg_trgm + search_aliases + جدول unmatched
 
-داخل `runTool` لـ`suggest_upsell`:
-- نجيب آخر 200 طلب confirmed/delivered للمطعم خلال آخر 90 يوم.
-- نبني خريطة: لكل صنف، شنو الأصناف اللي تكرّرت معاه بنفس الطلب وكم مرة.
-- نحسب score: `count(co-occurrence) / count(orders that contain source_item)`.
-- نأخذ أعلى 5 أصناف بـscore ≥ 0.2 (يعني 20%+ من طلبات هاي الصنف فيها هذا المقترح).
-- نفلتر: مو بالسلة، متوفر، مو نفس الصنف.
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
-**ب. Cache بسيط بالذاكرة** — Edge functions stateless لكن invocation واحد قد يخدم عدة tool calls بنفس الـconversation. نخزن النتيجة بـ`Map<restaurant_id, {data, expiresAt}>` بـmodule scope مع TTL 10 دقائق. لو ضاع cache بين invocations مو مشكلة، الحساب رخيص (200 طلب فقط).
+ALTER TABLE menu_items 
+  ADD COLUMN search_aliases text[] NOT NULL DEFAULT '{}';
 
-**ج. Threshold للحماية**:
-- لو عدد الطلبات < 10، نتجاوز الخطوة 1 ونروح للـ inferred (ما عندنا بيانات كافية).
-- لو ما طلع شي بـscore ≥ 0.2، نروح للـ inferred.
+-- index لتسريع fuzzy matching
+CREATE INDEX menu_items_name_trgm_idx 
+  ON menu_items USING gin (name gin_trgm_ops);
 
-### التغييرات في `agent-run/index.ts`
+-- جدول للأسئلة اللي ما لكينا لها صنف
+CREATE TABLE unmatched_queries (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  restaurant_id uuid NOT NULL,
+  conversation_id uuid,
+  query_text text NOT NULL,
+  normalized_text text NOT NULL,
+  resolved_to_item_id uuid, -- لو حُل لاحقاً
+  count int NOT NULL DEFAULT 1,
+  first_seen_at timestamptz NOT NULL DEFAULT now(),
+  last_seen_at timestamptz NOT NULL DEFAULT now()
+);
+-- + GRANTs + RLS owners + index على (restaurant_id, normalized_text)
+```
 
-1. **Helper جديد** `getFrequentlyBoughtWith(db, restaurantId, sourceItemId)`:
-   - يقرأ من cache أو يحسب من `orders` (`status in ('confirmed','preparing','delivering','delivered')`, `created_at > now - 90d`).
-   - يرجع `Array<{ menu_item_id, score, count }>` مرتبة تنازلياً.
+دالة بحث جديدة `search_menu_fuzzy(restaurant_id, query_normalized, threshold)` ترجع أعلى التطابقات حسب `similarity()` على الاسم + الـaliases + الـdescription.
 
-2. **داخل `suggest_upsell`** (السطر ~1572):
-   - قبل ما نروح للـ `inferUpsellCategory`، نستدعي `getFrequentlyBoughtWith`.
-   - لو رجع نتائج، نجيب تفاصيل الأصناف من `menu_items`، نفلتر (متوفر، مو بالسلة، stock OK)، ونرجع أعلى 3.
-   - لو ما رجع شي، نكمل بالمنطق الموجود (manual ثم inferred).
+### 3) منطق بحث متدرّج في `agent-run`
 
-3. **note للوكيل**: نضيف إشارة لو الاقتراح مبني على بيانات: 
-   `"اقتراح شائع مع هذا الصنف — اعرضه بثقة، مثلاً: 'الناس عادة ياخذونه ويا [اسم]، تحب نضيفه؟'"`.
+داخل tool `search_menu` (واللي يستخدمه `add_to_cart` لما الزبون يذكر اسم):
 
-### بدون تغييرات DB
-كل الحساب بالـedge function. ما اكو migration.
+```
+1. normalize(query)
+2. exact match على name normalized أو aliases normalized → رجّع
+3. fuzzy: pg_trgm similarity ≥ 0.4 → رجّع أعلى 3
+4. لو ما لكى شي → AI fallback:
+   - مرّر للـAI: query + قائمة [{id, name, category}] للأصناف المتوفرة
+   - استخدم google/gemini-3-flash-preview مع tool call
+   - يرجع menu_item_id الأقرب دلالياً أو null
+5. لو AI رجع null → سجّل بـunmatched_queries (upsert + count++)
+   ورد على الزبون "ما لكيت — هل تقصد X أو Y؟" مع أقرب 2 من fuzzy
+```
 
-### النتيجة
-- مطاعم عندها بيانات تاريخية → اقتراحاتها دقيقة جداً ومخصصة لكل صنف.
-- مطاعم جديدة → ترجع تلقائياً للـ inferred categories (الموجود).
+### 4) UI بسيط — Aliases + Unmatched
+
+تبويب جديد بـدashboard أو إضافة على `menu` tab:
+
+**أ. حقل aliases بكل صنف**: input للأسماء البديلة (chips). صاحب المطعم يكتب "تكه, تيكا, تكة" → يصير كلهم يلكطون نفس الصنف.
+
+**ب. قسم "كلمات ما فهمناها"**: جدول من `unmatched_queries` مرتب بـcount تنازلي. كل صف عليه:
+- النص اللي كتبه الزبون
+- عدد المرات
+- زر "اربط بصنف" → dropdown أصناف، يختار → يضيف للـaliases تلقائياً ويعلّم الـrow resolved
+
+## ملفات تتغير
+
+1. **migration** جديد: pg_trgm + search_aliases + unmatched_queries + search_menu_fuzzy()
+2. **`supabase/functions/agent-run/index.ts`**:
+   - helper `normalizeArabic()`
+   - تعديل `search_menu` للمنطق المتدرّج
+   - AI fallback call
+   - تسجيل unmatched
+3. **`src/components/menu-tab.tsx`** (أو الموجود): حقل aliases على كل صنف
+4. **`src/components/menu-tab.tsx`** أو tab جديد `unmatched-tab.tsx`: قائمة الكلمات + ربط
+
+## نقاط مهمة
+
+- النصوص الأصلية تبقى كما هي بالـDB؛ التطبيع فقط للمقارنة (للـsearch_aliases نخزن المُطبّع مسبقاً للسرعة).
+- threshold = 0.4 (متوازن: ما يلكط ضوضاء، ويلكط الأخطاء الشائعة).
+- AI fallback محدود بـ20 صنف max بالـprompt (تكلفة + سرعة).
 - نشر `agent-run` بعد التعديل.
+
+## النتيجة
+- "بيتزه مارغريتا" → يلكط "بيتزا مارغريتا" (fuzzy)
+- "تكه" → يلكط "تكة دجاج" (alias)
+- "اكلة شعبية" → AI يقترح "قوزي" (دلالي)
+- "بييييتزا" → يلكط "بيتزا" (normalizer)
+- اللي ما ينحل → يظهر لصاحب المطعم ليربطه بضغطة
