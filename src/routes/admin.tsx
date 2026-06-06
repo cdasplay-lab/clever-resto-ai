@@ -123,12 +123,21 @@ function AdminPage() {
       _plan_code: planCode,
       _months: months,
     });
+    if (error) { setSubmitting(false); toast.error(error.message); return; }
+    // Attach payment method + notes to the newest sub row.
+    const noteText = `طريقة الدفع: ${paymentMethod}${notes ? ` — ${notes}` : ""}`;
+    await supabase
+      .from("restaurant_subscriptions")
+      .update({ notes: noteText })
+      .eq("restaurant_id", dialog.row.restaurant_id)
+      .eq("status", "active");
     setSubmitting(false);
-    if (error) { toast.error(error.message); return; }
-    toast.success("تم تفعيل الباقة");
+    toast.success("تم تفعيل الباقة وتسجيل الدفع");
     setDialog({ open: false });
+    setNotes("");
     await load();
   }
+
 
   if (loading) return <div className="flex justify-center p-12"><Loader2 className="animate-spin" /></div>;
   if (!isAdmin) {
