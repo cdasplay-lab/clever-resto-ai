@@ -181,7 +181,7 @@ Deno.test({
       // The hard requirement is that no step crashed.
       assertEquals(typeof r4.data.reply === "string", true, "final reply missing");
     } finally {
-      await cleanup(restaurantId);
+      await cleanup(restaurantId, ownerId);
       console.log("cleanup complete");
     }
   },
