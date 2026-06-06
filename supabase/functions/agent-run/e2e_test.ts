@@ -107,7 +107,7 @@ async function setup() {
     .single();
   if (cErr) throw cErr;
 
-  return { restaurantId: rest.id, branchId: branch.id, conversationId: conv.id };
+  return { restaurantId: rest.id, branchId: branch.id, conversationId: conv.id, ownerId };
 }
 
 async function cleanup(restaurantId: string) {
