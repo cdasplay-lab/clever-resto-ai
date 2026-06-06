@@ -156,73 +156,9 @@ export function Dashboard() {
   }
 
   if (!restaurant) {
-    return (
-      <div className="min-h-screen bg-background p-6" dir="rtl">
-        <div className="mx-auto max-w-2xl">
-          <div className="mb-6 flex items-center justify-between">
-            <h1 className="text-2xl font-bold">إعداد المطعم</h1>
-            <div className="flex items-center gap-2">
-              <ThemeToggle />
-              <Button variant="ghost" onClick={logout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
-            </div>
-          </div>
-          <Card>
-            <CardHeader>
-              <CardTitle>أنشئ مطعمك الأول</CardTitle>
-              <CardDescription>هذا المطعم هو الذي سيتعامل معه الـ AI Agent.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form
-                onSubmit={async (e) => {
-                  e.preventDefault();
-                  setCreating(true);
-                  const fd = new FormData(e.currentTarget as HTMLFormElement);
-                  const { data: sess } = await supabase.auth.getUser();
-                  const { data, error } = await supabase
-                    .from("restaurants")
-                    .insert({
-                      owner_id: sess.user!.id,
-                      name: String(fd.get("name") || ""),
-                      description: String(fd.get("description") || ""),
-                      currency: String(fd.get("currency") || "IQD"),
-                      min_order: Number(fd.get("min_order") || 0),
-                    })
-                    .select()
-                    .single();
-                  setCreating(false);
-                  if (error) return toast.error(error.message);
-                  setRestaurant(data as any);
-                }}
-                className="space-y-4"
-              >
-                <div className="space-y-2">
-                  <Label>اسم المطعم</Label>
-                  <Input name="name" required />
-                </div>
-                <div className="space-y-2">
-                  <Label>وصف</Label>
-                  <Textarea name="description" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>العملة</Label>
-                    <Input name="currency" defaultValue="IQD" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>الحد الأدنى للطلب</Label>
-                    <Input name="min_order" type="number" defaultValue="0" />
-                  </div>
-                </div>
-                <Button type="submit" disabled={creating}>
-                  {creating ? <Loader2 className="h-4 w-4 animate-spin" /> : "إنشاء"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    );
+    return <OnboardingWizard onDone={(r) => setRestaurant(r as any)} onLogout={logout} />;
   }
+
 
   return <RestaurantManager restaurant={restaurant} onLogout={logout} onChange={setRestaurant} />;
 }
