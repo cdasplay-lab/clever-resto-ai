@@ -39,7 +39,10 @@ function AdminPage() {
   const [dialog, setDialog] = useState<{ open: boolean; row?: Row }>({ open: false });
   const [planCode, setPlanCode] = useState("starter");
   const [months, setMonths] = useState(1);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
 
   useEffect(() => {
     void check();
@@ -120,12 +123,21 @@ function AdminPage() {
       _plan_code: planCode,
       _months: months,
     });
+    if (error) { setSubmitting(false); toast.error(error.message); return; }
+    // Attach payment method + notes to the newest sub row.
+    const noteText = `طريقة الدفع: ${paymentMethod}${notes ? ` — ${notes}` : ""}`;
+    await supabase
+      .from("restaurant_subscriptions")
+      .update({ notes: noteText })
+      .eq("restaurant_id", dialog.row.restaurant_id)
+      .eq("status", "active");
     setSubmitting(false);
-    if (error) { toast.error(error.message); return; }
-    toast.success("تم تفعيل الباقة");
+    toast.success("تم تفعيل الباقة وتسجيل الدفع");
     setDialog({ open: false });
+    setNotes("");
     await load();
   }
+
 
   if (loading) return <div className="flex justify-center p-12"><Loader2 className="animate-spin" /></div>;
   if (!isAdmin) {
@@ -202,7 +214,25 @@ function AdminPage() {
               <label className="text-sm mb-2 block">عدد الأشهر</label>
               <Input type="number" min={1} value={months} onChange={(e) => setMonths(parseInt(e.target.value || "1", 10))} />
             </div>
+            <div>
+              <label className="text-sm mb-2 block">طريقة الدفع</label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">كاش</SelectItem>
+                  <SelectItem value="bank_transfer">تحويل بنكي</SelectItem>
+                  <SelectItem value="zain_cash">Zain Cash</SelectItem>
+                  <SelectItem value="fastpay">FastPay</SelectItem>
+                  <SelectItem value="other">أخرى</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm mb-2 block">ملاحظات (اختياري)</label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="مثلاً: رقم الإيصال، اسم المحوّل..." />
+            </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog({ open: false })}>إلغاء</Button>
             <Button onClick={activate} disabled={submitting}>
