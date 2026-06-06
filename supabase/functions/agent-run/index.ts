@@ -6,9 +6,11 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
+import { retryFetch } from "../_shared/retry.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
+const FALLBACK_MODEL = Deno.env.get("AGENT_FALLBACK_MODEL") ?? "google/gemini-2.5-flash";
 const MAX_TOOL_ITERATIONS = 6;
 const TOTAL_LOOP_TIMEOUT_MS = 25_000;
 const PER_TOOL_TIMEOUT_MS = 15_000;
