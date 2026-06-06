@@ -158,8 +158,9 @@ export function Dashboard() {
   }
 
   if (!restaurant) {
-    return <OnboardingWizard onDone={(r) => setRestaurant(r as any)} onLogout={logout} />;
+    return <OnboardingWizard onDone={(r: Restaurant) => setRestaurant(r)} onLogout={logout} />;
   }
+
 
 
   return <RestaurantManager restaurant={restaurant} onLogout={logout} onChange={setRestaurant} />;
