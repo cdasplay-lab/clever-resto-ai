@@ -1,16 +1,33 @@
-// telegram-webhook: receives Telegram updates, persists user message, calls agent, replies.
+// telegram-webhook: receives Telegram updates and dispatches to the agent.
+//
+// Two routing modes:
+//   A) Per-restaurant (preferred): URL is `/telegram-webhook?r=<restaurant_id>`,
+//      registered by telegram-connect with a per-restaurant secret derived from
+//      the restaurant's own bot token. Outbound calls use that bot token directly.
+//   B) Legacy global: no `?r=`, secret derived from the platform `TELEGRAM_API_KEY`
+//      (the workspace connector). The first active restaurant handles all updates.
+//      Kept for backwards compatibility with the original single-tenant setup.
+
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { retryFetch } from "../_shared/retry.ts";
 
 const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
-const TG_MAX_LEN = 3900; // Telegram hard limit is 4096; leave a small safety margin
+const TG_API = "https://api.telegram.org";
+const TG_MAX_LEN = 3900;
 
-async function deriveSecret(apiKey: string): Promise<string> {
-  const data = new TextEncoder().encode(`telegram-webhook:${apiKey}`);
+// --- secret derivation (must match telegram-connect) ---
+async function sha256B64Url(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest("SHA-256", data);
   return btoa(String.fromCharCode(...new Uint8Array(digest)))
     .replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+async function deriveLegacySecret(apiKey: string): Promise<string> {
+  return sha256B64Url(`telegram-webhook:${apiKey}`);
+}
+async function derivePerBotSecret(token: string): Promise<string> {
+  return sha256B64Url(`tg-bot-secret:${token}`);
 }
 
 function safeEqual(a: string | null, b: string) {
@@ -20,20 +37,45 @@ function safeEqual(a: string | null, b: string) {
   return d === 0;
 }
 
-async function tgCall(method: string, body: any): Promise<Response> {
-  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-  const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY")!;
-  return await retryFetch(`${GATEWAY}/${method}`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "X-Connection-Api-Key": TELEGRAM_API_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  }, { attempts: 3, label: `tg:${method}` });
+// --- Telegram client factory ---
+// In per-restaurant mode we call api.telegram.org directly with the bot's own token.
+// In legacy mode we keep using the connector gateway with the platform key.
+type TgClient = {
+  call: (method: string, body: any) => Promise<Response>;
+  fileUrl: (filePath: string) => string;
+};
+
+function makeDirectClient(token: string): TgClient {
+  return {
+    call: (method, body) => retryFetch(`${TG_API}/bot${token}/${method}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }, { attempts: 3, label: `tg:${method}` }),
+    fileUrl: (fp) => `${TG_API}/file/bot${token}/${fp}`,
+  };
 }
 
+function makeGatewayClient(): TgClient {
+  const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+  const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY")!;
+  return {
+    call: (method, body) => retryFetch(`${GATEWAY}/${method}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "X-Connection-Api-Key": TELEGRAM_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    }, { attempts: 3, label: `tg:${method}` }),
+    // The gateway also exposes /file/<file_path> but we can hit api.telegram.org
+    // with the workspace bot token directly for downloads.
+    fileUrl: (fp) => `${TG_API}/file/bot${TELEGRAM_API_KEY}/${fp}`,
+  };
+}
+
+// --- text utilities ---
 function splitText(text: string, max = TG_MAX_LEN): string[] {
   if (text.length <= max) return [text];
   const parts: string[] = [];
@@ -59,32 +101,32 @@ function buildKeyboard(replies: string[]) {
   return { inline_keyboard: rows };
 }
 
-async function tgSend(chatId: number, text: string, replies?: string[]) {
+async function tgSend(tg: TgClient, chatId: number, text: string, replies?: string[]) {
   const chunks = splitText(text);
   const kb = buildKeyboard(replies || []);
   for (let i = 0; i < chunks.length; i++) {
     const body: any = { chat_id: chatId, text: chunks[i] };
     if (i === chunks.length - 1 && kb) body.reply_markup = kb;
-    try { await tgCall("sendMessage", body); } catch (e) { console.error("tgSend failed", e); }
+    try { await tg.call("sendMessage", body); } catch (e) { console.error("tgSend failed", e); }
   }
 }
 
-async function tgSendTyping(chatId: number) {
-  try { await tgCall("sendChatAction", { chat_id: chatId, action: "typing" }); } catch (_) {}
+async function tgSendTyping(tg: TgClient, chatId: number) {
+  try { await tg.call("sendChatAction", { chat_id: chatId, action: "typing" }); } catch (_) {}
 }
 
-async function tgAnswerCallback(callbackId: string) {
-  try { await tgCall("answerCallbackQuery", { callback_query_id: callbackId }); } catch (_) {}
+async function tgAnswerCallback(tg: TgClient, callbackId: string) {
+  try { await tg.call("answerCallbackQuery", { callback_query_id: callbackId }); } catch (_) {}
 }
 
-async function tgSendMedia(chatId: number, items: { photo_url: string; caption: string }[]) {
+async function tgSendMedia(tg: TgClient, chatId: number, items: { photo_url: string; caption: string }[]) {
   for (let i = 0; i < items.length; i += 10) {
     const chunk = items.slice(i, i + 10);
     try {
       if (chunk.length === 1) {
-        await tgCall("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
+        await tg.call("sendPhoto", { chat_id: chatId, photo: chunk[0].photo_url, caption: chunk[0].caption });
       } else {
-        await tgCall("sendMediaGroup", {
+        await tg.call("sendMediaGroup", {
           chat_id: chatId,
           media: chunk.map((m) => ({ type: "photo", media: m.photo_url, caption: m.caption })),
         });
@@ -93,21 +135,20 @@ async function tgSendMedia(chatId: number, items: { photo_url: string; caption: 
   }
 }
 
-// Execute agent-produced actions on Telegram.
-async function executeActions(chatId: number, actions: any[]) {
+async function executeActions(tg: TgClient, chatId: number, actions: any[]) {
   if (!Array.isArray(actions) || !actions.length) return;
   for (const a of actions) {
     try {
       if (a?.type === "send_location" && Number.isFinite(a.lat) && Number.isFinite(a.lng)) {
-        await tgCall("sendLocation", { chat_id: chatId, latitude: a.lat, longitude: a.lng });
+        await tg.call("sendLocation", { chat_id: chatId, latitude: a.lat, longitude: a.lng });
         if (a.title || a.address) {
-          await tgCall("sendMessage", {
+          await tg.call("sendMessage", {
             chat_id: chatId,
             text: [a.title, a.address].filter(Boolean).join("\n📍 "),
           });
         }
       } else if (a?.type === "request_location") {
-        await tgCall("sendMessage", {
+        await tg.call("sendMessage", {
           chat_id: chatId,
           text: a.text || "شارك موقعك من الزر اللي تحت 👇",
           reply_markup: {
@@ -123,27 +164,23 @@ async function executeActions(chatId: number, actions: any[]) {
   }
 }
 
-// Idempotency check via processed_updates. Returns true if already seen.
-async function alreadyProcessed(updateId: number | string): Promise<boolean> {
+async function alreadyProcessed(updateId: number | string | undefined): Promise<boolean> {
   if (updateId === undefined || updateId === null) return false;
   const db = admin();
-  const key = String(updateId);
   const { error } = await db.from("processed_updates").insert({
     channel: "telegram",
-    update_key: key,
+    update_key: String(updateId),
   });
   if (!error) return false;
-  // 23505 = unique violation -> already processed
   if ((error as any).code === "23505") return true;
   console.warn("processed_updates insert error:", error);
   return false;
 }
 
-async function processUpdate(update: any, telegramApiKey: string): Promise<void> {
-  // Callback (inline keyboard button press)
+async function processUpdate(update: any, tg: TgClient, restaurantId: string): Promise<void> {
   const cb = update.callback_query;
   if (cb) {
-    await tgAnswerCallback(cb.id);
+    await tgAnswerCallback(tg, cb.id);
     const chatId = cb.message?.chat?.id;
     const data: string = cb.data || "";
     if (!chatId || !data) return;
@@ -157,19 +194,19 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
   const photos: any[] | undefined = message?.photo;
   const photo = Array.isArray(photos) && photos.length ? photos[photos.length - 1] : null;
   const voice = message?.voice || message?.audio;
-  const location = message?.location; // { latitude, longitude }
+  const location = message?.location;
 
   if (!chatId || (!text && !photo && !voice && !location)) return;
 
-  await tgSendTyping(chatId);
+  await tgSendTyping(tg, chatId);
 
   async function downloadAsDataUrl(fileId: string, fallbackMime: string): Promise<string | null> {
     try {
-      const r = await tgCall("getFile", { file_id: fileId });
+      const r = await tg.call("getFile", { file_id: fileId });
       const j = await r.json();
       const filePath = j?.result?.file_path;
       if (!filePath) return null;
-      const dl = await fetch(`https://api.telegram.org/file/bot${telegramApiKey}/${filePath}`);
+      const dl = await fetch(tg.fileUrl(filePath));
       if (!dl.ok) return null;
       const buf = new Uint8Array(await dl.arrayBuffer());
       const ct = dl.headers.get("content-type") || fallbackMime;
@@ -212,7 +249,7 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
       } catch (_) {}
     }
     if (!transcribedText) {
-      await tgSend(chatId, "ما كدرت أفهم الرسالة الصوتية 🎙️ ممكن تكتبلي النص؟");
+      await tgSend(tg, chatId, "ما كدرت أفهم الرسالة الصوتية 🎙️ ممكن تكتبلي النص؟");
       return;
     }
   }
@@ -231,18 +268,6 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
 
   const db = admin();
 
-  const { data: restaurant } = await db
-    .from("restaurants")
-    .select("id")
-    .eq("is_active", true)
-    .order("created_at", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-  if (!restaurant) {
-    await tgSend(chatId, "النظام ما عدا مطعم مربوط بعد. الرجاء التواصل مع الإدارة.");
-    return;
-  }
-
   const externalChatId = String(chatId);
   const handle = message?.from?.username ? `@${message.from.username}` : String(message?.from?.id ?? "");
   const customerName = [message?.from?.first_name, message?.from?.last_name].filter(Boolean).join(" ");
@@ -251,7 +276,7 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
   const { data: existing } = await db
     .from("conversations")
     .select("id, last_message_at, cart, state, delivery, meta")
-    .eq("restaurant_id", restaurant.id)
+    .eq("restaurant_id", restaurantId)
     .eq("channel", "telegram")
     .eq("external_chat_id", externalChatId)
     .maybeSingle();
@@ -271,7 +296,6 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
       updates.state = "greeting";
       updates.meta = { ...prevMeta, pending_confirmation: null };
     }
-    // Persist customer location into delivery
     if (location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
       const baseDelivery = updates.delivery ?? ((existing as any).delivery || {});
       updates.delivery = {
@@ -287,7 +311,7 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
     const { data: created, error } = await db
       .from("conversations")
       .insert({
-        restaurant_id: restaurant.id,
+        restaurant_id: restaurantId,
         channel: "telegram",
         external_chat_id: externalChatId,
         customer_handle: handle,
@@ -309,8 +333,7 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
     content: userText,
   });
 
-  // Keep typing indicator alive during agent call
-  const typingTimer = setInterval(() => { void tgSendTyping(chatId); }, 4000) as unknown as number;
+  const typingTimer = setInterval(() => { void tgSendTyping(tg, chatId); }, 4000) as unknown as number;
 
   const baseUrl = Deno.env.get("SUPABASE_URL");
   let data: any = {};
@@ -336,54 +359,84 @@ async function processUpdate(update: any, telegramApiKey: string): Promise<void>
       : data?.error === "payment_required"
       ? "النظام يحتاج تجديد الاشتراك. تواصل مع المطعم."
       : "صار خطأ بسيط، جرب مرة ثانية.";
-    await tgSend(chatId, errText);
+    await tgSend(tg, chatId, errText);
     return;
   }
 
-  if (Array.isArray(data.media) && data.media.length) {
-    await tgSendMedia(chatId, data.media);
+  if (Array.isArray(data.media) && data.media.length) await tgSendMedia(tg, chatId, data.media);
+  if (Array.isArray(data.actions) && data.actions.length) await executeActions(tg, chatId, data.actions);
+  if (data.reply) await tgSend(tg, chatId, data.reply, data.quick_replies);
+}
+
+// --- routing: figure out which restaurant + bot owns this update ---
+async function resolveRoute(req: Request): Promise<
+  | { ok: true; tg: TgClient; restaurantId: string }
+  | { ok: false; status: number; body: string }
+> {
+  const url = new URL(req.url);
+  const r = url.searchParams.get("r");
+  const got = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
+
+  // Per-restaurant mode
+  if (r) {
+    const db = admin();
+    const { data: rest } = await db
+      .from("restaurants")
+      .select("id, telegram_bot_token, is_active")
+      .eq("id", r)
+      .maybeSingle();
+    if (!rest || !rest.telegram_bot_token) {
+      return { ok: false, status: 404, body: "restaurant_or_bot_not_found" };
+    }
+    if (!rest.is_active) {
+      return { ok: false, status: 403, body: "restaurant_inactive" };
+    }
+    const expected = await derivePerBotSecret(rest.telegram_bot_token);
+    if (!safeEqual(got, expected)) return { ok: false, status: 401, body: "Unauthorized" };
+    return { ok: true, tg: makeDirectClient(rest.telegram_bot_token), restaurantId: rest.id };
   }
-  if (Array.isArray(data.actions) && data.actions.length) {
-    await executeActions(chatId, data.actions);
-  }
-  if (data.reply) await tgSend(chatId, data.reply, data.quick_replies);
+
+  // Legacy global mode (kept for original single-tenant connector workflow).
+  const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+  if (!TELEGRAM_API_KEY) return { ok: false, status: 401, body: "Unauthorized" };
+  const expected = await deriveLegacySecret(TELEGRAM_API_KEY);
+  if (!safeEqual(got, expected)) return { ok: false, status: 401, body: "Unauthorized" };
+  const db = admin();
+  const { data: first } = await db
+    .from("restaurants")
+    .select("id")
+    .eq("is_active", true)
+    .is("telegram_bot_token", null) // skip restaurants that have their own bot
+    .order("created_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!first) return { ok: false, status: 404, body: "no_legacy_restaurant" };
+  return { ok: true, tg: makeGatewayClient(), restaurantId: first.id };
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
-  const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
-  if (!TELEGRAM_API_KEY) return json({ error: "TELEGRAM_API_KEY missing" }, 500);
-
-  const expected = await deriveSecret(TELEGRAM_API_KEY);
-  const got = req.headers.get("X-Telegram-Bot-Api-Secret-Token");
-  if (!safeEqual(got, expected)) return new Response("Unauthorized", { status: 401 });
+  const route = await resolveRoute(req);
+  if (!route.ok) return new Response(route.body, { status: route.status });
 
   let update: any;
-  try {
-    update = await req.json();
-  } catch {
-    return json({ ok: true, ignored: "invalid_json" });
-  }
+  try { update = await req.json(); } catch { return json({ ok: true, ignored: "invalid_json" }); }
 
-  // Idempotency: if Telegram retries the same update, ack but skip work.
-  const updateId = update?.update_id;
-  if (await alreadyProcessed(updateId)) {
+  if (await alreadyProcessed(update?.update_id)) {
     return json({ ok: true, duplicate: true });
   }
 
-  // Reply 200 fast so Telegram doesn't retry; process in background.
-  const work = processUpdate(update, TELEGRAM_API_KEY).catch((e) => {
+  const work = processUpdate(update, route.tg, route.restaurantId).catch((e) => {
     console.error("processUpdate fatal:", e);
   });
 
-  // @ts-ignore EdgeRuntime is available in Supabase Edge runtime
+  // @ts-ignore EdgeRuntime is provided by Supabase Edge runtime
   if (typeof EdgeRuntime !== "undefined" && (EdgeRuntime as any).waitUntil) {
     // @ts-ignore
     (EdgeRuntime as any).waitUntil(work);
   } else {
-    // Local fallback: await it
     await work;
   }
 
