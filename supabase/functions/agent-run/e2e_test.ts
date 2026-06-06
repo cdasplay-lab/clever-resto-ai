@@ -110,7 +110,7 @@ async function setup() {
   return { restaurantId: rest.id, branchId: branch.id, conversationId: conv.id, ownerId };
 }
 
-async function cleanup(restaurantId: string) {
+async function cleanup(restaurantId: string, ownerId?: string) {
   const sb = db();
   // Order matters: child tables first.
   await sb.from("messages").delete().in("conversation_id",
