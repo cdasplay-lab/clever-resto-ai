@@ -846,21 +846,39 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>الطلبات الواردة</CardTitle>
-          {branches.length > 0 && (
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">كل الفروع</SelectItem>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-                <SelectItem value="none">بدون فرع</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={toggleSound}
+              title={soundOn ? "إيقاف التنبيه الصوتي" : "تشغيل التنبيه الصوتي"}
+            >
+              {soundOn ? "🔔" : "🔕"}
+            </Button>
+            {branches.length > 0 && (
+              <Select value={filter} onValueChange={setFilter}>
+                <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">كل الفروع</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  <SelectItem value="none">بدون فرع</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {filtered.length === 0 ? <p className="text-sm text-muted-foreground">ما اكو طلبات بعد</p> : (
             <div className="space-y-3">
-              {filtered.map((o) => (
+              {filtered.map((o) => {
+                const next = nextStatus(o.status);
+                const loc = o.meta?.customer_location;
+                const hasLoc = loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng);
+                const mapsUrl = hasLoc
+                  ? `https://maps.google.com/?q=${loc.lat},${loc.lng}`
+                  : (o.delivery_address ? `https://maps.google.com/?q=${encodeURIComponent(o.delivery_address)}` : null);
+                return (
                 <div key={o.id} className="rounded-lg border p-3">
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-medium min-w-0 truncate flex items-center gap-2">
@@ -888,13 +906,36 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
                       </li>
                     ))}
                   </ul>
-                  <div className="mt-2 text-left font-mono">الإجمالي: {o.total}</div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {next && (
+                        <Button size="sm" onClick={() => changeStatus(o.id, next.value)} disabled={updating === o.id}>
+                          {next.label}
+                        </Button>
+                      )}
+                      {mapsUrl && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          asChild
+                        >
+                          <a href={mapsUrl} target="_blank" rel="noreferrer">
+                            <MapPin className="ml-1 h-3 w-3" />
+                            {hasLoc ? "موقع الزبون" : "بحث بالعنوان"}
+                          </a>
+                        </Button>
+                      )}
+                    </div>
+                    <div className="text-left font-mono">الإجمالي: {o.total}</div>
+                  </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </CardContent>
       </Card>
+
     </div>
   );
 }
