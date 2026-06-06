@@ -2078,25 +2078,35 @@ async function runTool(
 }
 
 
-async function callModel(messages: any[], tools: any) {
-  const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+async function callModelOnce(model: string, messages: any[], tools: any) {
+  const r = await retryFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LOVABLE_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: MODEL,
-      messages,
-      tools,
-      tool_choice: "auto",
-    }),
-  });
+    body: JSON.stringify({ model, messages, tools, tool_choice: "auto" }),
+  }, { attempts: 3, label: `ai:${model}` });
 
   if (r.status === 429) throw new Error("rate_limited");
   if (r.status === 402) throw new Error("payment_required");
   if (!r.ok) throw new Error(`model error ${r.status}: ${await r.text()}`);
   return await r.json();
+}
+
+async function callModel(messages: any[], tools: any) {
+  try {
+    return await callModelOnce(MODEL, messages, tools);
+  } catch (err: any) {
+    const m = err?.message || "";
+    // Only fall back on transient/server failures, not on quota/billing/4xx
+    if (m === "rate_limited" || m === "payment_required") throw err;
+    if (FALLBACK_MODEL && FALLBACK_MODEL !== MODEL) {
+      console.warn(`[agent] primary model failed (${m}), trying fallback ${FALLBACK_MODEL}`);
+      return await callModelOnce(FALLBACK_MODEL, messages, tools);
+    }
+    throw err;
+  }
 }
 
 Deno.serve(async (req) => {
