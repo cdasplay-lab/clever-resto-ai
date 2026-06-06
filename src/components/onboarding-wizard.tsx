@@ -270,15 +270,16 @@ export function OnboardingWizard({
                   <Input value={branchAddress} onChange={(e) => setBranchAddress(e.target.value)} />
                 </div>
                 <MapsLocationField
-                  value={branchMapsUrl}
-                  latitude={branchLat}
-                  longitude={branchLng}
-                  onChange={(v) => {
-                    setBranchMapsUrl(v.url);
-                    setBranchLat(v.lat);
-                    setBranchLng(v.lng);
+                  url={branchMapsUrl || null}
+                  lat={branchLat}
+                  lng={branchLng}
+                  onChange={(url, lat, lng) => {
+                    setBranchMapsUrl(url || "");
+                    setBranchLat(lat);
+                    setBranchLng(lng);
                   }}
                 />
+
                 <div className="flex justify-between gap-2 pt-2">
                   <Button variant="ghost" onClick={() => setStep(2)}><ArrowRight className="ml-2 h-4 w-4" />رجوع</Button>
                   <Button onClick={submitStep3} disabled={busy}>
