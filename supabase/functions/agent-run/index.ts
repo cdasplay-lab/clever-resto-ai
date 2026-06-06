@@ -2226,6 +2226,7 @@ Deno.serve(async (req) => {
     }
 
     const media: MediaItem[] = [];
+    const actions: any[] = [];
     let finalText = "";
     let quickReplies: string[] = [];
     const loopStartedAt = Date.now();
