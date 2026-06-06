@@ -39,7 +39,10 @@ function AdminPage() {
   const [dialog, setDialog] = useState<{ open: boolean; row?: Row }>({ open: false });
   const [planCode, setPlanCode] = useState("starter");
   const [months, setMonths] = useState(1);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
+
 
   useEffect(() => {
     void check();
