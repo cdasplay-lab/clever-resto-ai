@@ -1335,6 +1335,11 @@ async function runTool(
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
+    const customerLoc = (delivery as any)?.customer_location;
+    const orderMeta: Record<string, any> = {};
+    if (customerLoc && Number.isFinite(customerLoc.lat) && Number.isFinite(customerLoc.lng)) {
+      orderMeta.customer_location = { lat: customerLoc.lat, lng: customerLoc.lng };
+    }
     const { data: order, error } = await db
       .from("orders")
       .insert({
@@ -1348,9 +1353,11 @@ async function runTool(
         subtotal,
         total: subtotal,
         status: "pending",
+        meta: orderMeta,
       })
       .select()
       .single();
+
     if (error) {
       console.error("submit_order insert failed:", error);
       try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "submit_order", error: error.message, payload: { args } }); } catch (_) {}
