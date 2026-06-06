@@ -731,7 +731,7 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
     if (typeof window === "undefined") return true;
     return localStorage.getItem("orders_sound") !== "off";
   });
-  const lastOrderIdRef = (typeof window !== "undefined") ? (window as any).__lastOrderRef ||= { current: null as string | null } : { current: null };
+  const lastOrderIdRef = useRef<string | null>(null);
 
   function playBeep() {
     try {
