@@ -908,6 +908,8 @@ export type Database = {
           owner_telegram_chat_id: string | null
           platform_webhook_secret: string | null
           platform_webhook_url: string | null
+          telegram_bot_id: string | null
+          telegram_bot_token: string | null
           telegram_bot_username: string | null
           tone: string
           updated_at: string
@@ -936,6 +938,8 @@ export type Database = {
           owner_telegram_chat_id?: string | null
           platform_webhook_secret?: string | null
           platform_webhook_url?: string | null
+          telegram_bot_id?: string | null
+          telegram_bot_token?: string | null
           telegram_bot_username?: string | null
           tone?: string
           updated_at?: string
@@ -964,6 +968,8 @@ export type Database = {
           owner_telegram_chat_id?: string | null
           platform_webhook_secret?: string | null
           platform_webhook_url?: string | null
+          telegram_bot_id?: string | null
+          telegram_bot_token?: string | null
           telegram_bot_username?: string | null
           tone?: string
           updated_at?: string
