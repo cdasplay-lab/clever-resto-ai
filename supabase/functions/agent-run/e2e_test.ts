@@ -32,10 +32,17 @@ async function setup() {
   const sb = db();
   const stamp = Date.now();
 
-  // Owner = an existing user, or create a fake auth user via admin API.
-  // We use a synthetic owner_id (uuid) — restaurants.owner_id has no FK, but
-  // RLS is bypassed by service role, so this is fine for the test.
-  const ownerId = crypto.randomUUID();
+  // Create a real auth user (restaurants.owner_id has a FK to auth.users).
+  const email = `e2e-${stamp}@test.local`;
+  const { data: userRes, error: uErr } = await sb.auth.admin.createUser({
+    email,
+    password: crypto.randomUUID(),
+    email_confirm: true,
+  });
+  if (uErr || !userRes.user) throw uErr ?? new Error("user creation failed");
+  const ownerId = userRes.user.id;
+
+
 
   const { data: rest, error: rErr } = await sb
     .from("restaurants")
