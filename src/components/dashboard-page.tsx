@@ -723,10 +723,31 @@ const ORDER_STATUSES: { value: string; label: string }[] = [
 ];
 
 function OrdersTab({ restaurantId }: { restaurantId: string }) {
-  const [orders, setOrders] = useState<(Order & { branch_id?: string | null })[]>([]);
+  const [orders, setOrders] = useState<(Order & { branch_id?: string | null; meta?: any })[]>([]);
   const [updating, setUpdating] = useState<string | null>(null);
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [soundOn, setSoundOn] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("orders_sound") !== "off";
+  });
+  const lastOrderIdRef = (typeof window !== "undefined") ? (window as any).__lastOrderRef ||= { current: null as string | null } : { current: null };
+
+  function playBeep() {
+    try {
+      const Ctx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = new Ctx();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = "sine"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.0001, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.5);
+      o.start(); o.stop(ctx.currentTime + 0.55);
+    } catch {}
+  }
 
   async function loadBranches() {
     const { data } = await supabase.from("branches").select("id,name").eq("restaurant_id", restaurantId).order("created_at");
@@ -735,11 +756,13 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
   async function load() {
     const { data } = await supabase
       .from("orders")
-      .select("id,customer_name,customer_phone,delivery_address,total,status,created_at,items,branch_id")
+      .select("id,customer_name,customer_phone,delivery_address,total,status,created_at,items,branch_id,meta")
       .eq("restaurant_id", restaurantId)
       .order("created_at", { ascending: false })
       .limit(50);
-    setOrders((data as any) ?? []);
+    const list = (data as any) ?? [];
+    setOrders(list);
+    if (list[0]) lastOrderIdRef.current = list[0].id;
   }
 
   useEffect(() => {
@@ -747,10 +770,19 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
     load();
     const ch = supabase
       .channel(`orders-${restaurantId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${restaurantId}` }, () => load())
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "orders", filter: `restaurant_id=eq.${restaurantId}` }, (payload) => {
+        const newId = (payload.new as any)?.id;
+        if (newId && newId !== lastOrderIdRef.current) {
+          if (soundOn) playBeep();
+          toast.success("🛎️ طلب جديد!");
+        }
+        load();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders", filter: `restaurant_id=eq.${restaurantId}` }, () => load())
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [restaurantId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [restaurantId, soundOn]);
 
   async function changeStatus(orderId: string, status: string) {
     setUpdating(orderId);
@@ -760,6 +792,23 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
       .then(({ error: e }) => { if (e) toast.error("تم التحديث لكن فشل الإشعار: " + e.message); else toast.success("تم تحديث الحالة وإشعار الزبون"); })
       .finally(() => setUpdating(null));
   }
+
+  function toggleSound() {
+    const next = !soundOn;
+    setSoundOn(next);
+    localStorage.setItem("orders_sound", next ? "on" : "off");
+  }
+
+  function nextStatus(cur: string): { value: string; label: string } | null {
+    const flow: Record<string, { value: string; label: string }> = {
+      pending: { value: "accepted", label: "قبول" },
+      accepted: { value: "preparing", label: "بدء التحضير" },
+      preparing: { value: "out_for_delivery", label: "بالطريق" },
+      out_for_delivery: { value: "completed", label: "مكتمل" },
+    };
+    return flow[cur] ?? null;
+  }
+
 
   const branchName = (id: string | null | undefined) => branches.find((b) => b.id === id)?.name;
   const filtered = filter === "all" ? orders : filter === "none" ? orders.filter((o) => !o.branch_id) : orders.filter((o) => o.branch_id === filter);
