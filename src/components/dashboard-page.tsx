@@ -1409,172 +1409,289 @@ function Endpoint({ method, url, desc }: { method: string; url: string; desc: st
   );
 }
 
-type ChannelKey = "telegram" | "whatsapp" | "instagram" | "facebook";
+type ChannelKey = "whatsapp" | "instagram" | "facebook";
 
 function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
-  const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/telegram-webhook`;
-  const [values, setValues] = useState<Record<ChannelKey, string>>({
-    telegram: "",
-    whatsapp: "",
-    instagram: "",
-    facebook: "",
-  });
-  const [saved, setSaved] = useState<Record<ChannelKey, boolean>>({
-    telegram: false,
-    whatsapp: false,
-    instagram: false,
-    facebook: false,
-  });
-  const [savingKey, setSavingKey] = useState<ChannelKey | null>(null);
-
-  const COL: Record<ChannelKey, string> = {
-    telegram: "telegram_bot_username",
-    whatsapp: "whatsapp_number",
-    instagram: "instagram_handle",
-    facebook: "facebook_page",
-  };
-
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from("restaurants")
-        .select("telegram_bot_username, whatsapp_number, instagram_handle, facebook_page")
-        .eq("id", restaurant.id)
-        .maybeSingle();
-      if (!data) return;
-      const next: Record<ChannelKey, string> = {
-        telegram: data.telegram_bot_username || "",
-        whatsapp: (data as any).whatsapp_number || "",
-        instagram: (data as any).instagram_handle || "",
-        facebook: (data as any).facebook_page || "",
-      };
-      setValues(next);
-      setSaved({
-        telegram: !!next.telegram,
-        whatsapp: !!next.whatsapp,
-        instagram: !!next.instagram,
-        facebook: !!next.facebook,
-      });
-    })();
-  }, [restaurant.id]);
-
-  function clean(key: ChannelKey, v: string) {
-    const t = v.trim();
-    if (key === "whatsapp") return t.replace(/[^\d+]/g, "");
-    if (key === "telegram" || key === "instagram") return t.replace(/^@/, "");
-    return t;
-  }
-
-  async function save(key: ChannelKey) {
-    const v = clean(key, values[key]);
-    if (!v) return toast.error("ادخل القيمة أولاً");
-    setSavingKey(key);
-    const { error } = await supabase
-      .from("restaurants")
-      .update({ [COL[key]]: v } as any)
-      .eq("id", restaurant.id);
-    setSavingKey(null);
-    if (error) return toast.error(error.message);
-    setValues((s) => ({ ...s, [key]: v }));
-    setSaved((s) => ({ ...s, [key]: true }));
-    toast.success("تم الربط");
-  }
-
-  async function disconnect(key: ChannelKey) {
-    const { error } = await supabase
-      .from("restaurants")
-      .update({ [COL[key]]: null } as any)
-      .eq("id", restaurant.id);
-    if (error) return toast.error(error.message);
-    setValues((s) => ({ ...s, [key]: "" }));
-    setSaved((s) => ({ ...s, [key]: false }));
-    toast.success("تم الفصل");
-  }
-
-  function copy(t: string) { navigator.clipboard.writeText(t); toast.success("نسخ الرابط"); }
-
-  const FIELDS: Record<ChannelKey, { label: string; placeholder: string; hint?: string }> = {
-    telegram: { label: "اسم البوت (Bot Username)", placeholder: "my_restaurant_bot", hint: "بدون @" },
-    whatsapp: { label: "رقم الواتساب (مع كود الدولة)", placeholder: "+9647712345678" },
-    instagram: { label: "حساب إنستغرام", placeholder: "my_restaurant", hint: "بدون @" },
-    facebook: { label: "اسم صفحة فيسبوك أو رابطها", placeholder: "MyRestaurantPage" },
-  };
-
-  const channels: ChannelKey[] = ["telegram", "whatsapp", "instagram", "facebook"];
-
   return (
     <div className="space-y-4">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Radio className="h-5 w-5" /> القنوات</CardTitle>
-          <CardDescription>اربط قنوات مطعمك بضغطة وحدة. ادخل المعرّف واضغط ربط.</CardDescription>
+          <CardDescription>اربط قنوات مطعمك. Telegram يربط بوت خاص بمطعمك. باقي القنوات تخزّن المعرّف فقط حالياً.</CardDescription>
         </CardHeader>
       </Card>
 
+      <TelegramConnectCard restaurant={restaurant} />
+
       <div className="grid gap-3 sm:grid-cols-2">
-        {channels.map((key) => {
-          const meta = channelMeta(key);
-          const Icon = meta.icon;
-          const f = FIELDS[key];
-          const isConnected = saved[key];
-          return (
-            <Card key={key} className="overflow-hidden">
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-                <div className="flex items-center gap-3">
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-lg border ${meta.color}`}>
-                    <Icon className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <CardTitle className="text-base">{meta.label}</CardTitle>
-                    <CardDescription className="text-xs">
-                      {isConnected ? "متصل" : "غير متصل"}
-                    </CardDescription>
-                  </div>
-                </div>
-                {isConnected && (
-                  <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-                    <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
-                  </Badge>
-                )}
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <div className="space-y-2">
-                  <Label className="text-xs">{f.label}</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder={f.placeholder}
-                      value={values[key]}
-                      onChange={(e) => setValues((s) => ({ ...s, [key]: e.target.value }))}
-                      dir="ltr"
-                    />
-                    {isConnected ? (
-                      <Button variant="outline" onClick={() => disconnect(key)}>فصل</Button>
-                    ) : (
-                      <Button onClick={() => save(key)} disabled={savingKey === key}>
-                        {savingKey === key ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> ربط</>)}
-                      </Button>
-                    )}
-                  </div>
-                  {f.hint && <p className="text-[11px] text-muted-foreground">{f.hint}</p>}
-                </div>
-
-                {key === "telegram" && (
-                  <details className="text-xs text-muted-foreground">
-                    <summary className="cursor-pointer hover:text-foreground">رابط الـ Webhook</summary>
-                    <div className="mt-2 flex items-center gap-2 rounded bg-muted p-2 font-mono text-[11px] break-all">
-                      <span className="flex-1">{webhookUrl}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => copy(webhookUrl)}>
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </details>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+        <SimpleChannelCard restaurant={restaurant} channel="whatsapp" />
+        <SimpleChannelCard restaurant={restaurant} channel="instagram" />
+        <SimpleChannelCard restaurant={restaurant} channel="facebook" />
       </div>
     </div>
+  );
+}
+
+function TelegramConnectCard({ restaurant }: { restaurant: Restaurant }) {
+  const [token, setToken] = useState("");
+  const [botUsername, setBotUsername] = useState<string | null>(null);
+  const [hasToken, setHasToken] = useState(false);
+  const [busy, setBusy] = useState<null | "connect" | "disconnect" | "test">(null);
+  const [showToken, setShowToken] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("restaurants")
+        .select("telegram_bot_username, telegram_bot_token")
+        .eq("id", restaurant.id)
+        .maybeSingle();
+      if (!data) return;
+      setBotUsername((data as any).telegram_bot_username || null);
+      setHasToken(!!(data as any).telegram_bot_token);
+    })();
+  }, [restaurant.id]);
+
+  async function call(action: "connect" | "disconnect" | "test", body: Record<string, unknown> = {}) {
+    setBusy(action);
+    try {
+      const { data, error } = await supabase.functions.invoke("telegram-connect", {
+        body: { restaurant_id: restaurant.id, action, ...body },
+      });
+      if (error) throw error;
+      if ((data as any)?.error) throw new Error((data as any).error);
+      return data as any;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onConnect() {
+    const t = token.trim();
+    if (!t) return toast.error("الصق التوكن من BotFather");
+    try {
+      const res = await call("connect", { bot_token: t });
+      setBotUsername(res?.bot?.username || null);
+      setHasToken(true);
+      setToken("");
+      toast.success(`تم ربط البوت @${res?.bot?.username}`);
+    } catch (e: any) {
+      const msg = e?.message || "فشل الربط";
+      const friendly =
+        msg.includes("invalid_token_format") ? "صيغة التوكن غير صحيحة" :
+        msg.includes("token_rejected_by_telegram") ? "Telegram رفض التوكن — تأكد إنه صحيح وفعّال" :
+        msg.includes("bot_already_linked_to_another_restaurant") ? "هذا البوت مربوط بمطعم آخر" :
+        msg.includes("setWebhook_failed") ? "ما قدرنا نسجّل الـ webhook، حاول مرة ثانية" :
+        msg;
+      toast.error(friendly);
+    }
+  }
+
+  async function onDisconnect() {
+    try {
+      await call("disconnect");
+      setBotUsername(null);
+      setHasToken(false);
+      toast.success("تم فصل البوت");
+    } catch (e: any) {
+      toast.error(e?.message || "فشل الفصل");
+    }
+  }
+
+  async function onTest() {
+    try {
+      const res = await call("test");
+      if ((res as any)?.error === "no_owner_chat") {
+        toast.error("سجّل owner_telegram_chat_id بالإعدادات أولاً");
+      } else {
+        toast.success("تم إرسال رسالة اختبار 📨");
+      }
+    } catch (e: any) {
+      const msg = e?.message || "";
+      if (msg.includes("no_owner_chat")) toast.error("سجّل owner_telegram_chat_id بالإعدادات أولاً");
+      else toast.error(msg || "فشل الاختبار");
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-sky-500/15 text-sky-400 border-sky-500/30">
+            <Send className="h-5 w-5" />
+          </div>
+          <div>
+            <CardTitle className="text-base">Telegram Bot</CardTitle>
+            <CardDescription className="text-xs">
+              {hasToken
+                ? <>متصل — <span dir="ltr">@{botUsername || "?"}</span></>
+                : "غير متصل"}
+            </CardDescription>
+          </div>
+        </div>
+        {hasToken && (
+          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
+          </Badge>
+        )}
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        {!hasToken ? (
+          <>
+            <div className="space-y-2">
+              <Label className="text-xs">Bot Token (من BotFather)</Label>
+              <div className="flex gap-2">
+                <Input
+                  type={showToken ? "text" : "password"}
+                  placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxyz..."
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  dir="ltr"
+                  autoComplete="off"
+                />
+                <Button variant="outline" type="button" onClick={() => setShowToken((s) => !s)}>
+                  {showToken ? "إخفاء" : "إظهار"}
+                </Button>
+                <Button onClick={onConnect} disabled={busy === "connect"}>
+                  {busy === "connect" ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> ربط</>)}
+                </Button>
+              </div>
+            </div>
+            <div className="rounded border border-muted p-3 text-xs text-muted-foreground space-y-1">
+              <p className="font-medium text-foreground">كيف تحصل على التوكن؟</p>
+              <ol className="list-decimal pr-4 space-y-1">
+                <li>افتح Telegram وكلّم <span dir="ltr" className="font-mono">@BotFather</span>.</li>
+                <li>اكتب <span dir="ltr" className="font-mono">/newbot</span> واتبع التعليمات (اسم + username ينتهي بـ <span dir="ltr">bot</span>).</li>
+                <li>انسخ التوكن اللي يطلع بصيغة <span dir="ltr" className="font-mono">123…:ABC…</span> والصقه هنا.</li>
+              </ol>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="rounded bg-muted/50 p-3 text-xs space-y-1">
+              <p>البوت <span dir="ltr" className="font-mono">@{botUsername}</span> يستلم رسائل الزبائن مباشرة ويرد عبر النظام.</p>
+              <p className="text-muted-foreground">جرّب: افتح المحادثة مع البوت من Telegram وأرسل "هاي".</p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={onTest} disabled={busy === "test"}>
+                {busy === "test" ? <Loader2 className="h-4 w-4 animate-spin" /> : "🧪 اختبر"}
+              </Button>
+              <Button variant="destructive" onClick={onDisconnect} disabled={busy === "disconnect"}>
+                {busy === "disconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : "فصل البوت"}
+              </Button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function SimpleChannelCard({ restaurant, channel }: { restaurant: Restaurant; channel: ChannelKey }) {
+  const COL: Record<ChannelKey, string> = {
+    whatsapp: "whatsapp_number",
+    instagram: "instagram_handle",
+    facebook: "facebook_page",
+  };
+  const FIELDS: Record<ChannelKey, { label: string; placeholder: string; hint?: string }> = {
+    whatsapp: { label: "رقم الواتساب (مع كود الدولة)", placeholder: "+9647712345678" },
+    instagram: { label: "حساب إنستغرام", placeholder: "my_restaurant", hint: "بدون @" },
+    facebook: { label: "اسم صفحة فيسبوك أو رابطها", placeholder: "MyRestaurantPage" },
+  };
+  const meta = channelMeta(channel);
+  const Icon = meta.icon;
+  const f = FIELDS[channel];
+
+  const [value, setValue] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("restaurants")
+        .select(COL[channel])
+        .eq("id", restaurant.id)
+        .maybeSingle();
+      const v = (data as any)?.[COL[channel]] || "";
+      setValue(v);
+      setSaved(!!v);
+    })();
+  }, [restaurant.id, channel]);
+
+  function clean(v: string) {
+    const t = v.trim();
+    if (channel === "whatsapp") return t.replace(/[^\d+]/g, "");
+    if (channel === "instagram") return t.replace(/^@/, "");
+    return t;
+  }
+
+  async function save() {
+    const v = clean(value);
+    if (!v) return toast.error("ادخل القيمة أولاً");
+    setSaving(true);
+    const { error } = await supabase
+      .from("restaurants")
+      .update({ [COL[channel]]: v } as any)
+      .eq("id", restaurant.id);
+    setSaving(false);
+    if (error) return toast.error(error.message);
+    setValue(v);
+    setSaved(true);
+    toast.success("تم الحفظ");
+  }
+
+  async function disconnect() {
+    const { error } = await supabase
+      .from("restaurants")
+      .update({ [COL[channel]]: null } as any)
+      .eq("id", restaurant.id);
+    if (error) return toast.error(error.message);
+    setValue("");
+    setSaved(false);
+    toast.success("تم الفصل");
+  }
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div className="flex items-center gap-3">
+          <div className={`flex h-10 w-10 items-center justify-center rounded-lg border ${meta.color}`}>
+            <Icon className="h-5 w-5" />
+          </div>
+          <div>
+            <CardTitle className="text-base">{meta.label}</CardTitle>
+            <CardDescription className="text-xs">{saved ? "مسجّل" : "غير مسجّل"}</CardDescription>
+          </div>
+        </div>
+        {saved && (
+          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
+          </Badge>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <Label className="text-xs">{f.label}</Label>
+          <div className="flex gap-2">
+            <Input
+              placeholder={f.placeholder}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              dir="ltr"
+            />
+            {saved ? (
+              <Button variant="outline" onClick={disconnect}>فصل</Button>
+            ) : (
+              <Button onClick={save} disabled={saving}>
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> حفظ</>)}
+              </Button>
+            )}
+          </div>
+          {f.hint && <p className="text-[11px] text-muted-foreground">{f.hint}</p>}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
