@@ -23,6 +23,8 @@ import { MarketingTab } from "@/components/marketing-tab";
 import { CombosTab } from "@/components/combos-tab";
 import { AnalyticsTab } from "@/components/analytics-tab";
 import { ComplaintsTab } from "@/components/complaints-tab";
+import { OnboardingWizard } from "@/components/onboarding-wizard";
+
 
 
 
