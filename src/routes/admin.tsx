@@ -214,7 +214,25 @@ function AdminPage() {
               <label className="text-sm mb-2 block">عدد الأشهر</label>
               <Input type="number" min={1} value={months} onChange={(e) => setMonths(parseInt(e.target.value || "1", 10))} />
             </div>
+            <div>
+              <label className="text-sm mb-2 block">طريقة الدفع</label>
+              <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cash">كاش</SelectItem>
+                  <SelectItem value="bank_transfer">تحويل بنكي</SelectItem>
+                  <SelectItem value="zain_cash">Zain Cash</SelectItem>
+                  <SelectItem value="fastpay">FastPay</SelectItem>
+                  <SelectItem value="other">أخرى</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm mb-2 block">ملاحظات (اختياري)</label>
+              <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="مثلاً: رقم الإيصال، اسم المحوّل..." />
+            </div>
           </div>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialog({ open: false })}>إلغاء</Button>
             <Button onClick={activate} disabled={submitting}>
