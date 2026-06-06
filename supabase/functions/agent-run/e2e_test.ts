@@ -137,7 +137,7 @@ Deno.test({
   sanitizeOps: false,
   sanitizeResources: false,
   fn: async () => {
-    const { restaurantId, conversationId } = await setup();
+    const { restaurantId, conversationId, ownerId } = await setup();
     try {
       // 1) Greeting
       const r1 = await userSay(conversationId, "السلام عليكم");
