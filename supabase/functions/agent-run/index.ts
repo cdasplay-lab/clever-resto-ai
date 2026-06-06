@@ -6,9 +6,11 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
+import { retryFetch } from "../_shared/retry.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
+const FALLBACK_MODEL = Deno.env.get("AGENT_FALLBACK_MODEL") ?? "google/gemini-2.5-flash";
 const MAX_TOOL_ITERATIONS = 6;
 const TOTAL_LOOP_TIMEOUT_MS = 25_000;
 const PER_TOOL_TIMEOUT_MS = 15_000;
@@ -724,6 +726,11 @@ ${branchRule}
 17) الشكاوى:
    • إذا الزبون اشتكى من جودة/تأخير/نقص/خطأ بالطلب أو سوء معاملة → استدعِ create_complaint مباشرة مع type مناسب وnote مختصر. لا تعتذر طويلاً ولا تعد بتعويض من نفسك ولا تحاول تحلّها لحالك.
    • الأداة راح توقف البوت تلقائياً وتنبّه المدير، فاكتفِ برد قصير جداً واحد بعدها.
+18) الموقع الجغرافي:
+   • إذا الزبون سأل "وين موقعكم"، "دزلي اللوكيشن"، "فين المطعم"، أو يبي يجي بنفسه (pickup) → استدعِ send_restaurant_location مباشرة. لا تكتب الرابط بنفسك.
+   • إذا تحتاج عنوان توصيل ولم يعطك الزبون موقعاً واضحاً، أو وصفه النصي ناقص → استدعِ request_customer_location مرة واحدة فقط بدل ما تسأله سؤال نصي.
+   • إذا الزبون شارك موقعه فعلاً (راح يجيك بصيغة "[موقع الزبون: lat=.., lng=..]") اعتبره عنوان التوصيل واستخدمه مع set_delivery_info كنص العنوان.
+
 
 # السياق الحالي (Context)
 السلة:
@@ -2076,25 +2083,35 @@ async function runTool(
 }
 
 
-async function callModel(messages: any[], tools: any) {
-  const r = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+async function callModelOnce(model: string, messages: any[], tools: any) {
+  const r = await retryFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${LOVABLE_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: MODEL,
-      messages,
-      tools,
-      tool_choice: "auto",
-    }),
-  });
+    body: JSON.stringify({ model, messages, tools, tool_choice: "auto" }),
+  }, { attempts: 3, label: `ai:${model}` });
 
   if (r.status === 429) throw new Error("rate_limited");
   if (r.status === 402) throw new Error("payment_required");
   if (!r.ok) throw new Error(`model error ${r.status}: ${await r.text()}`);
   return await r.json();
+}
+
+async function callModel(messages: any[], tools: any) {
+  try {
+    return await callModelOnce(MODEL, messages, tools);
+  } catch (err: any) {
+    const m = err?.message || "";
+    // Only fall back on transient/server failures, not on quota/billing/4xx
+    if (m === "rate_limited" || m === "payment_required") throw err;
+    if (FALLBACK_MODEL && FALLBACK_MODEL !== MODEL) {
+      console.warn(`[agent] primary model failed (${m}), trying fallback ${FALLBACK_MODEL}`);
+      return await callModelOnce(FALLBACK_MODEL, messages, tools);
+    }
+    throw err;
+  }
 }
 
 Deno.serve(async (req) => {
@@ -2148,7 +2165,7 @@ Deno.serve(async (req) => {
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,google_maps_url,latitude,longitude")
       .eq("restaurant_id", restaurant.id);
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
@@ -2214,6 +2231,7 @@ Deno.serve(async (req) => {
     }
 
     const media: MediaItem[] = [];
+    const actions: any[] = [];
     let finalText = "";
     let quickReplies: string[] = [];
     const loopStartedAt = Date.now();
@@ -2409,7 +2427,7 @@ Deno.serve(async (req) => {
             });
             try {
               result = await withTimeout(
-                runTool(db, conv, restaurant, name, args, media, customerProfile),
+                runTool(db, conv, restaurant, name, args, media, actions, customerProfile),
                 PER_TOOL_TIMEOUT_MS,
                 name,
               );
@@ -2463,7 +2481,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
-    return json({ reply: finalText, state: conv.state, media, quick_replies: quickReplies });
+    return json({ reply: finalText, state: conv.state, media, actions, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";
     // Phase 1: log error to agent_logs for the owner's bot-health view
