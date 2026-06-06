@@ -126,6 +126,10 @@ async function cleanup(restaurantId: string, ownerId?: string) {
   await sb.from("usage_events").delete().eq("restaurant_id", restaurantId);
   await sb.from("restaurant_subscriptions").delete().eq("restaurant_id", restaurantId);
   await sb.from("restaurants").delete().eq("id", restaurantId);
+  if (ownerId) {
+    try { await sb.auth.admin.deleteUser(ownerId); } catch (_) {}
+  }
+
 }
 
 Deno.test({
