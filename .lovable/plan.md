@@ -1,103 +1,88 @@
-## مرحلة A — جاهزية Beta لمطاعم حقيقية
+# تحسين الموبايل + الأداء
 
-الهدف: مطعم جديد يقدر يسجل، يربط بوته، يستقبل طلب، البوت يكمل دورة كاملة بدون انهيار، وصاحب المطعم يشوف الطلب ويغير حالته. كل شي عبر Telegram فقط.
+## التشخيص (من فحص الكود)
 
----
-
-### A1 — إكمال ميزة الموقع (نكمل اللي بدأناه)
-**الملفات**: `agent-run/index.ts`, `telegram-webhook/index.ts`, `dashboard-page.tsx` (تبويب الطلبات).
-
-1. ربط `actions[]` بحلقة الـ agent: بعد كل tool call، نمشي على الـ actions ونفذها (مثل `sendLocation`) قبل ما نرد للزبون.
-2. `telegram-webhook`: لو الرسالة فيها `location` → نخزن `delivery.customer_location = {lat,lng}` ونمرر للـ AI كنص واضح.
-3. تبويب الطلبات: زر "📍 افتح موقع الزبون" يفتح `maps.google.com/?q=lat,lng` لو متوفر.
-4. system prompt: قاعدتين واضحتين متى يستدعي `send_restaurant_location` و `request_customer_location`.
-
-### A2 — Reliability والـ retry (شرط إطلاق)
-**الملفات**: `agent-run/index.ts`, `telegram-webhook/index.ts`, `_shared/`, migration صغير.
-
-1. **Idempotency لـ Telegram updates**: استخدام `processed_updates` بجدية — أي update يجي مرتين (Telegram يعيد عند فشل 200) ما يولّد رسالتين.
-2. **Retry للـ Telegram API**: wrapper `tgFetch()` فيه exponential backoff (3 محاولات: 0.5s, 2s, 5s) للأخطاء العابرة (5xx, 429, network). 4xx ما نعيد.
-3. **Retry للـ AI (Lovable AI)**: نفس wrapper مع احترام `Retry-After` على 429، و fallback من gemini-pro → gemini-flash لو الـ pro فشل مرتين.
-4. **Tool call errors**: لو tool رمى exception، نرجع رسالة tool result فيها الخطأ بدل ما نطيح الحلقة كلها، والـ AI يقرر يعتذر أو يعيد محاولة.
-5. **حد أقصى للحلقة**: 8 خطوات (موجود؟ نتأكد). لو تجاوز → رد افتراضي "خلي أحول للمشرف" + alert.
-6. **Dead-letter logging**: أي فشل نهائي (بعد retries) يكتب صف بـ `agent_logs` بنوع `error_fatal` مع payload كامل، ويدز إشعار Telegram لمالك المطعم (لو فعّال).
-7. **Timeout على tools خارجية**: 15 ثانية حد أقصى لكل fetch، ما يخلي function تعلق.
-8. **Webhook 200 سريع**: نرد على Telegram 200 خلال ثانية، والمعالجة الفعلية بـ `EdgeRuntime.waitUntil()` — يمنع timeout على Telegram side ويوقف الإعادات.
-
-### A3 — Onboarding للمطعم الجديد
-**الملفات**: `routes/dashboard.tsx`, مكوّن جديد `onboarding-wizard.tsx`.
-
-Wizard 4 خطوات تطلع لو `restaurants` للمستخدم فاضي أو ناقص حقول أساسية:
-1. اسم المطعم + المدينة + النغمة + العملة.
-2. رفع صور المنيو (تستدعي `menu-extract` الموجودة) — مع skip + "أضيف لاحقاً".
-3. أول فرع: اسم + عنوان + رابط Google Maps + الهاتف + ساعات افتراضية.
-4. ربط Telegram bot (A4) — مع skip.
-
-بعد الإنهاء: redirect للوحة مع toast "أهلاً بيك".
-
-### A4 — ربط Telegram bot الذاتي لكل مطعم
-**الملفات**: تبويب جديد "القنوات" داخل الإعدادات، migration صغير، edge function جديدة `telegram-connect`.
-
-1. Migration: `restaurants.telegram_bot_token` (text, encrypted فعلياً بـ pgsodium أو على الأقل غير مقروء بـ RLS — للمالك فقط).
-2. UI: حقل "Bot Token" + زر "تثبيت الـ webhook". يلصق التوكن (من BotFather).
-3. `telegram-connect` (edge):
-   - يستلم token، يستدعي `getMe` للتحقق ويسحب username.
-   - يستدعي `setWebhook` على عنوان `telegram-webhook` الحالي مع `secret_token` = hash مشتق من `restaurant_id`.
-   - يخزن `telegram_bot_token` و `telegram_bot_username` بالمطعم.
-4. `telegram-webhook`: يقرأ `X-Telegram-Bot-Api-Secret-Token`، يستخرج `restaurant_id` منه ويتأكد. الحالي يستخدم secret عمومي — نخليه per-restaurant.
-5. زر "اختبر" يدز رسالة لـ `owner_telegram_chat_id` للتأكد إنه يشتغل.
-
-### A5 — اختبار End-to-End مع سيناريو حقيقي
-**ملف اختبار**: `supabase/functions/agent-run/e2e_test.ts` (Deno test).
-
-سيناريو واحد كامل (mock للـ Telegram + Lovable AI):
-1. زبون يقول "هاي" → بوت يرحب ويسأل شنو يحب.
-2. يطلب "بيتزا" → بوت يستدعي `search_menu` ويرجع نتائج.
-3. يختار → بوت يضيف للسلة ويعرض المجموع.
-4. يطلب توصيل → بوت يستدعي `request_customer_location`.
-5. يدز موقع → بوت يحدد الفرع، يحسب التوصيل، يأكد.
-6. تأكيد → ينشئ order، يدز للمطبخ.
-
-نشغله بـ `supabase--test_edge_functions` كل ما نغير شي بالـ agent.
-
-### A6 — صفحة الطلبات أحسن للمالك
-تحسينات صغيرة بس ضرورية:
-1. صوت تنبيه + badge عدد طلبات `pending` (موجود؟ نتأكد).
-2. أزرار سريعة: قبول → قيد التحضير → جاهز → بطريق التوصيل → مكتمل (مع إشعار تلقائي للزبون عبر `notify-order-status` الموجود).
-3. زر "افتح موقع الزبون" من A1.
-4. زر "إيقاف البوت" لهذه المحادثة (موجود `is_bot_paused`) — يبرز ويسهل الوصول.
-
-### A7 — أدمن: تفعيل اشتراك يدوياً
-**الملفات**: `routes/admin.tsx`.
-
-1. جدول كل المطاعم + خطتها الحالية + تاريخ الانتهاء.
-2. زر "تفعيل/تجديد اشتراك" يفتح dialog: يختار الخطة، المدة، طريقة الدفع (نص حر)، ملاحظات → يدخل بـ `restaurant_subscriptions`.
-3. زر "إيقاف" يغير status لـ `suspended`.
-4. عرض `usage_counters` بجنب كل مطعم (كم رسالة، كم طلب هذا الشهر).
-
-### A8 — فحص نهائي قبل الإطلاق
-checklist يدوي نمشي عليه قبل ما ندعي أول مطعم:
-- [ ] RLS مفعّل على كل جدول وعنده policies (نشغّل `supabase--linter`).
-- [ ] كل secret المطلوب موجود (`LOVABLE_API_KEY`, الخ).
-- [ ] e2e test يمر.
-- [ ] صفحة admin محمية بـ `is_platform_admin`.
-- [ ] webhook URL مستقر (`project--{id}.lovable.app`) ومثبت.
-- [ ] أول مطعم تجريبي (مطعمك أنت) ماشي ليوم كامل بدون أخطاء فادحة بالـ logs.
+**سبب البطء الرئيسي:**
+1. `dashboard-page.tsx` = **1726 سطر**، كل التبويبات الـ14 (Menu, Branches, Orders, Conversations, Channels, Analytics, Subscription, Health, Customers, Social, Marketing, Combos, Complaints, Settings) تتحمّل كلها مع أول render حتى لو الزبون فاتح تبويب واحد فقط.
+2. **14 TabsTrigger بصف واحد** على الموبايل = يطلعون خارج الشاشة بدون تمرير أفقي → الزبون ما يقدر يوصل لنصفهم.
+3. ما كو **lazy loading** للتبويبات → كل state + queries تشتغل مرة وحدة → re-renders كبيرة على كل تغيير.
+4. الـ landing (`index.tsx` 447 سطر) ممكن يحتوي صور غير محسّنة + ما عنده preload للـ LCP.
 
 ---
 
-## الترتيب المقترح للتنفيذ
-1. A1 + A2 معاً (نفس الملفات تقريباً) — أكبر دفعة.
-2. A4 (ربط البوت) — بدون هذا ما نقدر نجرب على مطعم تاني.
-3. A3 (onboarding).
-4. A6 (تحسين الطلبات).
-5. A7 (أدمن).
-6. A5 (e2e test) — نكتبه بعد ما يستقر السلوك.
-7. A8 — checklist.
+## الخطة
 
-## خارج النطاق (مرحلة B لاحقاً)
-WhatsApp/Instagram/Facebook، landing، docs، Stripe/Paddle، i18n، تحليلات متقدمة، اختبارات شاملة.
+### المرحلة 1 — أداء (يحل بطء الأزرار)
+
+**1.1 Lazy-load كل تبويبات الداشبورد**
+- تحويل كل `import { XTab } from ...` لـ `lazy(() => import(...))` مع `<Suspense>`.
+- التبويب اللي مختار فقط يتحمّل JS مالته.
+- النتيجة المتوقعة: bundle الأولي ينقص ~60-70%، الأزرار ترد فوراً.
+
+**1.2 Bottom nav بدلاً من Tabs على الموبايل**
+- على `md:` (شاشة < 768px): bottom navigation بـ 5 تبويبات رئيسية (الطلبات، المحادثات، المنيو، التحليلات، المزيد).
+- زر "المزيد" يفتح Sheet/Drawer فيه باقي التبويبات.
+- على الديسكتوب: نخلي الـ Tabs الحالية بس نضيف `overflow-x-auto` كـ fallback.
+
+**1.3 React optimizations**
+- `React.memo` على التبويبات الثقيلة (Analytics, Customers, Marketing).
+- `useMemo` للـ filtered lists بدل recalculate كل render.
+- استبدال `useEffect` + `fetch` بـ TanStack Query (الموجود أصلاً) عشان caching.
+
+**1.4 Landing page (index.tsx)**
+- صور WebP/AVIF + `loading="lazy"` لكل شي تحت الـ fold.
+- `<link rel="preload">` للـ LCP image في `head()`.
+- إزالة أي JS غير ضروري من الـ critical path.
 
 ---
 
-**موافق نبدأ بـ A1 + A2 بأول build؟** أو تحب نبدأ بـ A4 (ربط البوت) لأنه يفتح طريق التجريب على مطعمك بأسرع وقت؟
+### المرحلة 2 — UX موبايل
+
+**2.1 Touch targets**
+- كل الأزرار: `min-h-11 min-w-11` (44px iOS HIG).
+- زيادة padding على inputs (`h-12` بدل `h-10` على الموبايل).
+- spacing بين العناصر التفاعلية ≥ 8px.
+
+**2.2 الجداول → Cards على الموبايل**
+- جدول الطلبات، الزبائن، الشكاوى: على < md تتحوّل لـ stacked cards (الموبايل يكره الـ horizontal scroll).
+- زر "تفاصيل" يفتح Sheet من الأسفل بدل dialog كامل.
+
+**2.3 Forms**
+- inputs بعرض كامل على الموبايل.
+- زر الـ submit sticky في الأسفل (لا يضيع تحت الـ keyboard).
+- `inputMode` صح لكل input (tel, email, numeric).
+
+**2.4 Header موبايل**
+- اسم المطعم + avatar فقط، الباقي يدخل drawer.
+- ThemeToggle + LogOut بداخل القائمة.
+
+---
+
+### المرحلة 3 — تحسينات شاملة
+
+- إضافة `viewport-fit=cover` + safe-area-insets للـ iOS notch.
+- منع double-tap zoom على الأزرار: `touch-action: manipulation`.
+- skeleton loaders بدل spinners (الإحساس بالسرعة أفضل).
+- Service worker بسيط للـ caching (PWA-ready).
+
+---
+
+## ترتيب التنفيذ
+
+1. **lazy-load + memoization** (المرحلة 1.1 + 1.3) — أكبر تأثير على البطء، 30 دقيقة.
+2. **Bottom nav موبايل** (1.2) — يحل مشكلة الوصول للتبويبات.
+3. **Touch targets + tables→cards** (2.1 + 2.2) — تحسين اللمس والقراءة.
+4. **Forms + header موبايل** (2.3 + 2.4).
+5. **Landing optimizations** (1.4).
+6. **تحسينات نهائية** (المرحلة 3).
+
+---
+
+## الملفات اللي راح تتغيّر
+- `src/components/dashboard-page.tsx` (أكبر تغيير — split + lazy)
+- `src/components/*-tab.tsx` (memo + responsive cards)
+- `src/routes/index.tsx` (landing perf)
+- `src/styles.css` (utility classes للموبايل)
+- ملف جديد: `src/components/mobile-bottom-nav.tsx`
+
+**موافق نبدأ بالمرحلة 1 (الأداء) لأنها تحل البطء فوراً؟ أو تريد ترتيب مختلف؟**
