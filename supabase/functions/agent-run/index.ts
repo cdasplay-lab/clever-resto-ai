@@ -1233,20 +1233,8 @@ async function runTool(
         let dataDriven = false;
         let personalized = false;
 
-        // 1) Personalized: this customer's own repeat favorites (≥2 past orders).
-        try {
-          const favs: any[] = Array.isArray(customerProfile?.favorites) ? customerProfile.favorites : [];
-          const favIds = favs
-            .filter((f) => f && f.menu_item_id && Number(f.total_qty || 0) >= 2 && !inCartIds.has(f.menu_item_id))
-            .slice(0, 5)
-            .map((f) => f.menu_item_id);
-          if (favIds.length) {
-            pickedIds = favIds;
-            personalized = true;
-          }
-        } catch (_) { /* ignore */ }
-
-        // 2) Cross-customer FBT.
+        // 1) Cross-customer FBT. Never use a customer's personal favorites here:
+        // favorites are memory only, not permission to add/suggest items as if requested.
         if (!pickedIds.length) {
           try {
             const fbt = await loadFBT(db, restaurant.id);
@@ -1300,7 +1288,7 @@ async function runTool(
             .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
           if (checkoutSuggestions.length) {
             checkoutNote = personalized
-              ? `الزبون عادةً يطلب هذا الصنف. اعرض بسطر دافئ ومخصّص، مثل: '${customerProfile?.name ? "أبو/أم " + customerProfile.name + "، " : ""}شفت إنك دائماً تاخذ [اسم] — أضيفه ويا طلبك بـ [سعر]؟'. لو رفض كمّل ولا تكرر.`
+              ? "اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر."
               : dataDriven
                 ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
                 : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
