@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -39,25 +39,15 @@ export const Route = createFileRoute("/")({
 });
 
 function Landing() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
-
+  // Render the landing immediately — no blocking splash. If a session exists,
+  // redirect in the background. This eliminates a slow LCP on first visit.
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) {
         window.location.replace("/dashboard");
-      } else {
-        setAuthed(false);
       }
     });
   }, []);
-
-  if (authed === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">
-        …
-      </div>
-    );
-  }
 
   return (
     <div dir="rtl" className="min-h-screen bg-background text-foreground">
