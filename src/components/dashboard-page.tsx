@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,16 +14,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { BranchesTab } from "@/components/branches-tab";
-import { SubscriptionTab } from "@/components/subscription-tab";
-import { BotHealthTab } from "@/components/bot-health-tab";
-import { CustomersTab } from "@/components/customers-tab";
-import { SocialTab } from "@/components/social-tab";
-import { MarketingTab } from "@/components/marketing-tab";
-import { CombosTab } from "@/components/combos-tab";
-import { AnalyticsTab } from "@/components/analytics-tab";
-import { ComplaintsTab } from "@/components/complaints-tab";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
+
+// Lazy-load every secondary tab — they each load only when the user opens them.
+// Massively reduces initial JS bundle for the dashboard.
+const BranchesTab = lazy(() => import("@/components/branches-tab").then((m) => ({ default: m.BranchesTab })));
+const SubscriptionTab = lazy(() => import("@/components/subscription-tab").then((m) => ({ default: m.SubscriptionTab })));
+const BotHealthTab = lazy(() => import("@/components/bot-health-tab").then((m) => ({ default: m.BotHealthTab })));
+const CustomersTab = lazy(() => import("@/components/customers-tab").then((m) => ({ default: m.CustomersTab })));
+const SocialTab = lazy(() => import("@/components/social-tab").then((m) => ({ default: m.SocialTab })));
+const MarketingTab = lazy(() => import("@/components/marketing-tab").then((m) => ({ default: m.MarketingTab })));
+const CombosTab = lazy(() => import("@/components/combos-tab").then((m) => ({ default: m.CombosTab })));
+const AnalyticsTab = lazy(() => import("@/components/analytics-tab").then((m) => ({ default: m.AnalyticsTab })));
+const ComplaintsTab = lazy(() => import("@/components/complaints-tab").then((m) => ({ default: m.ComplaintsTab })));
+
+function TabFallback() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 
 
