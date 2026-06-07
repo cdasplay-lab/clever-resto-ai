@@ -1,4 +1,11 @@
-import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetHeader } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetTrigger,
+  SheetTitle,
+  SheetHeader,
+  SheetClose,
+} from "@/components/ui/sheet";
 import {
   ShoppingBag,
   MessageSquare,
@@ -37,6 +44,7 @@ export function MobileBottomNav({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const moreActive = MORE.some((m) => m.value === value);
   return (
     <nav
       dir="rtl"
@@ -69,7 +77,7 @@ export function MobileBottomNav({
               type="button"
               className={cn(
                 "flex flex-col items-center justify-center gap-0.5 py-2 text-[11px] transition-colors",
-                MORE.some((m) => m.value === value) ? "text-foreground" : "text-muted-foreground",
+                moreActive ? "text-foreground" : "text-muted-foreground",
               )}
             >
               <MenuIcon className="h-5 w-5" />
@@ -84,12 +92,20 @@ export function MobileBottomNav({
               {MORE.map((m) => {
                 const active = value === m.value;
                 return (
-                  <SheetClose
-                    key={m.value}
-                    active={active}
-                    label={m.label}
-                    onSelect={() => onChange(m.value)}
-                  />
+                  <SheetClose asChild key={m.value}>
+                    <button
+                      type="button"
+                      onClick={() => onChange(m.value)}
+                      className={cn(
+                        "rounded-lg border px-3 py-3 text-sm transition-colors",
+                        active
+                          ? "border-foreground bg-foreground text-background"
+                          : "border-border bg-card text-foreground hover:bg-accent",
+                      )}
+                    >
+                      {m.label}
+                    </button>
+                  </SheetClose>
                 );
               })}
             </div>
@@ -97,34 +113,5 @@ export function MobileBottomNav({
         </Sheet>
       </div>
     </nav>
-  );
-}
-
-// Small wrapper so each item closes the sheet on tap.
-import { SheetClose as RadixSheetClose } from "@/components/ui/sheet";
-function SheetClose({
-  label,
-  active,
-  onSelect,
-}: {
-  label: string;
-  active: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <RadixSheetClose asChild>
-      <button
-        type="button"
-        onClick={onSelect}
-        className={cn(
-          "rounded-lg border px-3 py-3 text-sm transition-colors",
-          active
-            ? "border-foreground bg-foreground text-background"
-            : "border-border bg-card text-foreground hover:bg-accent",
-        )}
-      >
-        {label}
-      </button>
-    </RadixSheetClose>
   );
 }
