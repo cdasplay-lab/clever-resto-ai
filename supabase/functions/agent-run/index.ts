@@ -890,8 +890,8 @@ async function runTool(
     } catch (_) { /* fall through */ }
 
 
-    // 1) Embedding search (semantic)
-    try {
+    // 1) Embedding search (semantic) — skip if category match already populated results
+    if (!results.length) try {
       const vec = await embedText(q);
       const { data, error } = await db.rpc("search_menu_items", {
         p_restaurant_id: restaurant.id,
