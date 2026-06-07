@@ -2193,14 +2193,23 @@ Deno.serve(async (req) => {
     // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
       .from("messages")
-      .select("role,content,tool_calls,tool_call_id,name")
+      .select("role,content,tool_calls,tool_call_id,name,created_at")
       .eq("conversation_id", conversation_id)
       .order("created_at", { ascending: false })
       .limit(30);
 
-    const cleanHistory = (history || [])
-      .slice()
-      .reverse()
+    // Session boundary: cut history at the most recent >3h gap so old sessions
+    // (e.g. yesterday's completed order) don't leak into a fresh "شلونك" greeting.
+    const SESSION_GAP_MS = 3 * 60 * 60 * 1000;
+    const ordered = (history || []).slice().reverse();
+    let sessionStart = 0;
+    for (let i = ordered.length - 1; i > 0; i--) {
+      const cur = new Date((ordered[i] as any).created_at).getTime();
+      const prev = new Date((ordered[i - 1] as any).created_at).getTime();
+      if (cur - prev > SESSION_GAP_MS) { sessionStart = i; break; }
+    }
+    const cleanHistory = ordered
+      .slice(sessionStart)
       .filter((m) => {
         const hasContent = typeof m.content === "string" && m.content.trim().length > 0;
         const hasToolCalls = Array.isArray(m.tool_calls) && m.tool_calls.length > 0;
