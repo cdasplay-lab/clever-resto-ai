@@ -15,6 +15,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 
 // Lazy-load every secondary tab — they each load only when the user opens them.
 // Massively reduces initial JS bundle for the dashboard.
@@ -192,8 +193,9 @@ function RestaurantManager({
   onLogout: () => void;
   onChange: (r: Restaurant) => void;
 }) {
+  const [tab, setTab] = useState("menu");
   return (
-    <div className="min-h-screen bg-background p-3 pt-safe pb-safe md:p-6" dir="rtl">
+    <div className="min-h-screen bg-background p-3 pt-safe pb-20 md:p-6 md:pb-6" dir="rtl">
       <div className="mx-auto max-w-5xl">
         <div className="mb-4 flex items-center justify-between gap-2 md:mb-6">
           <div className="min-w-0 flex-1">
@@ -211,8 +213,9 @@ function RestaurantManager({
           </div>
         </div>
 
-        <Tabs defaultValue="menu" dir="rtl">
-          <TabsList className="mb-4">
+        <Tabs value={tab} onValueChange={setTab} dir="rtl">
+          {/* Desktop tabs — on mobile we use the bottom nav below */}
+          <TabsList className="mb-4 hidden md:inline-flex">
             <TabsTrigger value="menu">المنيو</TabsTrigger>
             <TabsTrigger value="branches">الفروع</TabsTrigger>
             <TabsTrigger value="orders">الطلبات</TabsTrigger>
@@ -248,6 +251,7 @@ function RestaurantManager({
 
         </Tabs>
       </div>
+      <MobileBottomNav value={tab} onChange={setTab} />
     </div>
   );
 }
