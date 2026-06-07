@@ -90,7 +90,11 @@ Deno.serve(async (req) => {
 
     const shortId = String(order.id).slice(0, 8);
     const label = statusMessage(order.status, etaRemaining);
-    const text = `📦 تحديث طلبك #${shortId} من ${rest.name}\n${label}\nالإجمالي: ${order.total} ${rest.currency}`;
+    const baseApp = Deno.env.get("PUBLIC_APP_URL") || "https://project--69d6f4f9-fc25-4aef-bc41-e7320569fc12.lovable.app";
+    const trackLine = order.status === "completed" || order.status === "cancelled"
+      ? ""
+      : `\n🔗 تتبّع: ${baseApp}/track/${order.id}`;
+    const text = `📦 تحديث طلبك #${shortId} من ${rest.name}\n${label}\nالإجمالي: ${order.total} ${rest.currency}${trackLine}`;
 
     if (conv.channel === "telegram") {
       await tgSend(conv.external_chat_id, text);
