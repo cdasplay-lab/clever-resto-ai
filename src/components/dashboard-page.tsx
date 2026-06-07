@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil, MapPin } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil, MapPin, ArrowRight } from "lucide-react";
 import { MapsLocationField } from "@/components/maps-location-field";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -1045,8 +1045,8 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-      {/* List */}
-      <Card className="lg:col-span-2 flex flex-col max-h-[75vh]">
+      {/* List — hidden on mobile when a conversation is open */}
+      <Card className={`lg:col-span-2 flex flex-col max-h-[75vh] ${selected ? "hidden lg:flex" : "flex"}`}>
         <CardHeader className="space-y-3 pb-3">
           <div className="flex items-center justify-between">
             <CardTitle>المحادثات</CardTitle>
@@ -1130,14 +1130,24 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
         </CardContent>
       </Card>
 
-      {/* Thread */}
-      <Card className="lg:col-span-3 flex flex-col max-h-[75vh]">
+      {/* Thread — hidden on mobile until a conversation is selected */}
+      <Card className={`lg:col-span-3 flex flex-col max-h-[75vh] ${selected ? "flex" : "hidden lg:flex"}`}>
         <CardHeader className="pb-3">
           {selectedConv ? (
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="lg:hidden"
+                  onClick={() => setSelected(null)}
+                  aria-label="رجوع"
+                >
+                  <ArrowRight className="h-5 w-5" />
+                </Button>
                 {(() => { const m = channelMeta(selectedConv.channel); const Icon = m.icon; return (
-                  <div className={`flex h-10 w-10 items-center justify-center rounded-full border ${m.color}`}><Icon className="h-5 w-5" /></div>
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border ${m.color}`}><Icon className="h-5 w-5" /></div>
                 ); })()}
                 <div className="min-w-0">
                   <CardTitle className="text-base truncate">{selectedConv.customer_name || selectedConv.customer_handle || "زبون"}</CardTitle>
