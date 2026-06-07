@@ -14,6 +14,7 @@ import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as TrackOrderIdRouteImport } from './routes/track.$orderId'
 import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
 import { Route as ApiPublicCheckComplaintsRouteImport } from './routes/api/public/check-complaints'
 
@@ -42,6 +43,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TrackOrderIdRoute = TrackOrderIdRouteImport.update({
+  id: '/track/$orderId',
+  path: '/track/$orderId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicCheckDelaysRoute = ApiPublicCheckDelaysRouteImport.update({
   id: '/api/public/check-delays',
   path: '/api/public/check-delays',
@@ -60,6 +66,7 @@ export interface FileRoutesByFullPath {
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
 }
@@ -69,6 +76,7 @@ export interface FileRoutesByTo {
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
 }
@@ -79,6 +87,7 @@ export interface FileRoutesById {
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
 }
@@ -90,6 +99,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/dashboard'
     | '/reset-password'
+    | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
   fileRoutesByTo: FileRoutesByTo
@@ -99,6 +109,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/dashboard'
     | '/reset-password'
+    | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
   id:
@@ -108,6 +119,7 @@ export interface FileRouteTypes {
     | '/auth'
     | '/dashboard'
     | '/reset-password'
+    | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
   fileRoutesById: FileRoutesById
@@ -118,6 +130,7 @@ export interface RootRouteChildren {
   AuthRoute: typeof AuthRoute
   DashboardRoute: typeof DashboardRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  TrackOrderIdRoute: typeof TrackOrderIdRoute
   ApiPublicCheckComplaintsRoute: typeof ApiPublicCheckComplaintsRoute
   ApiPublicCheckDelaysRoute: typeof ApiPublicCheckDelaysRoute
 }
@@ -159,6 +172,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/track/$orderId': {
+      id: '/track/$orderId'
+      path: '/track/$orderId'
+      fullPath: '/track/$orderId'
+      preLoaderRoute: typeof TrackOrderIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/check-delays': {
       id: '/api/public/check-delays'
       path: '/api/public/check-delays'
@@ -182,6 +202,7 @@ const rootRouteChildren: RootRouteChildren = {
   AuthRoute: AuthRoute,
   DashboardRoute: DashboardRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  TrackOrderIdRoute: TrackOrderIdRoute,
   ApiPublicCheckComplaintsRoute: ApiPublicCheckComplaintsRoute,
   ApiPublicCheckDelaysRoute: ApiPublicCheckDelaysRoute,
 }
