@@ -235,33 +235,48 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
   if (voice?.file_id) {
     const audioDataUrl = await downloadAsDataUrl(voice.file_id, voice.mime_type || "audio/ogg");
     if (audioDataUrl) {
-      try {
-        const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
-        const mime = audioDataUrl.match(/^data:([^;]+)/)?.[1] || "audio/ogg";
-        const fmt = mime.includes("mpeg") ? "mp3" : mime.includes("wav") ? "wav" : mime.includes("mp4") || mime.includes("m4a") ? "mp4" : "ogg";
-        const base64 = audioDataUrl.split(",")[1] || "";
-        const tr = await retryFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "google/gemini-2.5-flash",
-            messages: [{
-              role: "user",
-              content: [
-                { type: "text", text: "حوّل هذه الرسالة الصوتية لنص عربي بالضبط كما قيلت، بدون أي إضافات أو تعليقات. فقط النص المنطوق." },
-                { type: "input_audio", input_audio: { data: base64, format: fmt } },
-              ],
-            }],
-          }),
-        }, { attempts: 2, label: "ai:transcribe" });
-        if (tr.ok) {
+      const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
+      const mime = audioDataUrl.match(/^data:([^;]+)/)?.[1] || "audio/ogg";
+      const fmt = mime.includes("mpeg") ? "mp3" : mime.includes("wav") ? "wav" : mime.includes("mp4") || mime.includes("m4a") ? "mp4" : "ogg";
+      const base64 = audioDataUrl.split(",")[1] || "";
+      const transcribePrompt =
+        "أنت مفرّغ صوتي للهجة العراقية/الخليجية في سياق طلبات مطاعم. " +
+        "اكتب النص المنطوق بالضبط بالعربية كما قيل، بدون إضافات أو ترجمة أو شرح. " +
+        "حافظ على أسماء الأكلات والكميات والأرقام كما نُطقت. " +
+        "إذا الكلام مو واضح، اكتب أوضح ما تكدر تسمعه. " +
+        "ممنوع ترد بـ 'لا أستطيع' — أعطِ أفضل تخمين فقط. " +
+        "أخرج النص لحاله بدون علامات اقتباس.";
+      const tryTranscribe = async (model: string): Promise<string> => {
+        try {
+          const tr = await retryFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model,
+              messages: [{
+                role: "user",
+                content: [
+                  { type: "text", text: transcribePrompt },
+                  { type: "input_audio", input_audio: { data: base64, format: fmt } },
+                ],
+              }],
+            }),
+          }, { attempts: 2, label: `ai:transcribe:${model}` });
+          if (!tr.ok) return "";
           const tj = await tr.json();
-          transcribedText = (tj?.choices?.[0]?.message?.content ?? "").toString().trim();
-        }
-      } catch (_) {}
+          let t = (tj?.choices?.[0]?.message?.content ?? "").toString().trim();
+          // strip surrounding quotes / "النص:" prefixes the model sometimes adds
+          t = t.replace(/^["'«»""]+|["'«»""]+$/g, "").replace(/^(النص|التفريغ)\s*[:：]\s*/i, "").trim();
+          // refusal patterns → treat as empty
+          if (/^(لا\s+(أستطيع|اكدر|اقدر)|عذرا|sorry|i\s+can'?t)/i.test(t)) return "";
+          return t;
+        } catch (_) { return ""; }
+      };
+      transcribedText = await tryTranscribe("google/gemini-2.5-flash");
+      if (!transcribedText) transcribedText = await tryTranscribe("google/gemini-2.5-pro");
     }
     if (!transcribedText) {
-      await tgSend(tg, chatId, "ما كدرت أفهم الرسالة الصوتية 🎙️ ممكن تكتبلي النص؟");
+      await tgSend(tg, chatId, "ما كدرت أفهم الرسالة الصوتية 🎙️ ممكن تعيدها أوضح أو تكتبلي النص؟");
       return;
     }
   }
