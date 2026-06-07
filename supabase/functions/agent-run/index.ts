@@ -2091,7 +2091,9 @@ async function runTool(
     if (!url) {
       return { error: "no_location_set", user_message: "موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا للاستفسار." };
     }
-    const label = branch ? `فرع ${branch.name}` : restaurant.name;
+    const label = branch
+      ? (/^(فرع|الفرع)\b/.test(String(branch.name).trim()) ? branch.name : `فرع ${branch.name}`)
+      : restaurant.name;
     const isTelegram = conv.channel === "telegram";
     if (isTelegram && Number.isFinite(lat) && Number.isFinite(lng)) {
       actions.push({ type: "send_location", lat, lng, title: label, address: src.address || null });
