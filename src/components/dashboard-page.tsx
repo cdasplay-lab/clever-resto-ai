@@ -29,9 +29,15 @@ const AnalyticsTab = lazy(() => import("@/components/analytics-tab").then((m) =>
 const ComplaintsTab = lazy(() => import("@/components/complaints-tab").then((m) => ({ default: m.ComplaintsTab })));
 
 function TabFallback() {
+  // Skeleton "feels" faster than a spinner — show the shape of content while the chunk loads.
   return (
-    <div className="flex items-center justify-center py-12">
-      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    <div className="space-y-3 py-2" aria-busy="true" aria-live="polite">
+      <div className="h-9 w-1/3 animate-pulse rounded-md bg-muted" />
+      <div className="h-24 w-full animate-pulse rounded-lg bg-muted" />
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="h-20 animate-pulse rounded-lg bg-muted" />
+        <div className="h-20 animate-pulse rounded-lg bg-muted" />
+      </div>
     </div>
   );
 }
