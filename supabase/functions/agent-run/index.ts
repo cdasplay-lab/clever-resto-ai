@@ -2173,7 +2173,61 @@ Deno.serve(async (req) => {
     if (e1 || !conv) return json({ error: "conversation not found" }, 404);
 
     // Human handoff: if owner paused the bot, don't run the LLM at all.
+    // But ping the owner/branch so they actually see the customer is still messaging,
+    // throttled to once every 5 minutes per conversation to avoid spam.
     if (conv.is_bot_paused) {
+      try {
+        const meta = (conv.meta || {}) as Record<string, any>;
+        const lastPingAt = meta.last_handoff_ping_at ? new Date(meta.last_handoff_ping_at).getTime() : 0;
+        const PING_THROTTLE_MS = 5 * 60 * 1000;
+        if (Date.now() - lastPingAt > PING_THROTTLE_MS) {
+          const { data: rest } = await db
+            .from("restaurants")
+            .select("id,name,owner_telegram_chat_id")
+            .eq("id", conv.restaurant_id)
+            .maybeSingle();
+          const { data: brs } = await db
+            .from("branches")
+            .select("telegram_chat_id")
+            .eq("restaurant_id", conv.restaurant_id)
+            .eq("is_active", true);
+          const { data: lastMsgs } = await db
+            .from("messages")
+            .select("content,role,created_at")
+            .eq("conversation_id", conversation_id)
+            .eq("role", "user")
+            .order("created_at", { ascending: false })
+            .limit(1);
+          const lastText = (lastMsgs?.[0]?.content || "").toString().slice(0, 300);
+
+          const chats = new Set<string>();
+          if (rest?.owner_telegram_chat_id) chats.add(rest.owner_telegram_chat_id);
+          (brs || []).forEach((b: any) => { if (b.telegram_chat_id) chats.add(b.telegram_chat_id); });
+
+          const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
+          const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+          if (LOVABLE_API_KEY && TELEGRAM_API_KEY && chats.size) {
+            const who = conv.customer_name || conv.customer_handle || "زبون";
+            const text = `⏰ زبون لسه ينتظر رد بعد التحويل\nالمطعم: ${rest?.name || ""}\nالزبون: ${who} (${conv.channel})\nآخر رسالة: "${lastText || "—"}"\nافتح المحادثة من لوحة التحكم وردّ عليه.`;
+            await Promise.all(Array.from(chats).map((chat) =>
+              fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+                  "X-Connection-Api-Key": TELEGRAM_API_KEY,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ chat_id: chat, text }),
+              }).catch(() => {}),
+            ));
+            await db.from("conversations").update({
+              meta: { ...meta, last_handoff_ping_at: new Date().toISOString() },
+            }).eq("id", conversation_id);
+          }
+        }
+      } catch (e) {
+        console.error("handoff ping failed:", e);
+      }
       return json({ reply: "", state: conv.state, media: [], skipped: "bot_paused" });
     }
 
