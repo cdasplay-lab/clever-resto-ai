@@ -199,4 +199,11 @@
   .pt-safe {
     padding-top: max(env(safe-area-inset-top), 0.5rem);
   }
+
+  /* Off-screen sections skip render+layout until scrolled near (huge win on mobile).
+     contain-intrinsic-size reserves space so the scrollbar doesn't jump. */
+  .cv-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: 1px 800px;
+  }
 }
