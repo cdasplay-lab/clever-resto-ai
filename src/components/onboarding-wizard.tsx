@@ -203,7 +203,7 @@ export function OnboardingWizard({
                   </div>
                   <div className="space-y-2">
                     <Label>الحد الأدنى للطلب</Label>
-                    <Input type="number" value={minOrder} onChange={(e) => setMinOrder(e.target.value)} />
+                    <Input type="number" inputMode="decimal" value={minOrder} onChange={(e) => setMinOrder(e.target.value)} />
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">

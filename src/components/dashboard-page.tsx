@@ -407,7 +407,7 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
           <form onSubmit={addItem} className="grid grid-cols-1 gap-3 md:grid-cols-6">
             <Input name="name" placeholder="اسم الصنف" required />
             <Input name="category" placeholder="الصنف (مثلاً: ساندويش)" />
-            <Input name="price" placeholder="السعر" type="number" required />
+            <Input name="price" placeholder="السعر" type="number" inputMode="decimal" required />
             <Input name="description" placeholder="وصف مختصر" />
             <Input name="image" type="file" accept="image/*" />
             <Button type="submit" disabled={adding}>
@@ -687,7 +687,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
         <div className="space-y-3">
           <div className="space-y-1"><Label>الاسم</Label><Input value={name} onChange={(e) => setName(e.target.value)} /></div>
           <div className="space-y-1"><Label>الصنف</Label><Input value={category} onChange={(e) => setCategory(e.target.value)} /></div>
-          <div className="space-y-1"><Label>السعر</Label><Input type="number" value={price} onChange={(e) => setPrice(Number(e.target.value))} /></div>
+          <div className="space-y-1"><Label>السعر</Label><Input type="number" inputMode="decimal" value={price} onChange={(e) => setPrice(Number(e.target.value))} /></div>
           <div className="space-y-1"><Label>الوصف</Label><Textarea value={description} onChange={(e) => setDescription(e.target.value)} /></div>
 
           <div className="rounded-lg border p-3 space-y-3">
@@ -701,7 +701,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
             {trackStock && (
               <div className="space-y-1">
                 <Label>الكمية المتوفرة</Label>
-                <Input type="number" min={0} value={stockQty} onChange={(e) => setStockQty(Number(e.target.value))} />
+                <Input type="number" inputMode="numeric" min={0} value={stockQty} onChange={(e) => setStockQty(Number(e.target.value))} />
               </div>
             )}
           </div>
@@ -1357,7 +1357,7 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
             </div>
 
             <div className="space-y-2"><Label>العملة</Label><Input value={r.currency} onChange={(e) => setR({ ...r, currency: e.target.value })} /></div>
-            <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
+            <div className="space-y-2"><Label>الحد الأدنى للطلب</Label><Input type="number" inputMode="decimal" value={r.min_order} onChange={(e) => setR({ ...r, min_order: Number(e.target.value) })} /></div>
             <div className="space-y-2 md:col-span-2">
               <Label>موقع المطعم على الخريطة</Label>
               <MapsLocationField
@@ -1385,16 +1385,16 @@ function SettingsTab({ restaurant, onChange }: { restaurant: Restaurant; onChang
             {DAYS.map((d) => {
               const h = hours[d.key] || { open: "10:00", close: "23:00", closed: false };
               return (
-                <div key={d.key} className="grid grid-cols-12 items-center gap-2 rounded-lg border p-2">
-                  <div className="col-span-3 text-sm font-medium">{d.label}</div>
-                  <label className="col-span-3 flex items-center gap-2 text-xs">
-                    <input type="checkbox" checked={h.closed} onChange={(e) => updateDay(d.key, { closed: e.target.checked })} />
-                    مغلق
-                  </label>
-                  <div className="col-span-3">
-                    <Input type="time" value={h.open} disabled={h.closed} onChange={(e) => updateDay(d.key, { open: e.target.value })} />
+                <div key={d.key} className="rounded-lg border p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-sm font-medium">{d.label}</div>
+                    <label className="flex items-center gap-2 text-xs">
+                      <input type="checkbox" checked={h.closed} onChange={(e) => updateDay(d.key, { closed: e.target.checked })} />
+                      مغلق
+                    </label>
                   </div>
-                  <div className="col-span-3">
+                  <div className="mt-2 grid grid-cols-2 gap-2">
+                    <Input type="time" value={h.open} disabled={h.closed} onChange={(e) => updateDay(d.key, { open: e.target.value })} />
                     <Input type="time" value={h.close} disabled={h.closed} onChange={(e) => updateDay(d.key, { close: e.target.value })} />
                   </div>
                 </div>
