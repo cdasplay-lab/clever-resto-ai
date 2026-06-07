@@ -12,7 +12,8 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
+      // h-auto so triggers can grow; tabs-scroll enables horizontal scroll on mobile
+      "tabs-scroll inline-flex h-auto w-full max-w-full items-center justify-start gap-1 rounded-lg bg-muted p-1 text-muted-foreground md:w-auto md:justify-center",
       className,
     )}
     {...props}
