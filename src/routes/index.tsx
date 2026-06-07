@@ -28,11 +28,13 @@ export const Route = createFileRoute("/")({
         content:
           "منصة وكيل AI للمطاعم: يرد على الزبائن في تيليجرام وواتساب وإنستغرام، يستلم الطلبات تلقائياً، ويفهم المنيو من صورة واحدة.",
       },
+      { name: "theme-color", content: "#0a0a0a" },
       { property: "og:title", content: "وكيل ذكي لمطعمك — يرد ويبيع 24/7" },
       {
         property: "og:description",
         content: "ارفع صورة منيو واحدة، واتركنا نتولى الردود والطلبات نيابة عنك.",
       },
+      { property: "og:locale", content: "ar_IQ" },
     ],
   }),
   component: Landing,
@@ -86,12 +88,12 @@ function Landing() {
               "radial-gradient(60% 50% at 50% 0%, color-mix(in oklab, var(--primary) 18%, transparent), transparent 70%)",
           }}
         />
-        <div className="mx-auto max-w-6xl px-4 pt-16 pb-20 text-center md:pt-24 md:pb-28">
+        <div className="mx-auto max-w-6xl px-4 pt-10 pb-14 text-center md:pt-24 md:pb-28">
           <div className="mx-auto mb-5 inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-xs text-muted-foreground">
             <Sparkles className="h-3.5 w-3.5" />
             وكيل AI متخصص للمطاعم — يرد بلهجتك
           </div>
-          <h1 className="mx-auto max-w-3xl text-4xl font-bold leading-tight tracking-tight md:text-6xl">
+          <h1 className="mx-auto max-w-3xl text-3xl font-bold leading-tight tracking-tight sm:text-4xl md:text-6xl">
             خلي وكيل ذكي يرد على زبائنك
             <br />
             <span className="bg-gradient-to-l from-foreground to-muted-foreground bg-clip-text text-transparent">
@@ -156,7 +158,7 @@ function Landing() {
       </section>
 
       {/* Features */}
-      <section id="features" className="mx-auto max-w-6xl px-4 py-20">
+      <section id="features" className="mx-auto max-w-6xl px-4 py-20 cv-auto">
         <SectionHeader
           eyebrow="المزايا"
           title="كل اللي يحتاجه مطعمك بمكان واحد"
@@ -197,7 +199,7 @@ function Landing() {
       </section>
 
       {/* How it works */}
-      <section id="how" className="border-t border-border/60 bg-muted/30">
+      <section id="how" className="border-t border-border/60 bg-muted/30 cv-auto">
         <div className="mx-auto max-w-6xl px-4 py-20">
           <SectionHeader
             eyebrow="الخطوات"
@@ -225,7 +227,7 @@ function Landing() {
       </section>
 
       {/* Pricing */}
-      <section id="pricing" className="mx-auto max-w-6xl px-4 py-20">
+      <section id="pricing" className="mx-auto max-w-6xl px-4 py-20 cv-auto">
         <SectionHeader
           eyebrow="الأسعار"
           title="ابدأ مجاناً — وسع لما تكبر"
@@ -262,7 +264,7 @@ function Landing() {
       </section>
 
       {/* Final CTA */}
-      <section className="border-t border-border/60">
+      <section className="border-t border-border/60 cv-auto">
         <div className="mx-auto max-w-4xl px-4 py-20 text-center">
           <h2 className="text-3xl font-bold tracking-tight md:text-4xl">
             مطعمك جاهز يبيع وأنت نايم؟
