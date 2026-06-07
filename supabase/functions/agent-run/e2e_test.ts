@@ -125,6 +125,7 @@ async function cleanup(restaurantId: string, ownerId?: string) {
   await sb.from("menu_items").delete().eq("restaurant_id", restaurantId);
   await sb.from("delivery_zones").delete().eq("restaurant_id", restaurantId);
   await sb.from("branches").delete().eq("restaurant_id", restaurantId);
+  await sb.from("customer_memory").delete().eq("restaurant_id", restaurantId);
   await sb.from("agent_logs").delete().eq("restaurant_id", restaurantId);
   await sb.from("usage_counters").delete().eq("restaurant_id", restaurantId);
   await sb.from("usage_events").delete().eq("restaurant_id", restaurantId);
