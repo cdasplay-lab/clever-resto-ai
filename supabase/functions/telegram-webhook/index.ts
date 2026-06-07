@@ -263,11 +263,17 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
             }),
           }, { attempts: 2, label: `ai:transcribe:${model}` });
           if (!tr.ok) {
-            console.warn(`[transcribe] ${model} status=${tr.status}`);
+            const errBody = await tr.text().catch(() => "");
+            console.warn(`[transcribe] ${model} status=${tr.status} body=${errBody.slice(0,400)}`);
             return "";
           }
           const tj = await tr.json();
           let t = (tj?.choices?.[0]?.message?.content ?? "").toString().trim();
+          if (!t) {
+            console.warn(`[transcribe] ${model} empty response, raw=${JSON.stringify(tj).slice(0,400)}`);
+          } else {
+            console.log(`[transcribe] ${model} OK len=${t.length}: ${t.slice(0,120)}`);
+          }
           t = t.replace(/^["'«»""]+|["'«»""]+$/g, "").replace(/^(النص|التفريغ|الكلام)\s*[:：]\s*/i, "").trim();
           if (/^(لا\s+(أستطيع|اكدر|اقدر|أكدر)|عذرا|آسف|sorry|i\s+can'?t|i\s+am\s+unable)/i.test(t)) {
             console.warn(`[transcribe] ${model} refused: ${t.slice(0,80)}`);
