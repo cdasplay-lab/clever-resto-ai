@@ -607,8 +607,8 @@ function buildCustomerProfileBlock(profile: any): string {
   lines.push("- رحّب بالزبون باسمه (لو معروف) ولا تسأله عن اسمه من جديد.");
   lines.push("- إذا قال 'نفس آخر مرة' أو 'كرر الطلب' → استدعِ reorder_last فوراً.");
   lines.push("- اقترح آخر عنوان وهاتف بدل ما تسأله من جديد — أكّد فقط: 'نوصّل على نفس العنوان (…)؟'.");
-  lines.push("- احترم الحساسيات والتفضيلات — لا تقترح صنف فيه شي ما يحبه.");
-  lines.push("- لو ساكت ومحتار، اقترح عليه أحد مفضّلاته.");
+  lines.push("- احترم الحساسيات والتفضيلات — لا تضيف ولا تغيّر أي صنف بسببها؛ استخدمها فقط حتى تتجنب اقتراح شيء ما يحبه.");
+  lines.push("- المفضّلات والطلبات السابقة معلومات داخلية للاستئناس فقط. ممنوع تضيف منها للسلة إلا إذا الزبون طلبها صراحة بكلام واضح.");
   lines.push("- ملاحظات المالك (notes) للاستئناس الداخلي فقط — لا تكشفها للزبون.");
 
   return lines.join("\n");
@@ -682,6 +682,8 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 
 # قواعد صارمة (Rules)
 1) ممنوع تخترع صنف أو سعر — استدعِ search_menu قبل أي add_to_cart.
+1.1) ممنوع تضيف أي صنف "من يمك" أو من المفضّلات/الطلبات السابقة/التوقعات/العادات. add_to_cart فقط للأصناف التي ذكرها الزبون صراحة في آخر طلبه، أو إذا وافق صراحة على اقتراح منك. لا تضيف بطاطس/صوص/مشروب/إضافات لأنّها "شائعة" أو "ضمن تفضيلاته" أو "طلبها قبل". إذا غير متأكد اسأل سؤال واحد.
+1.2) إذا الزبون اعترض مثل "ما طلبت بطاطس"، "من وين جبتها؟"، "شنو هاي؟" → اعتذر فوراً، استدعِ remove_from_cart للصنف الزائد إن كان موجوداً، ولا تضيف بدله أي شيء.
 2) تأكيد الطلب (إلزامي وبخطوتين):
    أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف (+ الفرع لو متعدد). إذا الاسم محفوظ في ملف الزبون أعلاه، استعمله مباشرة بدون ما تسأل. إذا ما تعرفه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name.
    ب) بعد ما تكتمل البيانات استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
@@ -1231,20 +1233,8 @@ async function runTool(
         let dataDriven = false;
         let personalized = false;
 
-        // 1) Personalized: this customer's own repeat favorites (≥2 past orders).
-        try {
-          const favs: any[] = Array.isArray(customerProfile?.favorites) ? customerProfile.favorites : [];
-          const favIds = favs
-            .filter((f) => f && f.menu_item_id && Number(f.total_qty || 0) >= 2 && !inCartIds.has(f.menu_item_id))
-            .slice(0, 5)
-            .map((f) => f.menu_item_id);
-          if (favIds.length) {
-            pickedIds = favIds;
-            personalized = true;
-          }
-        } catch (_) { /* ignore */ }
-
-        // 2) Cross-customer FBT.
+        // 1) Cross-customer FBT. Never use a customer's personal favorites here:
+        // favorites are memory only, not permission to add/suggest items as if requested.
         if (!pickedIds.length) {
           try {
             const fbt = await loadFBT(db, restaurant.id);
@@ -1298,7 +1288,7 @@ async function runTool(
             .map((s: any) => ({ id: s.id, name: s.name, price: s.price }));
           if (checkoutSuggestions.length) {
             checkoutNote = personalized
-              ? `الزبون عادةً يطلب هذا الصنف. اعرض بسطر دافئ ومخصّص، مثل: '${customerProfile?.name ? "أبو/أم " + customerProfile.name + "، " : ""}شفت إنك دائماً تاخذ [اسم] — أضيفه ويا طلبك بـ [سعر]؟'. لو رفض كمّل ولا تكرر.`
+              ? "اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر."
               : dataDriven
                 ? "قبل التأكيد اعرض عرض أخير لطيف بسطر واحد، مثلاً: 'كثير زباين ياخذون ويا طلبهم [اسم] بـ [سعر] — أضيفه؟'. لو الزبون رفض أو سكت كمّل التأكيد فوراً ولا تكرر."
                 : "قبل التأكيد اعرض اقتراح إضافة واحد بسطر لطيف، مثل: 'تحب تضيف [اسم] بـ [سعر] قبل ما نأكد؟'. لو الزبون رفض كمّل التأكيد فوراً ولا تكرر.";
