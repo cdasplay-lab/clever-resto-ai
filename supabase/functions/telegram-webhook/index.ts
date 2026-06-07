@@ -43,6 +43,7 @@ function safeEqual(a: string | null, b: string) {
 type TgClient = {
   call: (method: string, body: any) => Promise<Response>;
   fileUrl: (filePath: string) => string;
+  downloadFile: (filePath: string) => Promise<Response>;
 };
 
 function makeDirectClient(token: string): TgClient {
@@ -53,25 +54,32 @@ function makeDirectClient(token: string): TgClient {
       body: JSON.stringify(body),
     }, { attempts: 3, label: `tg:${method}` }),
     fileUrl: (fp) => `${TG_API}/file/bot${token}/${fp}`,
+    downloadFile: (fp) => retryFetch(`${TG_API}/file/bot${token}/${fp}`, {}, { attempts: 3, label: "tg:file" }),
   };
 }
 
 function makeGatewayClient(): TgClient {
   const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
   const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY")!;
+  const gatewayHeaders = {
+    Authorization: `Bearer ${LOVABLE_API_KEY}`,
+    "X-Connection-Api-Key": TELEGRAM_API_KEY,
+  };
   return {
     call: (method, body) => retryFetch(`${GATEWAY}/${method}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "X-Connection-Api-Key": TELEGRAM_API_KEY,
+        ...gatewayHeaders,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
     }, { attempts: 3, label: `tg:${method}` }),
-    // The gateway also exposes /file/<file_path> but we can hit api.telegram.org
-    // with the workspace bot token directly for downloads.
-    fileUrl: (fp) => `${TG_API}/file/bot${TELEGRAM_API_KEY}/${fp}`,
+    // TELEGRAM_API_KEY is the connector key, not the raw bot token, so legacy
+    // downloads must go through the connector gateway's /file/<file_path> path.
+    fileUrl: (fp) => `${GATEWAY}/file/${fp}`,
+    downloadFile: (fp) => retryFetch(`${GATEWAY}/file/${fp}`, {
+      headers: gatewayHeaders,
+    }, { attempts: 3, label: "tg:file" }),
   };
 }
 
@@ -217,15 +225,24 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
       const r = await tg.call("getFile", { file_id: fileId });
       const j = await r.json();
       const filePath = j?.result?.file_path;
-      if (!filePath) return null;
-      const dl = await fetch(tg.fileUrl(filePath));
-      if (!dl.ok) return null;
+      if (!filePath) {
+        console.warn("telegram getFile returned no file_path", JSON.stringify(j).slice(0, 300));
+        return null;
+      }
+      const dl = await tg.downloadFile(filePath);
+      if (!dl.ok) {
+        console.warn(`telegram file download failed status=${dl.status} path=${filePath}`);
+        return null;
+      }
       const buf = new Uint8Array(await dl.arrayBuffer());
       const ct = dl.headers.get("content-type") || fallbackMime;
       let bin = "";
       for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i]);
       return `data:${ct};base64,${btoa(bin)}`;
-    } catch (_) { return null; }
+    } catch (e) {
+      console.warn("telegram file download error", (e as Error)?.message);
+      return null;
+    }
   }
 
   let imageDataUrl: string | null = null;
