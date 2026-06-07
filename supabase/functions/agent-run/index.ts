@@ -1508,12 +1508,14 @@ async function runTool(
     } catch (_) {}
 
     const shortId = order.id.slice(0, 8);
+    const baseApp = Deno.env.get("PUBLIC_APP_URL") || "https://project--69d6f4f9-fc25-4aef-bc41-e7320569fc12.lovable.app";
+    const trackUrl = `${baseApp}/track/${order.id}`;
     return {
       ok: true,
       order_id: order.id,
       total: subtotal,
       eta_minutes: etaMinutes,
-      message: `✅ تم استلام طلبك #${shortId}.\nالتوصيل خلال ~${etaMinutes} دقيقة تقريباً.\nراح نخبرك بكل خطوة 🌹`,
+      message: `✅ تم استلام طلبك #${shortId}.\nالتوصيل خلال ~${etaMinutes} دقيقة تقريباً.\n🔗 تتبّع طلبك: ${trackUrl}\nراح نخبرك بكل خطوة 🌹`,
     };
   }
 
