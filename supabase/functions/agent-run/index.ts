@@ -863,6 +863,33 @@ async function runTool(
     let results: any[] = [];
     let matchSource: string = "embedding";
 
+    // 0) Category match — if the query looks like a category name (e.g. "اول ان ون بوكس"),
+    // return ALL items in that category instead of one arbitrary fuzzy match.
+    try {
+      const { data: cats } = await db
+        .from("menu_items")
+        .select("category")
+        .eq("restaurant_id", restaurant.id)
+        .eq("is_available", true)
+        .not("category", "is", null);
+      const uniqCats = Array.from(new Set((cats || []).map((c: any) => String(c.category || "")).filter(Boolean)));
+      const matchedCat = uniqCats.find((c) => {
+        const nc = normalizeArabic(c);
+        return nc === nq || nc.includes(nq) || nq.includes(nc);
+      });
+      if (matchedCat) {
+        const { data: catItems } = await db
+          .from("menu_items")
+          .select("id,name,description,price,is_available,category")
+          .eq("restaurant_id", restaurant.id)
+          .eq("is_available", true)
+          .eq("category", matchedCat)
+          .limit(20);
+        if (catItems && catItems.length) { results = catItems; matchSource = "category"; }
+      }
+    } catch (_) { /* fall through */ }
+
+
     // 1) Embedding search (semantic)
     try {
       const vec = await embedText(q);
