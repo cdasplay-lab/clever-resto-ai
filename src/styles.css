@@ -137,8 +137,66 @@
     border-color: var(--color-border);
   }
 
+  html {
+    /* iOS: respect safe area on the home indicator / notch */
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    /* prevent overscroll bounce that makes the app feel sluggish */
+    overscroll-behavior-y: none;
+  }
+
+  /* Eliminate the 300ms tap delay and double-tap zoom on interactive elements
+     — this is the #1 cause of "buttons feel laggy" on mobile. */
+  button,
+  [role="button"],
+  [role="tab"],
+  a,
+  input,
+  select,
+  textarea,
+  label {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Ensure the default Button (h-9 = 36px) meets the 44px touch target on
+     small screens without changing desktop density. */
+  @media (max-width: 768px) {
+    button,
+    [role="button"],
+    [role="tab"] {
+      min-height: 40px;
+    }
+    /* Inputs should be at least 16px to prevent iOS auto-zoom on focus */
+    input:not([type="checkbox"]):not([type="radio"]),
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
+  /* Horizontally-scrollable tab strips on mobile */
+  .tabs-scroll {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tabs-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Safe-area helpers for iOS */
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0.5rem);
+  }
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 0.5rem);
   }
 }
