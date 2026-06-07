@@ -315,7 +315,7 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
 
   const baseText = text ?? caption ?? "";
   let userText = (transcribedText
-    ? `[رسالة صوتية] ${transcribedText}`
+    ? transcribedText
     : (baseText || (imageDataUrl ? "[صورة من الزبون]" : ""))).toString();
 
   if (location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
