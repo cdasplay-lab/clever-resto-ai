@@ -75,11 +75,15 @@ async function setup() {
     .single();
   if (bErr) throw bErr;
 
-  const { error: mErr } = await sb.from("menu_items").insert([
+  const { data: menuItems, error: mErr } = await sb.from("menu_items").insert([
     { restaurant_id: rest.id, name: "برغر كلاسيك", price: 7000, category: "برغر", is_available: true },
+    { restaurant_id: rest.id, name: "برجر دجاج", price: 8000, category: "برغر", is_available: true },
+    { restaurant_id: rest.id, name: "بطاطس", price: 2500, category: "جانبي", is_available: true },
+    { restaurant_id: rest.id, name: "صوص", price: 500, category: "صوص", is_available: true },
+    { restaurant_id: rest.id, name: "مشروب غازي", price: 1500, category: "مشروبات", is_available: true },
     { restaurant_id: rest.id, name: "بيتزا مارغريتا", price: 12000, category: "بيتزا", is_available: true },
     { restaurant_id: rest.id, name: "كوكاكولا", price: 1500, category: "مشروبات", is_available: true },
-  ]);
+  ]).select("id,name,price");
   if (mErr) throw mErr;
 
   // Give it an active plan to avoid quota blocks.
@@ -107,7 +111,7 @@ async function setup() {
     .single();
   if (cErr) throw cErr;
 
-  return { restaurantId: rest.id, branchId: branch.id, conversationId: conv.id, ownerId };
+  return { restaurantId: rest.id, branchId: branch.id, conversationId: conv.id, ownerId, menuItems: menuItems ?? [] };
 }
 
 async function cleanup(restaurantId: string, ownerId?: string) {
@@ -180,6 +184,56 @@ Deno.test({
       // Soft assertion — agent may take 1-2 extra turns to finalize.
       // The hard requirement is that no step crashed.
       assertEquals(typeof r4.data.reply === "string", true, "final reply missing");
+    } finally {
+      await cleanup(restaurantId, ownerId);
+      console.log("cleanup complete");
+    }
+  },
+});
+
+Deno.test({
+  name: "e2e: does not add personal favorites unless explicitly requested",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const { restaurantId, conversationId, ownerId, menuItems } = await setup();
+    const sb = db();
+    try {
+      const byName = new Map((menuItems as any[]).map((m: any) => [m.name, m]));
+      const potato = byName.get("بطاطس");
+      assert(potato?.id, "missing potato test item");
+
+      await sb.from("customer_memory").insert({
+        restaurant_id: restaurantId,
+        channel: "telegram",
+        customer_handle: "@e2e_tester",
+        customer_name: "محمد",
+        total_orders: 1,
+        lifetime_value: 2500,
+        last_address: "الرحيمه",
+        last_phone: "07701234567",
+        auto_preferences: { likes: ["بطاطس"] },
+      });
+      await sb.from("orders").insert({
+        restaurant_id: restaurantId,
+        conversation_id: conversationId,
+        customer_name: "محمد",
+        customer_phone: "07701234567",
+        delivery_address: "الرحيمه",
+        items: [{ menu_item_id: potato.id, name: "بطاطس", qty: 3, unit_price: 2500 }],
+        subtotal: 7500,
+        total: 7500,
+        status: "delivered",
+      });
+
+      const r = await userSay(conversationId, "أريد ٢ برجر دجاج وصوص ومشروب غازي");
+      assert(r.ok, `agent failed: ${JSON.stringify(r.data)}`);
+
+      const { data: conv2 } = await sb.from("conversations").select("cart").eq("id", conversationId).single();
+      const cart = ((conv2 as any)?.cart ?? []) as Array<{ name?: string }>;
+      const names = cart.map((item) => item.name || "").join(" | ");
+      assert(!/بطاطس/.test(names), `bot added an unrequested favorite/previous item: ${JSON.stringify(cart)}`);
+      console.log("no unrequested favorites in cart:", names);
     } finally {
       await cleanup(restaurantId, ownerId);
       console.log("cleanup complete");
