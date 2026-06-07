@@ -187,16 +187,21 @@ function RestaurantManager({
   onChange: (r: Restaurant) => void;
 }) {
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6" dir="rtl">
+    <div className="min-h-screen bg-background p-3 pt-safe pb-safe md:p-6" dir="rtl">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{restaurant.name}</h1>
-            <p className="text-sm text-muted-foreground">لوحة إدارة الـ AI Agent</p>
+        <div className="mb-4 flex items-center justify-between gap-2 md:mb-6">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-bold md:text-2xl">{restaurant.name}</h1>
+            <p className="hidden text-sm text-muted-foreground md:block">لوحة إدارة الـ AI Agent</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 md:gap-2">
             <ThemeToggle />
-            <Button variant="ghost" onClick={onLogout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
+            <Button variant="ghost" size="icon" onClick={onLogout} aria-label="خروج" className="md:hidden">
+              <LogOut className="h-5 w-5" />
+            </Button>
+            <Button variant="ghost" onClick={onLogout} className="hidden md:inline-flex">
+              <LogOut className="ml-2 h-4 w-4" />خروج
+            </Button>
           </div>
         </div>
 
@@ -220,18 +225,18 @@ function RestaurantManager({
           </TabsList>
 
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="branches"><BranchesTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="branches"><Suspense fallback={<TabFallback />}><BranchesTab restaurantId={restaurant.id} /></Suspense></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
-          <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="subscription"><SubscriptionTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="health"><BotHealthTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="customers"><CustomersTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="social"><SocialTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="marketing"><MarketingTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="combos"><CombosTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="complaints"><ComplaintsTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="analytics"><Suspense fallback={<TabFallback />}><AnalyticsTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="subscription"><Suspense fallback={<TabFallback />}><SubscriptionTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="health"><Suspense fallback={<TabFallback />}><BotHealthTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="customers"><Suspense fallback={<TabFallback />}><CustomersTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="social"><Suspense fallback={<TabFallback />}><SocialTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="marketing"><Suspense fallback={<TabFallback />}><MarketingTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="combos"><Suspense fallback={<TabFallback />}><CombosTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="complaints"><Suspense fallback={<TabFallback />}><ComplaintsTab restaurantId={restaurant.id} /></Suspense></TabsContent>
 
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
