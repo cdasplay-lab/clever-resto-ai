@@ -870,7 +870,7 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
         </div>
       )}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3">
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>الطلبات الواردة</CardTitle>
           <div className="flex items-center gap-2">
             <Button
@@ -884,7 +884,7 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
             </Button>
             {branches.length > 0 && (
               <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="h-8 w-44"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-9 w-full sm:w-44"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">كل الفروع</SelectItem>
                   {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
@@ -906,14 +906,14 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
                   : (o.delivery_address ? `https://maps.google.com/?q=${encodeURIComponent(o.delivery_address)}` : null);
                 return (
                 <div key={o.id} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="font-medium min-w-0 truncate flex items-center gap-2">
-                      {o.customer_name || "زبون"} — {o.customer_phone}
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="font-medium min-w-0 flex flex-wrap items-center gap-2">
+                      <span className="truncate">{o.customer_name || "زبون"} — {o.customer_phone}</span>
                       {o.branch_id && <Badge variant="outline" className="text-[10px]">{branchName(o.branch_id) || "فرع"}</Badge>}
                     </div>
                     <div className="flex items-center gap-2">
                       <Select value={o.status} onValueChange={(v) => changeStatus(o.id, v)} disabled={updating === o.id}>
-                        <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+                        <SelectTrigger className="h-9 w-full sm:w-36"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           {ORDER_STATUSES.map((s) => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
                         </SelectContent>
