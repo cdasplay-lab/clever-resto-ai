@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,16 +14,27 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { BranchesTab } from "@/components/branches-tab";
-import { SubscriptionTab } from "@/components/subscription-tab";
-import { BotHealthTab } from "@/components/bot-health-tab";
-import { CustomersTab } from "@/components/customers-tab";
-import { SocialTab } from "@/components/social-tab";
-import { MarketingTab } from "@/components/marketing-tab";
-import { CombosTab } from "@/components/combos-tab";
-import { AnalyticsTab } from "@/components/analytics-tab";
-import { ComplaintsTab } from "@/components/complaints-tab";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
+
+// Lazy-load every secondary tab — they each load only when the user opens them.
+// Massively reduces initial JS bundle for the dashboard.
+const BranchesTab = lazy(() => import("@/components/branches-tab").then((m) => ({ default: m.BranchesTab })));
+const SubscriptionTab = lazy(() => import("@/components/subscription-tab").then((m) => ({ default: m.SubscriptionTab })));
+const BotHealthTab = lazy(() => import("@/components/bot-health-tab").then((m) => ({ default: m.BotHealthTab })));
+const CustomersTab = lazy(() => import("@/components/customers-tab").then((m) => ({ default: m.CustomersTab })));
+const SocialTab = lazy(() => import("@/components/social-tab").then((m) => ({ default: m.SocialTab })));
+const MarketingTab = lazy(() => import("@/components/marketing-tab").then((m) => ({ default: m.MarketingTab })));
+const CombosTab = lazy(() => import("@/components/combos-tab").then((m) => ({ default: m.CombosTab })));
+const AnalyticsTab = lazy(() => import("@/components/analytics-tab").then((m) => ({ default: m.AnalyticsTab })));
+const ComplaintsTab = lazy(() => import("@/components/complaints-tab").then((m) => ({ default: m.ComplaintsTab })));
+
+function TabFallback() {
+  return (
+    <div className="flex items-center justify-center py-12">
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
 
 
 
@@ -176,16 +187,21 @@ function RestaurantManager({
   onChange: (r: Restaurant) => void;
 }) {
   return (
-    <div className="min-h-screen bg-background p-4 md:p-6" dir="rtl">
+    <div className="min-h-screen bg-background p-3 pt-safe pb-safe md:p-6" dir="rtl">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-6 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{restaurant.name}</h1>
-            <p className="text-sm text-muted-foreground">لوحة إدارة الـ AI Agent</p>
+        <div className="mb-4 flex items-center justify-between gap-2 md:mb-6">
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-xl font-bold md:text-2xl">{restaurant.name}</h1>
+            <p className="hidden text-sm text-muted-foreground md:block">لوحة إدارة الـ AI Agent</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 md:gap-2">
             <ThemeToggle />
-            <Button variant="ghost" onClick={onLogout}><LogOut className="ml-2 h-4 w-4" />خروج</Button>
+            <Button variant="ghost" size="icon" onClick={onLogout} aria-label="خروج" className="md:hidden">
+              <LogOut className="h-5 w-5" />
+            </Button>
+            <Button variant="ghost" onClick={onLogout} className="hidden md:inline-flex">
+              <LogOut className="ml-2 h-4 w-4" />خروج
+            </Button>
           </div>
         </div>
 
@@ -209,18 +225,18 @@ function RestaurantManager({
           </TabsList>
 
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="branches"><BranchesTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="branches"><Suspense fallback={<TabFallback />}><BranchesTab restaurantId={restaurant.id} /></Suspense></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="conversations"><ConversationsTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="channels"><ChannelsTab restaurant={restaurant} /></TabsContent>
-          <TabsContent value="analytics"><AnalyticsTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="subscription"><SubscriptionTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="health"><BotHealthTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="customers"><CustomersTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="social"><SocialTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="marketing"><MarketingTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="combos"><CombosTab restaurantId={restaurant.id} /></TabsContent>
-          <TabsContent value="complaints"><ComplaintsTab restaurantId={restaurant.id} /></TabsContent>
+          <TabsContent value="analytics"><Suspense fallback={<TabFallback />}><AnalyticsTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="subscription"><Suspense fallback={<TabFallback />}><SubscriptionTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="health"><Suspense fallback={<TabFallback />}><BotHealthTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="customers"><Suspense fallback={<TabFallback />}><CustomersTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="social"><Suspense fallback={<TabFallback />}><SocialTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="marketing"><Suspense fallback={<TabFallback />}><MarketingTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="combos"><Suspense fallback={<TabFallback />}><CombosTab restaurantId={restaurant.id} /></Suspense></TabsContent>
+          <TabsContent value="complaints"><Suspense fallback={<TabFallback />}><ComplaintsTab restaurantId={restaurant.id} /></Suspense></TabsContent>
 
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
