@@ -101,8 +101,19 @@ function buildKeyboard(replies: string[]) {
   return { inline_keyboard: rows };
 }
 
+// Strip LLM markdown that Telegram (no parse_mode) renders literally.
+// Removes **bold**, __underline__, and stray leftover * _ markers around words.
+function stripMarkdown(s: string): string {
+  return s
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/(^|\s)\*(\S[^*\n]*\S|\S)\*(?=\s|[.,!?؟،:;)\]]|$)/g, "$1$2")
+    .replace(/(^|\s)_(\S[^_\n]*\S|\S)_(?=\s|[.,!?؟،:;)\]]|$)/g, "$1$2");
+}
+
 async function tgSend(tg: TgClient, chatId: number, text: string, replies?: string[]) {
-  const chunks = splitText(text);
+  const clean = stripMarkdown(text);
+  const chunks = splitText(clean);
   const kb = buildKeyboard(replies || []);
   for (let i = 0; i < chunks.length; i++) {
     const body: any = { chat_id: chatId, text: chunks[i] };
@@ -110,6 +121,7 @@ async function tgSend(tg: TgClient, chatId: number, text: string, replies?: stri
     try { await tg.call("sendMessage", body); } catch (e) { console.error("tgSend failed", e); }
   }
 }
+
 
 async function tgSendTyping(tg: TgClient, chatId: number) {
   try { await tg.call("sendChatAction", { chat_id: chatId, action: "typing" }); } catch (_) {}

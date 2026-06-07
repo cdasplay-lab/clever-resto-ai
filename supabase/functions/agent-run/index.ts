@@ -1156,7 +1156,10 @@ async function runTool(
     let checkoutSuggestions: any[] = [];
     let checkoutNote: string | null = null;
     let comboSuggestion: any = null;
-    if (!conv.meta?.checkout_upsell_offered && cart.length > 0) {
+    // Skip checkout upsell entirely if cart already contains a meal/box/combo
+    // (those usually bundle a drink + side, so suggesting another drink is noise).
+    const hasBundleItem = cart.some((c) => /بوكس|كومبو|وجبة|ميل|combo|meal|box/i.test(c.name || ""));
+    if (!conv.meta?.checkout_upsell_offered && cart.length > 0 && !hasBundleItem) {
       const inCartIds = new Set(cart.map((c) => c.menu_item_id));
       const cartQtyById = new Map<string, number>();
       for (const c of cart) cartQtyById.set(c.menu_item_id, (cartQtyById.get(c.menu_item_id) || 0) + c.qty);
