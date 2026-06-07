@@ -240,40 +240,49 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
       const fmt = mime.includes("mpeg") ? "mp3" : mime.includes("wav") ? "wav" : mime.includes("mp4") || mime.includes("m4a") ? "mp4" : "ogg";
       const base64 = audioDataUrl.split(",")[1] || "";
       const transcribePrompt =
-        "أنت مفرّغ صوتي للهجة العراقية/الخليجية في سياق طلبات مطاعم. " +
-        "اكتب النص المنطوق بالضبط بالعربية كما قيل، بدون إضافات أو ترجمة أو شرح. " +
-        "حافظ على أسماء الأكلات والكميات والأرقام كما نُطقت. " +
-        "إذا الكلام مو واضح، اكتب أوضح ما تكدر تسمعه. " +
-        "ممنوع ترد بـ 'لا أستطيع' — أعطِ أفضل تخمين فقط. " +
-        "أخرج النص لحاله بدون علامات اقتباس.";
-      const tryTranscribe = async (model: string): Promise<string> => {
+        "مهمتك: تفريغ صوتي حرفي للهجة العراقية/الخليجية في سياق طلبات مطاعم (برجر، بيتزا، شاورما، مشاوي، مشروبات، حلويات). " +
+        "اسمع الصوت بدقة واكتب الكلام بالعربية كلمة بكلمة كما نُطق تماماً، حتى لو فيه أخطاء أو تكرار. " +
+        "لا تترجم، لا تلخّص، لا تصحّح، لا تضيف شرح أو تعليق. " +
+        "أسماء الأكلات والكميات والأرقام مهمة جداً — اكتبها كما سُمعت. " +
+        "إذا في كلمة مو واضحة اكتب أقرب تخمين بدون أقواس أو علامات استفهام. " +
+        "ممنوع منعاً باتاً ترد بـ 'لا أستطيع' أو 'عذراً' أو أي اعتذار — لازم تعطي نص. " +
+        "أخرج النص المفرّغ فقط، بدون أي مقدمة أو 'النص:' أو علامات اقتباس.";
+      const tryTranscribe = async (model: string, useAudioPart = true): Promise<string> => {
         try {
+          const content: any[] = [{ type: "text", text: transcribePrompt }];
+          if (useAudioPart) {
+            content.push({ type: "input_audio", input_audio: { data: base64, format: fmt } });
+          }
           const tr = await retryFetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
             method: "POST",
             headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
             body: JSON.stringify({
               model,
-              messages: [{
-                role: "user",
-                content: [
-                  { type: "text", text: transcribePrompt },
-                  { type: "input_audio", input_audio: { data: base64, format: fmt } },
-                ],
-              }],
+              temperature: 0.1,
+              messages: [{ role: "user", content }],
             }),
           }, { attempts: 2, label: `ai:transcribe:${model}` });
-          if (!tr.ok) return "";
+          if (!tr.ok) {
+            console.warn(`[transcribe] ${model} status=${tr.status}`);
+            return "";
+          }
           const tj = await tr.json();
           let t = (tj?.choices?.[0]?.message?.content ?? "").toString().trim();
-          // strip surrounding quotes / "النص:" prefixes the model sometimes adds
-          t = t.replace(/^["'«»""]+|["'«»""]+$/g, "").replace(/^(النص|التفريغ)\s*[:：]\s*/i, "").trim();
-          // refusal patterns → treat as empty
-          if (/^(لا\s+(أستطيع|اكدر|اقدر)|عذرا|sorry|i\s+can'?t)/i.test(t)) return "";
+          t = t.replace(/^["'«»""]+|["'«»""]+$/g, "").replace(/^(النص|التفريغ|الكلام)\s*[:：]\s*/i, "").trim();
+          if (/^(لا\s+(أستطيع|اكدر|اقدر|أكدر)|عذرا|آسف|sorry|i\s+can'?t|i\s+am\s+unable)/i.test(t)) {
+            console.warn(`[transcribe] ${model} refused: ${t.slice(0,80)}`);
+            return "";
+          }
           return t;
-        } catch (_) { return ""; }
+        } catch (e) {
+          console.warn(`[transcribe] ${model} error`, (e as Error)?.message);
+          return "";
+        }
       };
-      transcribedText = await tryTranscribe("google/gemini-2.5-flash");
-      if (!transcribedText) transcribedText = await tryTranscribe("google/gemini-2.5-pro");
+      // Try strongest first; fall back through faster models.
+      transcribedText = await tryTranscribe("google/gemini-2.5-pro");
+      if (!transcribedText) transcribedText = await tryTranscribe("openai/gpt-5-mini");
+      if (!transcribedText) transcribedText = await tryTranscribe("google/gemini-2.5-flash");
     }
     if (!transcribedText) {
       await tgSend(tg, chatId, "ما كدرت أفهم الرسالة الصوتية 🎙️ ممكن تعيدها أوضح أو تكتبلي النص؟");
