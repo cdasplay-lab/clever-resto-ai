@@ -704,13 +704,16 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
     : activeBranches.length === 1
     ? `الفرع الوحيد: ${activeBranches[0].name}${activeBranches[0].address ? ` — ${activeBranches[0].address}` : ""}`
     : `الفروع المتاحة (${activeBranches.length}):\n${activeBranches.map((b: any) => {
-        const areas = Array.isArray(b.delivery_areas) && b.delivery_areas.length ? b.delivery_areas.join("، ") : "—";
+        const areas = Array.isArray(b.delivery_areas) && b.delivery_areas.length
+          ? b.delivery_areas.map((a: any) => (typeof a === "string" ? a : a?.name || "")).filter(Boolean).join("، ")
+          : "—";
         return `- ${b.name}${b.address ? ` (${b.address})` : ""} | مناطق التوصيل: ${areas}`;
       }).join("\n")}`;
 
   const branchRule = activeBranches.length > 1
-    ? `8) المطعم عنده عدة فروع. لازم تستدعي resolve_branch(address) أول ما الزبون يعطي عنوانه/منطقته، قبل set_delivery_info و submit_order. إذا منطقته ما مخدومة من أي فرع، اعتذر بلطف واذكر المناطق المخدومة.`
+    ? `8) المطعم عنده عدة فروع. **إلزامي** تستدعي resolve_branch(address) قبل set_delivery_info و preview_order. إذا حاولت preview_order بدون تحديد فرع راح ترجع لك خطأ branch_required. إذا منطقته ما مخدومة من أي فرع، اعتذر بلطف واذكر المناطق المخدومة.`
     : `8) المطعم عنده فرع واحد فقط.`;
+
 
   return `# الهوية (Identity)
 أنت موظف استقبال طلبات لمطعم "${restaurant.name}". شغلتك الوحيدة: تساعد الزبون يطلب أكل بسرعة وبدون لف.
