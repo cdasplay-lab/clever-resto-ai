@@ -1091,13 +1091,22 @@ async function runTool(
       const already = cartExisting.filter((c) => c.menu_item_id === item.id).reduce((s, c) => s + c.qty, 0);
       const need = already + Number(args.qty || 0);
       if (item.stock_qty == null || item.stock_qty <= 0) {
-        return { error: `للأسف "${item.name}" خلصان حالياً. اقترح بديل عبر search_menu.` };
+        const alts = await suggestAlternatives(db, restaurant.id, item.category, [item.id]);
+        return {
+          error: `للأسف "${item.name}" خلصان حالياً.`,
+          out_of_stock: true,
+          suggested_alternatives: alts,
+          user_message: alts.length
+            ? `للأسف "${item.name}" خلصان. تحب بديل من نفس الفئة: ${alts.map((a) => a.name).join("، ")}؟`
+            : `للأسف "${item.name}" خلصان حالياً.`,
+        };
       }
       if (need > item.stock_qty) {
         const remaining = Math.max(0, item.stock_qty - already);
         return { error: `المتوفر من "${item.name}" ${remaining} فقط. عدّل الكمية.`, available: remaining };
       }
     }
+
 
     // Compute price with deltas
     let unitPrice = Number(item.price);
