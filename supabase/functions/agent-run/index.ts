@@ -103,6 +103,34 @@ type Delivery = {
   payment_method?: "cash" | "card_on_delivery";
 };
 
+// Find in-stock alternatives in the same category, used when an item is OOS.
+async function suggestAlternatives(
+  db: any,
+  restaurantId: string,
+  category: string | null | undefined,
+  excludeIds: string[],
+): Promise<Array<{ id: string; name: string; price: number }>> {
+  if (!category) return [];
+  try {
+    const { data } = await db
+      .from("menu_items")
+      .select("id,name,price,category,track_stock,stock_qty,is_available")
+      .eq("restaurant_id", restaurantId)
+      .eq("is_available", true)
+      .ilike("category", category)
+      .limit(8);
+    return (data || [])
+      .filter((m: any) => !excludeIds.includes(m.id))
+      .filter((m: any) => !m.track_stock || (m.stock_qty != null && m.stock_qty > 0))
+      .slice(0, 3)
+      .map((m: any) => ({ id: m.id, name: m.name, price: Number(m.price) }));
+  } catch {
+    return [];
+  }
+}
+
+
+
 
 // ---------- Tool definitions (sent to the model) ----------
 const TOOLS = [
