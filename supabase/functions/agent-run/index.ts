@@ -1178,16 +1178,31 @@ async function runTool(
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     if (!cart.length) return { error: "السلة فارغة" };
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const delivery = conv.delivery || {};
+    const delivery = (conv.delivery || {}) as Delivery;
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف — استدعِ set_delivery_info أولاً" };
     }
     if (!conv.customer_name || !String(conv.customer_name).trim()) {
       return { error: "ناقص اسم الزبون — اسأله عن اسمه ثم استدعِ set_delivery_info مع customer_name." };
     }
+    if (!delivery.payment_method) {
+      return {
+        error: "payment_method_required",
+        user_message: "اسأل الزبون قبل التأكيد: 'تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟' ثم استدعِ set_delivery_info مع payment_method (cash أو card_on_delivery) وبعدها preview_order مرة ثانية.",
+      };
+    }
     const branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
+    const activeBranches = branches.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length > 1) {
+      return {
+        error: "branch_required",
+        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch بعنوان الزبون.",
+        available_branches: activeBranches.map((b: any) => ({ id: b.id, name: b.name })),
+      };
+    }
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+
     const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
