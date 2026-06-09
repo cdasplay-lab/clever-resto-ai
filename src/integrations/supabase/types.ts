@@ -677,6 +677,7 @@ export type Database = {
           items: Json
           meta: Json
           notes: string | null
+          payment_method: string | null
           restaurant_id: string
           scheduled_for: string | null
           status: Database["public"]["Enums"]["order_status"]
@@ -697,6 +698,7 @@ export type Database = {
           items: Json
           meta?: Json
           notes?: string | null
+          payment_method?: string | null
           restaurant_id: string
           scheduled_for?: string | null
           status?: Database["public"]["Enums"]["order_status"]
@@ -717,6 +719,7 @@ export type Database = {
           items?: Json
           meta?: Json
           notes?: string | null
+          payment_method?: string | null
           restaurant_id?: string
           scheduled_for?: string | null
           status?: Database["public"]["Enums"]["order_status"]
