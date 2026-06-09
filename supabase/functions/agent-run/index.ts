@@ -1207,8 +1207,9 @@ async function runTool(
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
     }
-    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     const token = `ord_${fp.slice(0, 16)}`;
+
 
     // ===== Checkout-time upsell (once per conversation) =====
     let checkoutSuggestions: any[] = [];
