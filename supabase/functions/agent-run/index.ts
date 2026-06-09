@@ -1801,7 +1801,9 @@ async function runTool(
 
 
   if (name === "resolve_branch") {
-    const addr = String(args.address || "").trim().toLowerCase();
+    const rawAddr = String(args.address || "").trim();
+    const addrNorm = normalizeArabic(rawAddr);
+    const addrTokens = addrNorm.split(/[\s،,.\/-]+/).filter((t) => t.length >= 2);
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
     if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
     if (branches.length === 1) {
@@ -1810,9 +1812,23 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), branch_id: b.id };
       return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
     }
-    const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
+    const areaMatches = (b: any) => {
+      const areas = Array.isArray(b.delivery_areas) ? b.delivery_areas : [];
+      for (const a of areas) {
+        const areaName = normalizeArabic(branchAreaName(a));
+        if (!areaName) continue;
+        if (addrNorm.includes(areaName) || areaName.includes(addrNorm)) return true;
+        // Token-level fallback so "كرادة" matches "الكرادة" after normalization
+        const areaTokens = areaName.split(/[\s،,.\/-]+/).filter((t) => t.length >= 2);
+        if (areaTokens.some((t) => addrTokens.includes(t))) return true;
+      }
+      return false;
+    };
+    const matches = branches.filter(areaMatches);
     if (matches.length === 0) {
-      const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
+      const allAreas = branches.flatMap((b: any) =>
+        (Array.isArray(b.delivery_areas) ? b.delivery_areas : []).map(branchAreaName).filter(Boolean)
+      );
       return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas };
     }
     const chosen = matches[0];
@@ -1820,6 +1836,7 @@ async function runTool(
     conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
     return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
   }
+
 
   if (name === "handoff_to_human") {
     const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
