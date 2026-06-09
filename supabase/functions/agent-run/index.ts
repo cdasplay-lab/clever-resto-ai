@@ -1365,7 +1365,8 @@ async function runTool(
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
       return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
     }).join("\n");
-    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    const paymentLabel = delivery.payment_method === "card_on_delivery" ? "بطاقة عند الاستلام" : "نقداً عند الاستلام";
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n💳 الدفع: ${paymentLabel}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
     return {
       ok: true,
       confirmation_token: token,
@@ -1392,9 +1393,23 @@ async function runTool(
     if (!args.confirmation_token || args.confirmation_token !== pending.token) {
       return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
-    const delivery = conv.delivery || {};
+    const delivery = (conv.delivery || {}) as Delivery;
     const branchId = conv.meta?.branch_id || null;
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const branchesAll: any[] = (restaurant as any).__branches || [];
+    const activeBranches = branchesAll.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length > 1) {
+      return {
+        error: "branch_required",
+        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد.",
+      };
+    }
+    if (!delivery.payment_method) {
+      return {
+        error: "payment_method_required",
+        user_message: "اسأل الزبون عن طريقة الدفع (نقدي/بطاقة عند الاستلام) ثم set_delivery_info ثم preview_order من جديد.",
+      };
+    }
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     if (currentFp !== pending.fp) {
       // Cart or delivery changed since preview — force a new preview
       await db.from("conversations").update({
@@ -1430,10 +1445,12 @@ async function runTool(
         subtotal,
         total: subtotal,
         status: "pending",
+        payment_method: delivery.payment_method,
         meta: orderMeta,
       })
       .select()
       .single();
+
 
     if (error) {
       console.error("submit_order insert failed:", error);
