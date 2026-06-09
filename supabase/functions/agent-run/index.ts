@@ -1593,9 +1593,17 @@ async function runTool(
     if (!args.confirmation_token || args.confirmation_token !== pending.token) {
       return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
-    const delivery = conv.delivery || {};
+    const delivery = (conv.delivery || {}) as Delivery;
     const branchId = conv.meta?.branch_id || null;
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const branchesAll: any[] = (restaurant as any).__branches || [];
+    const activeBranches = branchesAll.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length > 1) {
+      return { error: "branch_required", user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد." };
+    }
+    if (!delivery.payment_method) {
+      return { error: "payment_method_required", user_message: "اسأل الزبون عن طريقة الدفع ثم set_delivery_info ثم preview_order من جديد." };
+    }
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     if (currentFp !== pending.fp) {
       await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
@@ -1628,6 +1636,7 @@ async function runTool(
         total: subtotal,
         status: "scheduled",
         scheduled_for: when.toISOString(),
+        payment_method: delivery.payment_method,
         notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
       })
       .select()
