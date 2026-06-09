@@ -32,18 +32,34 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function cartFingerprint(cart: any[], delivery: any, branchId: string | null): string {
+function cartFingerprint(cart: any[], delivery: any, branchId: string | null, customerName?: string | null): string {
   const norm = {
     cart: (cart || []).map((c) => ({
       id: c.menu_item_id, q: c.qty, p: c.unit_price,
       o: (c.selected_options || []).map((s: any) => `${s.group}=${s.choice}`).sort().join("|"),
       n: c.notes || "",
     })),
-    d: { a: delivery?.address || "", p: delivery?.phone || "", t: delivery?.time || "" },
+    d: {
+      a: delivery?.address || "",
+      p: delivery?.phone || "",
+      t: delivery?.time || "",
+      pm: delivery?.payment_method || "",
+    },
     b: branchId || "",
+    cn: (customerName || "").toString().trim(),
   };
   return JSON.stringify(norm);
 }
+
+// Normalize a branch delivery_areas entry: supports both plain strings
+// and structured objects like { name, fee, eta_minutes }.
+function branchAreaName(a: any): string {
+  if (!a) return "";
+  if (typeof a === "string") return a;
+  if (typeof a === "object" && typeof a.name === "string") return a.name;
+  return "";
+}
+
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
@@ -59,6 +75,7 @@ function normalizeArabic(input: string): string {
   // Alef maksura -> ya
   s = s.replace(/\u0649/g, "\u064A");
   // Ta marbuta -> ha
+
   s = s.replace(/\u0629/g, "\u0647");
   // Remove tatweel
   s = s.replace(/\u0640/g, "");
@@ -83,7 +100,37 @@ type Delivery = {
   phone?: string;
   time?: string;
   area?: string;
+  payment_method?: "cash" | "card_on_delivery";
 };
+
+// Find in-stock alternatives in the same category, used when an item is OOS.
+async function suggestAlternatives(
+  db: any,
+  restaurantId: string,
+  category: string | null | undefined,
+  excludeIds: string[],
+): Promise<Array<{ id: string; name: string; price: number }>> {
+  if (!category) return [];
+  try {
+    const { data } = await db
+      .from("menu_items")
+      .select("id,name,price,category,track_stock,stock_qty,is_available")
+      .eq("restaurant_id", restaurantId)
+      .eq("is_available", true)
+      .ilike("category", category)
+      .limit(8);
+    return (data || [])
+      .filter((m: any) => !excludeIds.includes(m.id))
+      .filter((m: any) => !m.track_stock || (m.stock_qty != null && m.stock_qty > 0))
+      .slice(0, 3)
+      .map((m: any) => ({ id: m.id, name: m.name, price: Number(m.price) }));
+  } catch {
+    return [];
+  }
+}
+
+
+
 
 // ---------- Tool definitions (sent to the model) ----------
 const TOOLS = [
@@ -158,7 +205,7 @@ const TOOLS = [
     function: {
       name: "set_delivery_info",
       description:
-        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. لازم تتضمن اسم الزبون + العنوان + الهاتف.",
+        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. لازم تتضمن اسم الزبون + العنوان + الهاتف. مرّر طريقة الدفع لو ذكرها الزبون (cash = نقدي عند الاستلام، card_on_delivery = بطاقة عند الاستلام).",
       parameters: {
         type: "object",
         properties: {
@@ -167,12 +214,18 @@ const TOOLS = [
           phone: { type: "string" },
           time: { type: "string", description: "وقت التوصيل المطلوب (نص حر)" },
           area: { type: "string" },
+          payment_method: {
+            type: "string",
+            enum: ["cash", "card_on_delivery"],
+            description: "طريقة الدفع: cash = نقدي عند الاستلام، card_on_delivery = بطاقة عند الاستلام.",
+          },
         },
         required: ["customer_name", "address", "phone"],
         additionalProperties: false,
       },
     },
   },
+
   {
     type: "function",
     function: {
@@ -651,13 +704,16 @@ function systemPrompt(restaurant: any, conv: any, branches: any[], customerProfi
     : activeBranches.length === 1
     ? `الفرع الوحيد: ${activeBranches[0].name}${activeBranches[0].address ? ` — ${activeBranches[0].address}` : ""}`
     : `الفروع المتاحة (${activeBranches.length}):\n${activeBranches.map((b: any) => {
-        const areas = Array.isArray(b.delivery_areas) && b.delivery_areas.length ? b.delivery_areas.join("، ") : "—";
+        const areas = Array.isArray(b.delivery_areas) && b.delivery_areas.length
+          ? b.delivery_areas.map((a: any) => (typeof a === "string" ? a : a?.name || "")).filter(Boolean).join("، ")
+          : "—";
         return `- ${b.name}${b.address ? ` (${b.address})` : ""} | مناطق التوصيل: ${areas}`;
       }).join("\n")}`;
 
   const branchRule = activeBranches.length > 1
-    ? `8) المطعم عنده عدة فروع. لازم تستدعي resolve_branch(address) أول ما الزبون يعطي عنوانه/منطقته، قبل set_delivery_info و submit_order. إذا منطقته ما مخدومة من أي فرع، اعتذر بلطف واذكر المناطق المخدومة.`
+    ? `8) المطعم عنده عدة فروع. **إلزامي** تستدعي resolve_branch(address) قبل set_delivery_info و preview_order. إذا حاولت preview_order بدون تحديد فرع راح ترجع لك خطأ branch_required. إذا منطقته ما مخدومة من أي فرع، اعتذر بلطف واذكر المناطق المخدومة.`
     : `8) المطعم عنده فرع واحد فقط.`;
+
 
   return `# الهوية (Identity)
 أنت موظف استقبال طلبات لمطعم "${restaurant.name}". شغلتك الوحيدة: تساعد الزبون يطلب أكل بسرعة وبدون لف.
@@ -685,10 +741,12 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 1.1) ممنوع تضيف أي صنف "من يمك" أو من المفضّلات/الطلبات السابقة/التوقعات/العادات. add_to_cart فقط للأصناف التي ذكرها الزبون صراحة في آخر طلبه، أو إذا وافق صراحة على اقتراح منك. لا تضيف بطاطس/صوص/مشروب/إضافات لأنّها "شائعة" أو "ضمن تفضيلاته" أو "طلبها قبل". إذا غير متأكد اسأل سؤال واحد.
 1.2) إذا الزبون اعترض مثل "ما طلبت بطاطس"، "من وين جبتها؟"، "شنو هاي؟" → اعتذر فوراً، استدعِ remove_from_cart للصنف الزائد إن كان موجوداً، ولا تضيف بدله أي شيء.
 2) تأكيد الطلب (إلزامي وبخطوتين):
-   أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف (+ الفرع لو متعدد). إذا الاسم محفوظ في ملف الزبون أعلاه، استعمله مباشرة بدون ما تسأل. إذا ما تعرفه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name.
-   ب) بعد ما تكتمل البيانات استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
+   أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف + **طريقة الدفع** (+ الفرع لو متعدد). إذا الاسم محفوظ في ملف الزبون أعلاه، استعمله مباشرة بدون ما تسأل. إذا ما تعرفه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name.
+   أ-2) **طريقة الدفع إلزامية**: قبل preview_order اسأل الزبون مرة واحدة بصياغة طبيعية مثل: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟" ومرّر القيمة في set_delivery_info كـ payment_method (cash أو card_on_delivery). لا تكرر السؤال لو سبق وجاوب. لو preview_order رجع payment_method_required، اسأل فوراً.
+   ب) بعد ما تكتمل البيانات استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل يتضمن طريقة الدفع. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
    ج) لا تستدعِ submit_order إلا بعد ما الزبون يرد بصراحة بـ نعم/أكد/تمام/أوكي. عند الاستدعاء مرّر confirmation_token كما هو ونص موافقة الزبون الحرفي في user_confirmation_text.
-   د) لو الزبون عدّل السلة أو العنوان أو الاسم بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
+   د) لو الزبون عدّل السلة أو العنوان أو الاسم أو طريقة الدفع بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
+
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
 4) الحد الأدنى للطلب: ${effectiveMinOrder} ${restaurant.currency}. لو السلة أقل، خبّر الزبون قبل ما يأكد.
 5) ممنوع الكلام بأي موضوع خارج طلبات المطعم. إذا سألك عن شي غير مرتبط، رجّعه للطلب بلطف.
@@ -1067,13 +1125,22 @@ async function runTool(
       const already = cartExisting.filter((c) => c.menu_item_id === item.id).reduce((s, c) => s + c.qty, 0);
       const need = already + Number(args.qty || 0);
       if (item.stock_qty == null || item.stock_qty <= 0) {
-        return { error: `للأسف "${item.name}" خلصان حالياً. اقترح بديل عبر search_menu.` };
+        const alts = await suggestAlternatives(db, restaurant.id, item.category, [item.id]);
+        return {
+          error: `للأسف "${item.name}" خلصان حالياً.`,
+          out_of_stock: true,
+          suggested_alternatives: alts,
+          user_message: alts.length
+            ? `للأسف "${item.name}" خلصان. تحب بديل من نفس الفئة: ${alts.map((a) => a.name).join("، ")}؟`
+            : `للأسف "${item.name}" خلصان حالياً.`,
+        };
       }
       if (need > item.stock_qty) {
         const remaining = Math.max(0, item.stock_qty - already);
         return { error: `المتوفر من "${item.name}" ${remaining} فقط. عدّل الكمية.`, available: remaining };
       }
     }
+
 
     // Compute price with deltas
     let unitPrice = Number(item.price);
@@ -1127,11 +1194,16 @@ async function runTool(
   }
 
   if (name === "set_delivery_info") {
+    const prevDelivery = (conv.delivery || {}) as Delivery;
+    const pm = args.payment_method === "cash" || args.payment_method === "card_on_delivery"
+      ? args.payment_method
+      : prevDelivery.payment_method;
     const delivery: Delivery = {
       address: args.address,
       phone: args.phone,
       time: args.time,
       area: args.area,
+      payment_method: pm,
     };
     const newName = (args.customer_name || "").toString().trim() || conv.customer_name || null;
     conv.delivery = delivery;
@@ -1140,29 +1212,47 @@ async function runTool(
       .from("conversations")
       .update({ delivery, state: "confirm", customer_name: newName })
       .eq("id", conv.id);
-    return { ok: true, delivery, customer_name: newName };
+    return { ok: true, delivery, customer_name: newName, needs_payment_method: !pm };
   }
+
+
 
   if (name === "preview_order") {
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     if (!cart.length) return { error: "السلة فارغة" };
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const delivery = conv.delivery || {};
+    const delivery = (conv.delivery || {}) as Delivery;
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف — استدعِ set_delivery_info أولاً" };
     }
     if (!conv.customer_name || !String(conv.customer_name).trim()) {
       return { error: "ناقص اسم الزبون — اسأله عن اسمه ثم استدعِ set_delivery_info مع customer_name." };
     }
+    if (!delivery.payment_method) {
+      return {
+        error: "payment_method_required",
+        user_message: "اسأل الزبون قبل التأكيد: 'تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟' ثم استدعِ set_delivery_info مع payment_method (cash أو card_on_delivery) وبعدها preview_order مرة ثانية.",
+      };
+    }
     const branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
+    const activeBranches = branches.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length > 1) {
+      return {
+        error: "branch_required",
+        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch بعنوان الزبون.",
+        available_branches: activeBranches.map((b: any) => ({ id: b.id, name: b.name })),
+      };
+    }
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+
     const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
     }
-    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     const token = `ord_${fp.slice(0, 16)}`;
+
 
     // ===== Checkout-time upsell (once per conversation) =====
     let checkoutSuggestions: any[] = [];
@@ -1318,7 +1408,8 @@ async function runTool(
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
       return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
     }).join("\n");
-    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    const paymentLabel = delivery.payment_method === "card_on_delivery" ? "بطاقة عند الاستلام" : "نقداً عند الاستلام";
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n💳 الدفع: ${paymentLabel}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
     return {
       ok: true,
       confirmation_token: token,
@@ -1345,9 +1436,23 @@ async function runTool(
     if (!args.confirmation_token || args.confirmation_token !== pending.token) {
       return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
-    const delivery = conv.delivery || {};
+    const delivery = (conv.delivery || {}) as Delivery;
     const branchId = conv.meta?.branch_id || null;
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const branchesAll: any[] = (restaurant as any).__branches || [];
+    const activeBranches = branchesAll.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length > 1) {
+      return {
+        error: "branch_required",
+        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد.",
+      };
+    }
+    if (!delivery.payment_method) {
+      return {
+        error: "payment_method_required",
+        user_message: "اسأل الزبون عن طريقة الدفع (نقدي/بطاقة عند الاستلام) ثم set_delivery_info ثم preview_order من جديد.",
+      };
+    }
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     if (currentFp !== pending.fp) {
       // Cart or delivery changed since preview — force a new preview
       await db.from("conversations").update({
@@ -1383,10 +1488,12 @@ async function runTool(
         subtotal,
         total: subtotal,
         status: "pending",
+        payment_method: delivery.payment_method,
         meta: orderMeta,
       })
       .select()
       .single();
+
 
     if (error) {
       console.error("submit_order insert failed:", error);
@@ -1529,9 +1636,17 @@ async function runTool(
     if (!args.confirmation_token || args.confirmation_token !== pending.token) {
       return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
     }
-    const delivery = conv.delivery || {};
+    const delivery = (conv.delivery || {}) as Delivery;
     const branchId = conv.meta?.branch_id || null;
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId));
+    const branchesAll: any[] = (restaurant as any).__branches || [];
+    const activeBranches = branchesAll.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length > 1) {
+      return { error: "branch_required", user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد." };
+    }
+    if (!delivery.payment_method) {
+      return { error: "payment_method_required", user_message: "اسأل الزبون عن طريقة الدفع ثم set_delivery_info ثم preview_order من جديد." };
+    }
+    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     if (currentFp !== pending.fp) {
       await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
@@ -1564,6 +1679,7 @@ async function runTool(
         total: subtotal,
         status: "scheduled",
         scheduled_for: when.toISOString(),
+        payment_method: delivery.payment_method,
         notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
       })
       .select()
@@ -1728,7 +1844,9 @@ async function runTool(
 
 
   if (name === "resolve_branch") {
-    const addr = String(args.address || "").trim().toLowerCase();
+    const rawAddr = String(args.address || "").trim();
+    const addrNorm = normalizeArabic(rawAddr);
+    const addrTokens = addrNorm.split(/[\s،,.\/-]+/).filter((t) => t.length >= 2);
     const branches: any[] = (restaurant.__branches || []).filter((b: any) => b.is_active);
     if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
     if (branches.length === 1) {
@@ -1737,9 +1855,23 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), branch_id: b.id };
       return { ok: true, branch: { id: b.id, name: b.name, address: b.address, min_order: b.min_order, open_hours: b.open_hours } };
     }
-    const matches = branches.filter((b: any) => Array.isArray(b.delivery_areas) && b.delivery_areas.some((a: string) => addr.includes(String(a).toLowerCase())));
+    const areaMatches = (b: any) => {
+      const areas = Array.isArray(b.delivery_areas) ? b.delivery_areas : [];
+      for (const a of areas) {
+        const areaName = normalizeArabic(branchAreaName(a));
+        if (!areaName) continue;
+        if (addrNorm.includes(areaName) || areaName.includes(addrNorm)) return true;
+        // Token-level fallback so "كرادة" matches "الكرادة" after normalization
+        const areaTokens = areaName.split(/[\s،,.\/-]+/).filter((t) => t.length >= 2);
+        if (areaTokens.some((t) => addrTokens.includes(t))) return true;
+      }
+      return false;
+    };
+    const matches = branches.filter(areaMatches);
     if (matches.length === 0) {
-      const allAreas = branches.flatMap((b: any) => (Array.isArray(b.delivery_areas) ? b.delivery_areas : []));
+      const allAreas = branches.flatMap((b: any) =>
+        (Array.isArray(b.delivery_areas) ? b.delivery_areas : []).map(branchAreaName).filter(Boolean)
+      );
       return { error: "ما اكو فرع يخدم هذي المنطقة", served_areas: allAreas };
     }
     const chosen = matches[0];
@@ -1747,6 +1879,7 @@ async function runTool(
     conv.meta = { ...(conv.meta || {}), branch_id: chosen.id };
     return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
   }
+
 
   if (name === "handoff_to_human") {
     const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
