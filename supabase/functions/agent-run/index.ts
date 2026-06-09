@@ -75,6 +75,7 @@ function normalizeArabic(input: string): string {
   // Alef maksura -> ya
   s = s.replace(/\u0649/g, "\u064A");
   // Ta marbuta -> ha
+
   s = s.replace(/\u0629/g, "\u0647");
   // Remove tatweel
   s = s.replace(/\u0640/g, "");
