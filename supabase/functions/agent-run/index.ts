@@ -32,18 +32,34 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function cartFingerprint(cart: any[], delivery: any, branchId: string | null): string {
+function cartFingerprint(cart: any[], delivery: any, branchId: string | null, customerName?: string | null): string {
   const norm = {
     cart: (cart || []).map((c) => ({
       id: c.menu_item_id, q: c.qty, p: c.unit_price,
       o: (c.selected_options || []).map((s: any) => `${s.group}=${s.choice}`).sort().join("|"),
       n: c.notes || "",
     })),
-    d: { a: delivery?.address || "", p: delivery?.phone || "", t: delivery?.time || "" },
+    d: {
+      a: delivery?.address || "",
+      p: delivery?.phone || "",
+      t: delivery?.time || "",
+      pm: delivery?.payment_method || "",
+    },
     b: branchId || "",
+    cn: (customerName || "").toString().trim(),
   };
   return JSON.stringify(norm);
 }
+
+// Normalize a branch delivery_areas entry: supports both plain strings
+// and structured objects like { name, fee, eta_minutes }.
+function branchAreaName(a: any): string {
+  if (!a) return "";
+  if (typeof a === "string") return a;
+  if (typeof a === "object" && typeof a.name === "string") return a.name;
+  return "";
+}
+
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
@@ -83,7 +99,9 @@ type Delivery = {
   phone?: string;
   time?: string;
   area?: string;
+  payment_method?: "cash" | "card_on_delivery";
 };
+
 
 // ---------- Tool definitions (sent to the model) ----------
 const TOOLS = [
@@ -158,7 +176,7 @@ const TOOLS = [
     function: {
       name: "set_delivery_info",
       description:
-        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. لازم تتضمن اسم الزبون + العنوان + الهاتف.",
+        "احفظ معلومات التوصيل بعد ما يأكدها الزبون. لازم تتضمن اسم الزبون + العنوان + الهاتف. مرّر طريقة الدفع لو ذكرها الزبون (cash = نقدي عند الاستلام، card_on_delivery = بطاقة عند الاستلام).",
       parameters: {
         type: "object",
         properties: {
@@ -167,12 +185,18 @@ const TOOLS = [
           phone: { type: "string" },
           time: { type: "string", description: "وقت التوصيل المطلوب (نص حر)" },
           area: { type: "string" },
+          payment_method: {
+            type: "string",
+            enum: ["cash", "card_on_delivery"],
+            description: "طريقة الدفع: cash = نقدي عند الاستلام، card_on_delivery = بطاقة عند الاستلام.",
+          },
         },
         required: ["customer_name", "address", "phone"],
         additionalProperties: false,
       },
     },
   },
+
   {
     type: "function",
     function: {
@@ -1127,11 +1151,16 @@ async function runTool(
   }
 
   if (name === "set_delivery_info") {
+    const prevDelivery = (conv.delivery || {}) as Delivery;
+    const pm = args.payment_method === "cash" || args.payment_method === "card_on_delivery"
+      ? args.payment_method
+      : prevDelivery.payment_method;
     const delivery: Delivery = {
       address: args.address,
       phone: args.phone,
       time: args.time,
       area: args.area,
+      payment_method: pm,
     };
     const newName = (args.customer_name || "").toString().trim() || conv.customer_name || null;
     conv.delivery = delivery;
@@ -1140,8 +1169,10 @@ async function runTool(
       .from("conversations")
       .update({ delivery, state: "confirm", customer_name: newName })
       .eq("id", conv.id);
-    return { ok: true, delivery, customer_name: newName };
+    return { ok: true, delivery, customer_name: newName, needs_payment_method: !pm };
   }
+
+
 
   if (name === "preview_order") {
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
