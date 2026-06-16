@@ -429,6 +429,23 @@ const TOOLS = [
       parameters: { type: "object", properties: {}, additionalProperties: false },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "check_coverage",
+      description:
+        "افحص هل موقع الزبون (lat,lng) ضمن نطاق توصيل أي فرع نشط. استخدمها قبل preview_order لما يكون الفرع غير محدد ولديك موقع الزبون، أو لما تشك إنه خارج التغطية. ترجع الفرع المغطي (لو موجود) أو قائمة الفروع المتاحة ومسافة كل واحد.",
+      parameters: {
+        type: "object",
+        properties: {
+          lat: { type: "number" },
+          lng: { type: "number" },
+        },
+        required: ["lat", "lng"],
+        additionalProperties: false,
+      },
+    },
+  },
 ] as const;
 
 // ---------- Complaint keyword detection ----------
