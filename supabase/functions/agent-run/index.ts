@@ -1264,6 +1264,50 @@ async function runTool(
     }
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
 
+    // ===== Geographic coverage check =====
+    const targetBranches = branch ? [branch] : activeBranches;
+    const branchesWithCoverage = targetBranches.filter((b: any) => b.coverage_type && b.coverage_type !== "none");
+    const customerLocForCov = (delivery as any)?.customer_location || conv.meta?.customer_location;
+    if (branchesWithCoverage.length > 0) {
+      if (!customerLocForCov || !Number.isFinite(customerLocForCov.lat) || !Number.isFinite(customerLocForCov.lng)) {
+        return {
+          error: "customer_location_required",
+          user_message: "يحتاج موقع الزبون الجغرافي حتى نتأكد إنه ضمن منطقة التوصيل. استدعِ request_customer_location مرة واحدة، وبعدها preview_order من جديد.",
+        };
+      }
+      const covering = targetBranches.filter((b: any) => checkBranchCoverage(b, customerLocForCov).covered);
+      if (covering.length === 0) {
+        // Log to uncovered_requests + suggest pickup / alternate branch
+        try {
+          await db.from("uncovered_requests").insert({
+            restaurant_id: restaurant.id,
+            branch_id: branch?.id || null,
+            conversation_id: conv.id,
+            customer_phone: delivery.phone || null,
+            customer_handle: conv.customer_handle || null,
+            address_text: delivery.address || null,
+            latitude: customerLocForCov.lat,
+            longitude: customerLocForCov.lng,
+          });
+        } catch (_) { /* never block */ }
+        // Find any other branch (across all active) that does cover this point
+        const fallback = activeBranches.find((b: any) => b !== branch && checkBranchCoverage(b, customerLocForCov).covered);
+        return {
+          error: "out_of_coverage",
+          user_message: fallback
+            ? `موقع الزبون خارج نطاق التوصيل لهذا الفرع، لكن فرع "${fallback.name}" يغطي منطقته. اعرض عليه التحويل لهذا الفرع، أو خيار الاستلام من المطعم (Pickup). لا تأكد توصيل ما لم يطلب الزبون استثناء صريح.`
+            : `موقع الزبون خارج نطاق التوصيل لكل فروعنا حالياً. اعتذر بلطف، واعرض عليه خيار الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. لا تأكد طلب توصيل.`,
+          alternate_branch: fallback ? { id: fallback.id, name: fallback.name } : null,
+        };
+      }
+      // If we have multiple covering and no specific branch chosen yet, pick the closest one with coords
+      if (!branch && covering.length >= 1) {
+        const picked = covering[0];
+        conv.meta = { ...(conv.meta || {}), branch_id: picked.id };
+        await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
+      }
+    }
+
     const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
