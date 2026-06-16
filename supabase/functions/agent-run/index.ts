@@ -7,6 +7,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
 import { retryFetch } from "../_shared/retry.ts";
+import { checkBranchCoverage, GOVERNORATES as IQ_GOVS } from "../_shared/geo.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
