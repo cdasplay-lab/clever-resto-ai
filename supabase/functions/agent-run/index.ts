@@ -2411,7 +2411,7 @@ Deno.serve(async (req) => {
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,google_maps_url,latitude,longitude")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,google_maps_url,latitude,longitude,coverage_type,coverage_governorate,coverage_polygon,coverage_radius_km")
       .eq("restaurant_id", restaurant.id);
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
