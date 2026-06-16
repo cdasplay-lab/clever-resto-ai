@@ -220,7 +220,11 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
       google_maps_url: b.google_maps_url,
       latitude: b.latitude,
       longitude: b.longitude,
-    }).eq("id", b.id);
+      coverage_type: b.coverage_type,
+      coverage_governorate: b.coverage_type === "governorate" ? b.coverage_governorate : null,
+      coverage_radius_km: b.coverage_type === "radius" ? Number(b.coverage_radius_km) || null : null,
+      coverage_polygon: b.coverage_type === "polygon" ? (b.coverage_polygon as any) : null,
+    } as any).eq("id", b.id);
     setSaving(false);
     if (error) return toast.error(error.message);
     toast.success("تم الحفظ");
