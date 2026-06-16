@@ -64,6 +64,10 @@ export function BranchesTab({ restaurantId }: { restaurantId: string }) {
       ...b,
       delivery_areas: Array.isArray(b.delivery_areas) ? b.delivery_areas : [],
       open_hours: b.open_hours && Object.keys(b.open_hours).length ? b.open_hours : defaultHours(),
+      coverage_type: (b.coverage_type as CoverageType) || "none",
+      coverage_governorate: b.coverage_governorate ?? null,
+      coverage_polygon: Array.isArray(b.coverage_polygon) ? b.coverage_polygon : null,
+      coverage_radius_km: b.coverage_radius_km ?? null,
     })));
     setLoading(false);
   }
