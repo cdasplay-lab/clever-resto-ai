@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Pencil, MapPin, Phone, Clock } from "lucide-react";
 import { MapsLocationField } from "@/components/maps-location-field";
+import { GOVERNORATES } from "@/lib/governorates-iq";
 
 type DayHours = { open: string; close: string; closed: boolean };
 type OpenHours = Record<string, DayHours>;
+type CoverageType = "none" | "governorate" | "polygon" | "radius";
 export type Branch = {
   id: string;
   restaurant_id: string;
@@ -26,6 +28,10 @@ export type Branch = {
   google_maps_url: string | null;
   latitude: number | null;
   longitude: number | null;
+  coverage_type: CoverageType;
+  coverage_governorate: string | null;
+  coverage_polygon: { lat: number; lng: number }[] | null;
+  coverage_radius_km: number | null;
 };
 
 const DAYS: { key: string; label: string }[] = [
