@@ -1942,6 +1942,36 @@ async function runTool(
     return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
   }
 
+  if (name === "check_coverage") {
+    const lat = Number(args.lat), lng = Number(args.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { error: "إحداثيات غير صالحة" };
+    const branches: any[] = ((restaurant as any).__branches || []).filter((b: any) => b.is_active);
+    if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
+    // Persist the customer location for use in preview_order
+    conv.meta = { ...(conv.meta || {}), customer_location: { lat, lng } };
+    await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
+    const results = branches.map((b: any) => {
+      const r = checkBranchCoverage(b, { lat, lng });
+      return { id: b.id, name: b.name, covered: r.covered, mode: r.mode, distance_km: r.distance_km ?? null };
+    });
+    const covering = results.filter((r: any) => r.covered);
+    if (covering.length === 0) {
+      return {
+        ok: false,
+        covered: false,
+        user_message: "موقع الزبون خارج نطاق التوصيل لجميع الفروع. اعتذر بلطف، واعرض الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. سيُسجل الطلب كمنطقة مطلوبة للمالك تلقائياً عند المحاولة.",
+        branches: results,
+      };
+    }
+    // Auto-select the closest covering branch
+    const best = covering.sort((a: any, b: any) => (a.distance_km ?? 999) - (b.distance_km ?? 999))[0];
+    conv.meta = { ...(conv.meta || {}), branch_id: best.id, customer_location: { lat, lng } };
+    await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
+    return { ok: true, covered: true, chosen_branch: best, all_branches: results };
+  }
+
+
+
 
   if (name === "handoff_to_human") {
     const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
