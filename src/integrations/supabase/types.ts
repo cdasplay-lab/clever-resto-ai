@@ -151,12 +151,17 @@ export type Database = {
       branches: {
         Row: {
           address: string | null
+          coverage_governorate: string | null
+          coverage_polygon: Json | null
+          coverage_radius_km: number | null
+          coverage_type: string
           created_at: string
           current_prep_minutes: number | null
           delivery_areas: Json
           google_maps_url: string | null
           id: string
           is_active: boolean
+          languages: string[]
           latitude: number | null
           longitude: number | null
           min_order: number
@@ -169,12 +174,17 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          coverage_governorate?: string | null
+          coverage_polygon?: Json | null
+          coverage_radius_km?: number | null
+          coverage_type?: string
           created_at?: string
           current_prep_minutes?: number | null
           delivery_areas?: Json
           google_maps_url?: string | null
           id?: string
           is_active?: boolean
+          languages?: string[]
           latitude?: number | null
           longitude?: number | null
           min_order?: number
@@ -187,12 +197,17 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          coverage_governorate?: string | null
+          coverage_polygon?: Json | null
+          coverage_radius_km?: number | null
+          coverage_type?: string
           created_at?: string
           current_prep_minutes?: number | null
           delivery_areas?: Json
           google_maps_url?: string | null
           id?: string
           is_active?: boolean
+          languages?: string[]
           latitude?: number | null
           longitude?: number | null
           min_order?: number
@@ -1033,6 +1048,75 @@ export type Database = {
           updated_at?: string
         }
         Relationships: []
+      }
+      uncovered_requests: {
+        Row: {
+          address_text: string | null
+          branch_id: string | null
+          conversation_id: string | null
+          count: number
+          created_at: string
+          customer_handle: string | null
+          customer_phone: string | null
+          first_seen_at: string
+          id: string
+          last_seen_at: string
+          latitude: number | null
+          longitude: number | null
+          restaurant_id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          address_text?: string | null
+          branch_id?: string | null
+          conversation_id?: string | null
+          count?: number
+          created_at?: string
+          customer_handle?: string | null
+          customer_phone?: string | null
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          latitude?: number | null
+          longitude?: number | null
+          restaurant_id: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          address_text?: string | null
+          branch_id?: string | null
+          conversation_id?: string | null
+          count?: number
+          created_at?: string
+          customer_handle?: string | null
+          customer_phone?: string | null
+          first_seen_at?: string
+          id?: string
+          last_seen_at?: string
+          latitude?: number | null
+          longitude?: number | null
+          restaurant_id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "uncovered_requests_branch_id_fkey"
+            columns: ["branch_id"]
+            isOneToOne: false
+            referencedRelation: "branches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "uncovered_requests_restaurant_id_fkey"
+            columns: ["restaurant_id"]
+            isOneToOne: false
+            referencedRelation: "restaurants"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       unmatched_queries: {
         Row: {

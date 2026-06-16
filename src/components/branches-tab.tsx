@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Pencil, MapPin, Phone, Clock } from "lucide-react";
 import { MapsLocationField } from "@/components/maps-location-field";
+import { GOVERNORATES } from "@/lib/governorates-iq";
 
 type DayHours = { open: string; close: string; closed: boolean };
 type OpenHours = Record<string, DayHours>;
+type CoverageType = "none" | "governorate" | "polygon" | "radius";
 export type Branch = {
   id: string;
   restaurant_id: string;
@@ -26,6 +28,10 @@ export type Branch = {
   google_maps_url: string | null;
   latitude: number | null;
   longitude: number | null;
+  coverage_type: CoverageType;
+  coverage_governorate: string | null;
+  coverage_polygon: { lat: number; lng: number }[] | null;
+  coverage_radius_km: number | null;
 };
 
 const DAYS: { key: string; label: string }[] = [
@@ -58,6 +64,10 @@ export function BranchesTab({ restaurantId }: { restaurantId: string }) {
       ...b,
       delivery_areas: Array.isArray(b.delivery_areas) ? b.delivery_areas : [],
       open_hours: b.open_hours && Object.keys(b.open_hours).length ? b.open_hours : defaultHours(),
+      coverage_type: (b.coverage_type as CoverageType) || "none",
+      coverage_governorate: b.coverage_governorate ?? null,
+      coverage_polygon: Array.isArray(b.coverage_polygon) ? b.coverage_polygon : null,
+      coverage_radius_km: b.coverage_radius_km ?? null,
     })));
     setLoading(false);
   }
@@ -210,7 +220,11 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
       google_maps_url: b.google_maps_url,
       latitude: b.latitude,
       longitude: b.longitude,
-    }).eq("id", b.id);
+      coverage_type: b.coverage_type,
+      coverage_governorate: b.coverage_type === "governorate" ? b.coverage_governorate : null,
+      coverage_radius_km: b.coverage_type === "radius" ? Number(b.coverage_radius_km) || null : null,
+      coverage_polygon: b.coverage_type === "polygon" ? (b.coverage_polygon as any) : null,
+    } as any).eq("id", b.id);
     setSaving(false);
     if (error) return toast.error(error.message);
     toast.success("تم الحفظ");
@@ -238,6 +252,51 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
             <div className="space-y-1"><Label>الحد الأدنى للطلب</Label><Input type="number" value={b.min_order} onChange={(e) => setB({ ...b, min_order: Number(e.target.value) })} /></div>
             <div className="space-y-1"><Label>Telegram chat للإشعارات (اختياري)</Label><Input value={b.telegram_chat_id ?? ""} onChange={(e) => setB({ ...b, telegram_chat_id: e.target.value })} /></div>
           </div>
+
+          <div className="space-y-2 rounded border p-3 bg-muted/30">
+            <Label className="font-semibold">نطاق التوصيل الجغرافي (Coverage)</Label>
+            <p className="text-xs text-muted-foreground">يفحص الوكيل موقع الزبون (GPS) ويرفض الطلبات خارج هذا النطاق.</p>
+            <div className="flex gap-2 flex-wrap">
+              {([
+                { v: "none", l: "بدون فحص" },
+                { v: "governorate", l: "محافظة كاملة" },
+                { v: "radius", l: "دائرة حول الفرع" },
+                { v: "polygon", l: "منطقة مرسومة (متقدم)" },
+              ] as { v: CoverageType; l: string }[]).map((o) => (
+                <Button key={o.v} type="button" size="sm"
+                  variant={b.coverage_type === o.v ? "default" : "outline"}
+                  onClick={() => setB({ ...b, coverage_type: o.v })}>{o.l}</Button>
+              ))}
+            </div>
+            {b.coverage_type === "governorate" && (
+              <div className="space-y-1">
+                <Label className="text-xs">اختر المحافظة</Label>
+                <select
+                  className="w-full rounded border bg-background p-2 text-sm"
+                  value={b.coverage_governorate ?? ""}
+                  onChange={(e) => setB({ ...b, coverage_governorate: e.target.value || null })}
+                >
+                  <option value="">— اختر —</option>
+                  {GOVERNORATES.map((g) => (<option key={g.code} value={g.code}>{g.name_ar}</option>))}
+                </select>
+              </div>
+            )}
+            {b.coverage_type === "radius" && (
+              <div className="space-y-1">
+                <Label className="text-xs">نصف القطر بالكيلومتر</Label>
+                <Input type="number" min={1} step={0.5}
+                  value={b.coverage_radius_km ?? ""}
+                  onChange={(e) => setB({ ...b, coverage_radius_km: e.target.value ? Number(e.target.value) : null })}
+                  placeholder="مثلاً: 8" />
+                <p className="text-[11px] text-muted-foreground">يحتاج موقع الفرع على الخريطة محدد بالأعلى.</p>
+              </div>
+            )}
+            {b.coverage_type === "polygon" && (
+              <p className="text-xs text-muted-foreground">الرسم اليدوي على الخريطة قيد التطوير. استعمل "محافظة كاملة" أو "دائرة" حالياً.</p>
+            )}
+          </div>
+
+
 
           <div className="space-y-2">
             <Label>مناطق التوصيل</Label>

@@ -7,6 +7,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
 import { retryFetch } from "../_shared/retry.ts";
+import { checkBranchCoverage, GOVERNORATES as IQ_GOVS } from "../_shared/geo.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
@@ -426,6 +427,23 @@ const TOOLS = [
       name: "request_customer_location",
       description: "اطلب من الزبون يشارك موقعه الجغرافي. استخدمها لما تحتاج عنوان التوصيل ولم يعطه الزبون أو لما يصعب وصفه نصياً. على Telegram يظهر للزبون زر مباشر لمشاركة موقعه.",
       parameters: { type: "object", properties: {}, additionalProperties: false },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "check_coverage",
+      description:
+        "افحص هل موقع الزبون (lat,lng) ضمن نطاق توصيل أي فرع نشط. استخدمها قبل preview_order لما يكون الفرع غير محدد ولديك موقع الزبون، أو لما تشك إنه خارج التغطية. ترجع الفرع المغطي (لو موجود) أو قائمة الفروع المتاحة ومسافة كل واحد.",
+      parameters: {
+        type: "object",
+        properties: {
+          lat: { type: "number" },
+          lng: { type: "number" },
+        },
+        required: ["lat", "lng"],
+        additionalProperties: false,
+      },
     },
   },
 ] as const;
@@ -1246,6 +1264,50 @@ async function runTool(
     }
     const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
 
+    // ===== Geographic coverage check =====
+    const targetBranches = branch ? [branch] : activeBranches;
+    const branchesWithCoverage = targetBranches.filter((b: any) => b.coverage_type && b.coverage_type !== "none");
+    const customerLocForCov = (delivery as any)?.customer_location || conv.meta?.customer_location;
+    if (branchesWithCoverage.length > 0) {
+      if (!customerLocForCov || !Number.isFinite(customerLocForCov.lat) || !Number.isFinite(customerLocForCov.lng)) {
+        return {
+          error: "customer_location_required",
+          user_message: "يحتاج موقع الزبون الجغرافي حتى نتأكد إنه ضمن منطقة التوصيل. استدعِ request_customer_location مرة واحدة، وبعدها preview_order من جديد.",
+        };
+      }
+      const covering = targetBranches.filter((b: any) => checkBranchCoverage(b, customerLocForCov).covered);
+      if (covering.length === 0) {
+        // Log to uncovered_requests + suggest pickup / alternate branch
+        try {
+          await db.from("uncovered_requests").insert({
+            restaurant_id: restaurant.id,
+            branch_id: branch?.id || null,
+            conversation_id: conv.id,
+            customer_phone: delivery.phone || null,
+            customer_handle: conv.customer_handle || null,
+            address_text: delivery.address || null,
+            latitude: customerLocForCov.lat,
+            longitude: customerLocForCov.lng,
+          });
+        } catch (_) { /* never block */ }
+        // Find any other branch (across all active) that does cover this point
+        const fallback = activeBranches.find((b: any) => b !== branch && checkBranchCoverage(b, customerLocForCov).covered);
+        return {
+          error: "out_of_coverage",
+          user_message: fallback
+            ? `موقع الزبون خارج نطاق التوصيل لهذا الفرع، لكن فرع "${fallback.name}" يغطي منطقته. اعرض عليه التحويل لهذا الفرع، أو خيار الاستلام من المطعم (Pickup). لا تأكد توصيل ما لم يطلب الزبون استثناء صريح.`
+            : `موقع الزبون خارج نطاق التوصيل لكل فروعنا حالياً. اعتذر بلطف، واعرض عليه خيار الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. لا تأكد طلب توصيل.`,
+          alternate_branch: fallback ? { id: fallback.id, name: fallback.name } : null,
+        };
+      }
+      // If we have multiple covering and no specific branch chosen yet, pick the closest one with coords
+      if (!branch && covering.length >= 1) {
+        const picked = covering[0];
+        conv.meta = { ...(conv.meta || {}), branch_id: picked.id };
+        await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
+      }
+    }
+
     const effectiveMin = Number(branch?.min_order ?? restaurant.min_order ?? 0);
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
@@ -1880,6 +1942,36 @@ async function runTool(
     return { ok: true, branch: { id: chosen.id, name: chosen.name, address: chosen.address, min_order: chosen.min_order, open_hours: chosen.open_hours }, alternatives: matches.slice(1).map((b: any) => ({ id: b.id, name: b.name })) };
   }
 
+  if (name === "check_coverage") {
+    const lat = Number(args.lat), lng = Number(args.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { error: "إحداثيات غير صالحة" };
+    const branches: any[] = ((restaurant as any).__branches || []).filter((b: any) => b.is_active);
+    if (!branches.length) return { error: "ما اكو فروع مفعّلة" };
+    // Persist the customer location for use in preview_order
+    conv.meta = { ...(conv.meta || {}), customer_location: { lat, lng } };
+    await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
+    const results = branches.map((b: any) => {
+      const r = checkBranchCoverage(b, { lat, lng });
+      return { id: b.id, name: b.name, covered: r.covered, mode: r.mode, distance_km: r.distance_km ?? null };
+    });
+    const covering = results.filter((r: any) => r.covered);
+    if (covering.length === 0) {
+      return {
+        ok: false,
+        covered: false,
+        user_message: "موقع الزبون خارج نطاق التوصيل لجميع الفروع. اعتذر بلطف، واعرض الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. سيُسجل الطلب كمنطقة مطلوبة للمالك تلقائياً عند المحاولة.",
+        branches: results,
+      };
+    }
+    // Auto-select the closest covering branch
+    const best = covering.sort((a: any, b: any) => (a.distance_km ?? 999) - (b.distance_km ?? 999))[0];
+    conv.meta = { ...(conv.meta || {}), branch_id: best.id, customer_location: { lat, lng } };
+    await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
+    return { ok: true, covered: true, chosen_branch: best, all_branches: results };
+  }
+
+
+
 
   if (name === "handoff_to_human") {
     const reason = String(args.reason || "").trim() || "الزبون يحتاج موظف";
@@ -2393,7 +2485,7 @@ Deno.serve(async (req) => {
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
-      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,google_maps_url,latitude,longitude")
+      .select("id,name,address,phone,delivery_areas,open_hours,min_order,is_active,telegram_chat_id,google_maps_url,latitude,longitude,coverage_type,coverage_governorate,coverage_polygon,coverage_radius_km")
       .eq("restaurant_id", restaurant.id);
     const branches = branchesData ?? [];
     (restaurant as any).__branches = branches;
