@@ -17,6 +17,35 @@ const TOTAL_LOOP_TIMEOUT_MS = 25_000;
 const PER_TOOL_TIMEOUT_MS = 15_000;
 const MAX_CONSECUTIVE_TOOL_STEPS = 4; // bdoun nass mn al-model
 
+// --- Per-conversation lock (serializes concurrent runs on the same chat) ---
+const LOCK_TTL_SECONDS = 120;   // a run older than this is considered crashed
+const LOCK_MAX_WAIT_MS = 30_000; // how long a queued run waits for the lock
+const LOCK_POLL_MS = 400;
+
+function sleepMs(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+
+// Acquire the conversation lock, polling until it is free or stale.
+// Fail-open: if we never acquire (shouldn't happen thanks to TTL), proceed
+// anyway so a customer's message is never silently dropped.
+async function acquireConversationLock(db: any, conversationId: string, token: string): Promise<boolean> {
+  const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+  for (;;) {
+    const { data, error } = await db.rpc("claim_conversation", {
+      _conversation_id: conversationId, _token: token, _ttl_seconds: LOCK_TTL_SECONDS,
+    });
+    if (!error && data === true) return true;
+    if (Date.now() >= deadline) return false;
+    await sleepMs(LOCK_POLL_MS);
+  }
+}
+
+async function releaseConversationLock(db: any, conversationId: string | null, token: string | null) {
+  if (!conversationId || !token) return;
+  try {
+    await db.rpc("release_conversation", { _conversation_id: conversationId, _token: token });
+  } catch (_) { /* lock self-expires via TTL anyway */ }
+}
+
 // Promise timeout wrapper - safe utility, doesn't mutate anything
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -2385,12 +2414,20 @@ Deno.serve(async (req) => {
   const runStartedAt = Date.now();
   let runRestaurantId: string | null = null;
   let runConversationId: string | null = null;
+  let lockToken: string | null = null;
+  let lockDb: any = null;
   try {
     const { conversation_id, image_url } = await req.json();
     if (!conversation_id) return json({ error: "conversation_id required" }, 400);
     runConversationId = conversation_id;
     const db = admin();
+    lockDb = db;
 
+    // Serialize concurrent runs on this conversation. Acquire BEFORE reading
+    // state so we observe the cart/state left by any previous run instead of
+    // racing it (prevents lost-update cart corruption from rapid messages).
+    lockToken = crypto.randomUUID();
+    await acquireConversationLock(db, conversation_id, lockToken);
 
     const { data: conv, error: e1 } = await db
       .from("conversations")
@@ -2832,6 +2869,9 @@ Deno.serve(async (req) => {
     if (msg === "payment_required") return json({ error: "payment_required" }, 402);
     console.error("agent-run error:", e);
     return json({ error: msg }, 500);
+  } finally {
+    // Always release the conversation lock, on every exit path.
+    await releaseConversationLock(lockDb, runConversationId, lockToken);
   }
 });
 
