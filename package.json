@@ -82,6 +82,7 @@
     "build:dev": "vite build --mode development",
     "dev": "vite dev",
     "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "preview": "vite preview"
   },

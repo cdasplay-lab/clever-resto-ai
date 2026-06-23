@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # Frontend: type safety + lint + build. Catches broken imports/types
+  # (e.g. the kind of error that can't be caught locally without deps).
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bun run typecheck
+      # Lint is advisory for now (repo predates CI; surfaces issues without
+      # blocking). Flip to a hard gate once the existing lint debt is cleared.
+      - name: Lint
+        run: bun run lint
+        continue-on-error: true
+      - name: Build
+        run: bun run build
+
+  # Edge functions: run the pure unit tests (no secrets, no network).
+  # The e2e_test.ts is intentionally excluded — it needs deployed infra + keys.
+  functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check shared logic
+        run: deno check supabase/functions/_shared/geo.ts
+      - name: Unit tests (shared)
+        run: deno test supabase/functions/_shared/
