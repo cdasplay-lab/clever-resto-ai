@@ -46,6 +46,38 @@ async function releaseConversationLock(db: any, conversationId: string | null, t
   } catch (_) { /* lock self-expires via TTL anyway */ }
 }
 
+// --- Fatal-error alerting to the platform admin (replaces daily log review) ---
+// Set the PLATFORM_ALERT_CHAT_ID secret to your Telegram chat id to receive
+// real-time alerts. Throttled per restaurant (warm-isolate memory) to avoid spam.
+const ALERT_THROTTLE_MS = 10 * 60 * 1000;
+const lastAlertAt = new Map<string, number>();
+
+async function alertFatalError(restaurantId: string | null, message: string, conversationId: string | null) {
+  try {
+    const chatId = Deno.env.get("PLATFORM_ALERT_CHAT_ID");
+    const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+    if (!chatId || !LOVABLE_API_KEY || !TELEGRAM_API_KEY) return;
+
+    const key = restaurantId || "global";
+    const now = Date.now();
+    if (now - (lastAlertAt.get(key) || 0) < ALERT_THROTTLE_MS) return;
+    lastAlertAt.set(key, now);
+
+    await fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+        "X-Connection-Api-Key": TELEGRAM_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `🚨 خطأ فادح في الوكيل\nمطعم: ${restaurantId ?? "—"}\nمحادثة: ${conversationId ?? "—"}\nالخطأ: ${String(message).slice(0, 400)}`,
+      }),
+    }).catch(() => {});
+  } catch (_) { /* alerting must never throw */ }
+}
+
 // Promise timeout wrapper - safe utility, doesn't mutate anything
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
@@ -2867,6 +2899,8 @@ Deno.serve(async (req) => {
     }
     if (msg === "rate_limited") return json({ error: "rate_limited" }, 429);
     if (msg === "payment_required") return json({ error: "payment_required" }, 402);
+    // Genuinely fatal (unexpected) error — alert the platform admin in real time.
+    await alertFatalError(runRestaurantId, msg, runConversationId);
     console.error("agent-run error:", e);
     return json({ error: msg }, 500);
   } finally {
