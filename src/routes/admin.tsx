@@ -19,6 +19,11 @@ export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
+// The new admin_* RPCs aren't in the generated Supabase types yet.
+// Regenerate types after `supabase db push`, then this cast can be removed.
+const adminRpc = (name: string, args?: Record<string, unknown>) =>
+  (supabase.rpc as any)(name, args);
+
 type Row = {
   restaurant_id: string;
   restaurant_name: string;
@@ -150,8 +155,8 @@ function AdminPage() {
 
     // Health + finance (best-effort; don't block the page).
     const [{ data: h }, { data: f }] = await Promise.all([
-      supabase.rpc("admin_bot_health_all"),
-      supabase.rpc("admin_finance_summary"),
+      adminRpc("admin_bot_health_all"),
+      adminRpc("admin_finance_summary"),
     ]);
     setHealth((h as Health[]) ?? []);
     setFinance((f as Finance) ?? null);
@@ -193,7 +198,7 @@ function AdminPage() {
   }
 
   async function setActive(r: Row, active: boolean, reason: string) {
-    const { error } = await supabase.rpc("admin_set_restaurant_active", {
+    const { error } = await adminRpc("admin_set_restaurant_active", {
       _restaurant_id: r.restaurant_id, _active: active, _reason: reason || null,
     });
     if (error) throw error;
@@ -201,7 +206,7 @@ function AdminPage() {
   }
 
   async function setSubStatus(r: Row, status: string, reason: string) {
-    const { error } = await supabase.rpc("admin_set_subscription_status", {
+    const { error } = await adminRpc("admin_set_subscription_status", {
       _restaurant_id: r.restaurant_id, _status: status, _reason: reason || null,
     });
     if (error) throw error;

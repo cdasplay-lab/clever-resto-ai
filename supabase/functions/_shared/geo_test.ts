@@ -56,8 +56,9 @@ Deno.test("checkBranchCoverage: unknown governorate fails open", () => {
   assertEquals(r.reason, "gov_not_configured");
 });
 
-Deno.test("GOVERNORATES: all 18 provinces present with valid polygons", () => {
-  assertEquals(Object.keys(GOVERNORATES).length, 18);
+Deno.test("GOVERNORATES: all 19 provinces present with valid polygons", () => {
+  // Iraq has 19 governorates since Halabja was split out in 2014.
+  assertEquals(Object.keys(GOVERNORATES).length, 19);
   for (const [code, g] of Object.entries(GOVERNORATES)) {
     assert(g.polygon.length >= 3, `${code} needs >=3 points`);
     assert(g.name_ar.length > 0, `${code} needs an Arabic name`);
