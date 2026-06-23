@@ -17,6 +17,10 @@ jobs:
         with:
           bun-version: latest
       - run: bun install --frozen-lockfile
+      # Build first: the TanStack Router plugin regenerates routeTree.gen.ts
+      # (typed routes) during build, so typecheck below sees new routes.
+      - name: Build
+        run: bun run build
       - name: Typecheck
         run: bun run typecheck
       # Lint is advisory for now (repo predates CI; surfaces issues without
@@ -24,8 +28,6 @@ jobs:
       - name: Lint
         run: bun run lint
         continue-on-error: true
-      - name: Build
-        run: bun run build
 
   # Edge functions: run the pure unit tests (no secrets, no network).
   # The e2e_test.ts is intentionally excluded — it needs deployed infra + keys.

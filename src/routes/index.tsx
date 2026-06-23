@@ -298,7 +298,8 @@ function Landing() {
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-xs text-muted-foreground md:flex-row">
           <div>© {new Date().getFullYear()} مطعمي AI — جميع الحقوق محفوظة</div>
           <div className="flex items-center gap-4">
-            <a href="#features" className="hover:text-foreground">المزايا</a>
+            <Link to="/privacy" className="hover:text-foreground">الخصوصية</Link>
+            <Link to="/terms" className="hover:text-foreground">الشروط</Link>
             <a href="#pricing" className="hover:text-foreground">الأسعار</a>
             <Link to="/auth" className="hover:text-foreground">دخول</Link>
           </div>
