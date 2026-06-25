@@ -10,23 +10,60 @@ import { assert, assertEquals } from "https://deno.land/std@0.224.0/assert/mod.t
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+const AGENT_SECRET = Deno.env.get("AGENT_RUN_SECRET") ?? "";
 const AGENT_URL = `${SUPABASE_URL}/functions/v1/agent-run`;
 
 function db() {
   return createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
 }
 
-async function userSay(conversationId: string, text: string) {
-  const sb = db();
-  await sb.from("messages").insert({ conversation_id: conversationId, role: "user", content: text });
-  const r = await fetch(AGENT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
-    body: JSON.stringify({ conversation_id: conversationId }),
-  });
+// Raw call helper — lets security tests vary the secret header / body.
+async function callAgent(body: unknown, opts?: { secret?: string | null }) {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const secret = opts && "secret" in opts ? opts.secret : AGENT_SECRET;
+  if (secret != null) headers["X-Agent-Secret"] = secret;
+  const r = await fetch(AGENT_URL, { method: "POST", headers, body: JSON.stringify(body) });
   const data = await r.json().catch(() => ({}));
   return { status: r.status, ok: r.ok, data };
 }
+
+async function userSay(conversationId: string, text: string) {
+  const sb = db();
+  await sb.from("messages").insert({ conversation_id: conversationId, role: "user", content: text });
+  return callAgent({ conversation_id: conversationId });
+}
+
+// ---- Security integration tests (require deployed function + AGENT_RUN_SECRET) ----
+// TEST #1 unauthorized, TEST #4 fake payload. Skipped if no secret configured.
+Deno.test({
+  name: "security: request without the shared secret is rejected (401)",
+  ignore: !AGENT_SECRET,
+  async fn() {
+    const r = await callAgent({ conversation_id: crypto.randomUUID() }, { secret: null });
+    assertEquals(r.status, 401);
+    assert(!JSON.stringify(r.data).includes("conversation"), "no internal detail leaked");
+  },
+});
+
+Deno.test({
+  name: "security: wrong secret is rejected (401)",
+  ignore: !AGENT_SECRET,
+  async fn() {
+    const r = await callAgent({ conversation_id: crypto.randomUUID() }, { secret: "wrong-secret" });
+    assertEquals(r.status, 401);
+  },
+});
+
+Deno.test({
+  name: "security: malformed payload is rejected (400) even with valid secret",
+  ignore: !AGENT_SECRET,
+  async fn() {
+    const r = await callAgent({ conversation_id: "not-a-uuid" });
+    assertEquals(r.status, 400);
+    const r2 = await callAgent({ foo: "bar" });
+    assertEquals(r2.status, 400);
+  },
+});
 
 async function setup() {
   const sb = db();
