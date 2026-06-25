@@ -19,6 +19,7 @@
  */
 
 @theme inline {
+  --font-sans: "Tajawal", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -145,8 +146,27 @@
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
+    /* Arabic-first UI font */
+    font-family: var(--font-sans);
+    /* slightly relaxed for comfortable Arabic reading */
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     /* prevent overscroll bounce that makes the app feel sluggish */
     overscroll-behavior-y: none;
+  }
+
+  /* Negative letter-spacing distorts Arabic script — neutralize the "tracking"
+     utilities inside RTL so headings stay crisp and correctly shaped. */
+  [dir="rtl"] .tracking-tight,
+  [dir="rtl"] .tracking-tighter {
+    letter-spacing: 0;
+  }
+
+  /* Tighten heading line-height a touch so large Arabic titles feel solid. */
+  [dir="rtl"] h1,
+  [dir="rtl"] h2 {
+    line-height: 1.25;
   }
 
   /* Eliminate the 300ms tap delay and double-tap zoom on interactive elements
