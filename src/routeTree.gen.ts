@@ -9,7 +9,9 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as PrivacyRouteImport } from './routes/privacy'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -18,9 +20,19 @@ import { Route as TrackOrderIdRouteImport } from './routes/track.$orderId'
 import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
 import { Route as ApiPublicCheckComplaintsRouteImport } from './routes/api/public/check-complaints'
 
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DashboardRoute = DashboardRouteImport.update({
@@ -65,7 +77,9 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
+  '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/terms': typeof TermsRoute
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
@@ -75,7 +89,9 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
+  '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/terms': typeof TermsRoute
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
@@ -86,7 +102,9 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/dashboard': typeof DashboardRoute
+  '/privacy': typeof PrivacyRoute
   '/reset-password': typeof ResetPasswordRoute
+  '/terms': typeof TermsRoute
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
@@ -98,7 +116,9 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/dashboard'
+    | '/privacy'
     | '/reset-password'
+    | '/terms'
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
@@ -108,7 +128,9 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/dashboard'
+    | '/privacy'
     | '/reset-password'
+    | '/terms'
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
@@ -118,7 +140,9 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/dashboard'
+    | '/privacy'
     | '/reset-password'
+    | '/terms'
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
@@ -129,7 +153,9 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
   DashboardRoute: typeof DashboardRoute
+  PrivacyRoute: typeof PrivacyRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
+  TermsRoute: typeof TermsRoute
   TrackOrderIdRoute: typeof TrackOrderIdRoute
   ApiPublicCheckComplaintsRoute: typeof ApiPublicCheckComplaintsRoute
   ApiPublicCheckDelaysRoute: typeof ApiPublicCheckDelaysRoute
@@ -137,11 +163,25 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reset-password': {
       id: '/reset-password'
       path: '/reset-password'
       fullPath: '/reset-password'
       preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dashboard': {
@@ -201,7 +241,9 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
   DashboardRoute: DashboardRoute,
+  PrivacyRoute: PrivacyRoute,
   ResetPasswordRoute: ResetPasswordRoute,
+  TermsRoute: TermsRoute,
   TrackOrderIdRoute: TrackOrderIdRoute,
   ApiPublicCheckComplaintsRoute: ApiPublicCheckComplaintsRoute,
   ApiPublicCheckDelaysRoute: ApiPublicCheckDelaysRoute,
@@ -209,3 +251,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
