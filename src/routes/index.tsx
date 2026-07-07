@@ -61,7 +61,9 @@ const C = {
 
 function Landing() {
   // Render immediately; redirect logged-in users in the background.
+  // Skip redirect when ?preview=1 so owners can review the landing page.
   useEffect(() => {
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("preview")) return;
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) window.location.replace("/dashboard");
     });
