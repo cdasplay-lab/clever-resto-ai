@@ -2547,8 +2547,15 @@ Deno.serve(async (req) => {
     } else if (quotaRes && (quotaRes as any).allowed === false) {
       const reason = (quotaRes as any).reason;
       console.log("Bot blocked for restaurant", restaurant.id, "reason:", reason);
-      // Bot stops responding. Owner sees this in dashboard.
-      return json({ reply: "", state: conv.state, media: [], skipped: "quota_blocked", reason });
+      const reply = reason === "no_active_subscription"
+        ? "النظام متوقف مؤقتاً لأن اشتراك المطعم منتهي. تواصل مع إدارة المطعم حتى يجددون الخدمة."
+        : reason === "ai_reply_limit"
+        ? "وصل المطعم للحد الشهري من ردود البوت. تواصل مع إدارة المطعم حتى يرفعون الباقة."
+        : reason === "branch_limit_exceeded"
+        ? "النظام يحتاج تحديث إعدادات الفروع من إدارة المطعم قبل ما أكمل الطلب."
+        : "النظام متوقف مؤقتاً من إدارة المطعم. حاول لاحقاً أو تواصل ويا المطعم.";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: conv.state, media: [], skipped: "quota_blocked", reason });
     }
 
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
