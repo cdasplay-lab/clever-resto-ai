@@ -25,7 +25,8 @@ type Conv = { id: string; channel: string; created_at: string };
 
 type AgentLog = { kind: string; error: string | null; latency_ms: number | null; tool_name: string | null; created_at: string };
 
-const PIE_COLORS = ["hsl(var(--primary))", "hsl(var(--accent))", "hsl(var(--muted-foreground))", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#0ea5e9"];
+// hsl(var(--x)) is invalid now that tokens are oklch — use the vars directly.
+const PIE_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "#ef4444", "#0ea5e9", "#f59e0b"];
 
 export function AnalyticsTab({ restaurantId }: { restaurantId: string }) {
   const [range, setRange] = useState<Range>(30);
@@ -184,7 +185,7 @@ export function AnalyticsTab({ restaurantId }: { restaurantId: string }) {
                     <XAxis dataKey="day" />
                     <YAxis />
                     <Tooltip />
-                    <Line type="monotone" dataKey="revenue" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} />
+                    <Line type="monotone" dataKey="revenue" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -203,7 +204,7 @@ export function AnalyticsTab({ restaurantId }: { restaurantId: string }) {
                     <XAxis dataKey="day" />
                     <YAxis />
                     <Tooltip />
-                    <Bar dataKey="orders" fill="hsl(var(--primary))" />
+                    <Bar dataKey="orders" fill="var(--chart-1)" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -221,7 +222,7 @@ export function AnalyticsTab({ restaurantId }: { restaurantId: string }) {
                   <XAxis dataKey="hour" />
                   <YAxis />
                   <Tooltip />
-                  <Bar dataKey="orders" fill="hsl(var(--accent))" />
+                  <Bar dataKey="orders" fill="var(--chart-2)" />
                 </BarChart>
               </ResponsiveContainer>
             </div>

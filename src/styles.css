@@ -62,75 +62,96 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/*
+ * Brand palette — the landing page neon (pink #FF3D81 / violet #8B5CF6 /
+ * cyan #4DE1FF on aubergine #0B0614) carried into the product, toned
+ * down for long work sessions. Landing stays bold; dashboard stays calm,
+ * but they read as one product.
+ */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
+  --brand-pink: oklch(0.63 0.235 358);
+  --brand-violet: oklch(0.585 0.233 292);
+  --background: oklch(0.982 0.006 308);
+  --foreground: oklch(0.235 0.045 302);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
+  --card-foreground: oklch(0.235 0.045 302);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.235 0.045 302);
+  --primary: oklch(0.63 0.235 358);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.955 0.013 305);
+  --secondary-foreground: oklch(0.31 0.06 300);
+  --muted: oklch(0.955 0.013 305);
+  --muted-foreground: oklch(0.52 0.038 300);
+  --accent: oklch(0.945 0.028 295);
+  --accent-foreground: oklch(0.36 0.12 293);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.984 0.003 247.858);
-  --sidebar-foreground: oklch(0.129 0.042 264.695);
-  --sidebar-primary: oklch(0.208 0.042 265.755);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.968 0.007 247.896);
-  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-border: oklch(0.929 0.013 255.508);
-  --sidebar-ring: oklch(0.704 0.04 256.788);
+  --border: oklch(0.905 0.018 302);
+  --input: oklch(0.905 0.018 302);
+  --ring: oklch(0.68 0.16 358);
+  --chart-1: oklch(0.63 0.235 358);
+  --chart-2: oklch(0.585 0.233 292);
+  --chart-3: oklch(0.62 0.115 220);
+  --chart-4: oklch(0.63 0.14 163);
+  --chart-5: oklch(0.72 0.15 80);
+  --sidebar: oklch(0.97 0.01 305);
+  --sidebar-foreground: oklch(0.235 0.045 302);
+  --sidebar-primary: oklch(0.63 0.235 358);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.945 0.028 295);
+  --sidebar-accent-foreground: oklch(0.36 0.12 293);
+  --sidebar-border: oklch(0.905 0.018 302);
+  --sidebar-ring: oklch(0.68 0.16 358);
 }
 
 .dark {
-  --background: oklch(0.129 0.042 264.695);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.208 0.042 265.755);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.208 0.042 265.755);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.279 0.041 260.031);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.279 0.041 260.031);
-  --muted-foreground: oklch(0.704 0.04 256.788);
-  --accent: oklch(0.279 0.041 260.031);
-  --accent-foreground: oklch(0.984 0.003 247.858);
+  --brand-pink: oklch(0.67 0.235 358);
+  --brand-violet: oklch(0.606 0.25 292.7);
+  --background: oklch(0.155 0.035 305);
+  --foreground: oklch(0.955 0.015 300);
+  --card: oklch(0.205 0.05 302);
+  --card-foreground: oklch(0.955 0.015 300);
+  --popover: oklch(0.205 0.05 302);
+  --popover-foreground: oklch(0.955 0.015 300);
+  --primary: oklch(0.67 0.235 358);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.265 0.05 300);
+  --secondary-foreground: oklch(0.955 0.015 300);
+  --muted: oklch(0.25 0.045 300);
+  --muted-foreground: oklch(0.7 0.04 300);
+  --accent: oklch(0.3 0.075 295);
+  --accent-foreground: oklch(0.955 0.015 300);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.208 0.042 265.755);
-  --sidebar-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.279 0.041 260.031);
-  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.551 0.027 264.364);
+  --border: oklch(0.93 0.02 300 / 11%);
+  --input: oklch(0.93 0.02 300 / 15%);
+  --ring: oklch(0.67 0.2 358);
+  --chart-1: oklch(0.67 0.235 358);
+  --chart-2: oklch(0.606 0.25 292.7);
+  --chart-3: oklch(0.84 0.12 215);
+  --chart-4: oklch(0.72 0.15 162);
+  --chart-5: oklch(0.8 0.16 85);
+  --sidebar: oklch(0.185 0.045 303);
+  --sidebar-foreground: oklch(0.955 0.015 300);
+  --sidebar-primary: oklch(0.67 0.235 358);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.3 0.075 295);
+  --sidebar-accent-foreground: oklch(0.955 0.015 300);
+  --sidebar-border: oklch(0.93 0.02 300 / 11%);
+  --sidebar-ring: oklch(0.67 0.2 358);
+}
+
+@layer components {
+  /* Brand CTA gradient — same pink→violet as the landing hero buttons */
+  .bg-brand-gradient {
+    background-image: linear-gradient(90deg, var(--brand-pink), var(--brand-violet));
+    transition: filter 0.2s;
+  }
+  .bg-brand-gradient:hover {
+    filter: brightness(1.08);
+  }
 }
 
 @layer base {
