@@ -2374,8 +2374,11 @@ async function runTool(
     const src: any = branch || restaurant;
     const lat = Number(src.latitude);
     const lng = Number(src.longitude);
-    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    // Guard against (0,0) / near-zero — that's the Gulf of Guinea, not a real branch.
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng)
+      && (Math.abs(lat) > 0.001 || Math.abs(lng) > 0.001);
     const url = src.google_maps_url || (hasCoords ? `https://maps.google.com/?q=${lat},${lng}` : null);
+
     const label = branch
       ? (/^(فرع|الفرع)\b/.test(String(branch.name).trim()) ? branch.name : `فرع ${branch.name}`)
       : restaurant.name;
