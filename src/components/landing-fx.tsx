@@ -207,6 +207,31 @@ export function LandingFX() {
     targets.forEach((el) => io.observe(el));
     cleanups.push(() => io.disconnect());
 
+    /* Kinetic strip reacts to scroll velocity — skews like a motion-graphics pass */
+    const strip = document.querySelector<HTMLElement>(".fx-strip");
+    if (strip) {
+      let lastY = window.scrollY;
+      let reset: ReturnType<typeof setTimeout> | undefined;
+      const onSkew = () => {
+        const dy = window.scrollY - lastY;
+        lastY = window.scrollY;
+        const sk = Math.max(-9, Math.min(9, dy * 0.3));
+        strip.style.transition = "transform .12s ease-out";
+        strip.style.transform = `skewX(${sk}deg)`;
+        clearTimeout(reset);
+        reset = setTimeout(() => {
+          strip.style.transition = "transform .6s cubic-bezier(.2,.8,.2,1)";
+          strip.style.transform = "skewX(0deg)";
+        }, 100);
+      };
+      window.addEventListener("scroll", onSkew, { passive: true });
+      cleanups.push(() => {
+        clearTimeout(reset);
+        window.removeEventListener("scroll", onSkew);
+        strip.style.transform = "";
+      });
+    }
+
     if (!isTouch()) {
       /* Custom cursor */
       const dot = document.createElement("div");
@@ -292,6 +317,178 @@ export function LandingFX() {
         .fx-w>span{transform:none;animation:none}
       }
     `}</style>
+  );
+}
+
+/* ---------- Scroll-cinema: hero recedes like a camera pull-back ---------- */
+
+export function HeroExit({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isReduced()) return;
+    const el = ref.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const p = Math.min(window.scrollY / (window.innerHeight * 0.85), 1);
+        el.style.transform = `translateY(${p * -46}px) scale(${1 - p * 0.1})`;
+        el.style.opacity = `${1 - p * 0.85}`;
+      });
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll);
+    };
+  }, []);
+
+  return (
+    <div ref={ref} style={{ willChange: "transform, opacity" }}>
+      {children}
+    </div>
+  );
+}
+
+/* ---------- Scroll-cinema: pinned step-by-step scene ----------
+   The section pins to the viewport and the four steps play like
+   video frames as the user scrolls — scroll position is the timeline. */
+
+type CinStep = { n: string; title: string; text: string; icon: React.ReactNode };
+
+const STEP_HUES = ["#FF3D81", "#8B5CF6", "#4DE1FF", "#34D399"];
+
+export function CinematicSteps({ steps }: { steps: CinStep[] }) {
+  const [cinema, setCinema] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [idx, setIdx] = useState(0);
+  const [local, setLocal] = useState(0); // progress inside the current step, 0..1
+
+  // SSR, no-JS and reduced-motion all get the plain grid; the pinned scene
+  // only activates client-side when motion is allowed.
+  useEffect(() => {
+    if (!isReduced()) setCinema(true);
+  }, []);
+
+  useEffect(() => {
+    if (!cinema) return;
+    const el = wrapRef.current;
+    if (!el) return;
+    let raf = 0;
+    const onScroll = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const r = el.getBoundingClientRect();
+        const total = r.height - window.innerHeight;
+        if (total <= 0) return;
+        const p = Math.min(Math.max(-r.top / total, 0), 0.9999);
+        const f = p * steps.length;
+        setIdx(Math.floor(f));
+        setLocal(f - Math.floor(f));
+      });
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [cinema, steps.length]);
+
+  if (!cinema) {
+    return (
+      <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        {steps.map((s) => (
+          <div
+            key={s.n}
+            className="relative rounded-2xl border p-6 pt-8"
+            style={{ borderColor: "rgba(240,235,255,.09)", background: "#1A0F2E" }}
+          >
+            <div
+              className="pointer-events-none absolute -top-5 left-4 text-5xl font-black"
+              style={{ WebkitTextStroke: "1.5px rgba(255,61,129,.5)", color: "transparent" }}
+            >
+              {s.n}
+            </div>
+            <div
+              className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl"
+              style={{ background: "rgba(139,92,246,.14)", color: "#8B5CF6" }}
+            >
+              {s.icon}
+            </div>
+            <h3 className="text-base font-bold">{s.title}</h3>
+            <p className="mt-2 text-sm font-light leading-relaxed" style={{ color: "#9D93B8" }}>{s.text}</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  const s = steps[idx];
+  const hue = STEP_HUES[idx % STEP_HUES.length];
+
+  return (
+    <div ref={wrapRef} className="relative mt-4" style={{ height: `${steps.length * 85 + 100}vh` }}>
+      <div className="sticky top-0 flex h-screen flex-col items-center justify-center overflow-hidden px-4">
+        {/* per-step tinted backdrop */}
+        <div
+          className="pointer-events-none absolute inset-0 transition-all duration-700"
+          style={{ background: `radial-gradient(720px 420px at 50% 42%, ${hue}26, transparent 70%)` }}
+        />
+        {/* ghost step number drifts with scroll like a parallax layer */}
+        <div
+          key={`n-${idx}`}
+          className="cin-ghost pointer-events-none absolute select-none font-black"
+          style={{
+            fontSize: "clamp(180px, 42vmin, 420px)",
+            WebkitTextStroke: `2px ${hue}59`,
+            color: "transparent",
+            transform: `translateY(${(local - 0.5) * -46}px)`,
+          }}
+          aria-hidden
+        >
+          {s.n.replace(/^٠/, "")}
+        </div>
+        {/* the current frame */}
+        <div key={`c-${idx}`} className="cin-card relative z-[1] mx-auto max-w-xl text-center">
+          <div
+            className="mx-auto mb-5 inline-flex h-14 w-14 items-center justify-center rounded-2xl border"
+            style={{ background: `${hue}1f`, color: hue, borderColor: `${hue}40`, boxShadow: `0 0 44px ${hue}33` }}
+          >
+            {s.icon}
+          </div>
+          <h3 className="text-3xl font-black md:text-5xl">{s.title}</h3>
+          <p className="mx-auto mt-4 max-w-md text-base font-light leading-loose md:text-lg" style={{ color: "#9D93B8" }}>
+            {s.text}
+          </p>
+        </div>
+        {/* timeline progress */}
+        <div className="absolute bottom-10 z-[1] flex w-full max-w-xs items-center gap-2 px-6" dir="rtl">
+          {steps.map((st, i) => (
+            <div key={st.n} className="h-1 flex-1 overflow-hidden rounded-full" style={{ background: "rgba(240,235,255,.12)" }}>
+              <div
+                className="h-full rounded-full transition-[width] duration-300"
+                style={{
+                  width: i < idx ? "100%" : i === idx ? `${Math.round(local * 100)}%` : "0%",
+                  background: `linear-gradient(90deg, ${STEP_HUES[i % STEP_HUES.length]}, ${STEP_HUES[(i + 1) % STEP_HUES.length]})`,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <style>{`
+          @keyframes cin-up{from{opacity:0;transform:translateY(30px) scale(.96)}to{opacity:1;transform:none}}
+          .cin-card{animation:cin-up .6s cubic-bezier(.2,.8,.2,1) both}
+          @keyframes cin-fade{from{opacity:0}to{opacity:1}}
+          .cin-ghost{animation:cin-fade .8s ease both}
+        `}</style>
+      </div>
+    </div>
   );
 }
 

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { LandingFX, AuroraCanvas, RevealWords, LiveChatDemo } from "@/components/landing-fx";
+import { LandingFX, AuroraCanvas, RevealWords, LiveChatDemo, HeroExit, CinematicSteps } from "@/components/landing-fx";
 import { Button } from "@/components/ui/button";
 import {
   Bot,
@@ -137,6 +137,7 @@ function Landing() {
           style={{ background: "radial-gradient(1100px 550px at 50% 0%, transparent, rgba(11,6,20,.6) 75%)" }}
         />
         <div className="relative z-[2] mx-auto max-w-4xl pt-20 pb-16">
+          <HeroExit>
           <div
             className="mb-7 inline-flex items-center gap-2 text-xs tracking-[.25em]"
             style={{ color: C.cyan }}
@@ -183,12 +184,13 @@ function Landing() {
           <p className="mt-5 text-xs" style={{ color: C.muted }}>
             بدون بطاقة ائتمان · إعداد بأقل من 5 دقائق
           </p>
+          </HeroExit>
         </div>
       </section>
 
       {/* ======================= KINETIC STRIPS ======================= */}
       <div
-        className="relative z-[2] overflow-hidden border-y py-6"
+        className="fx-strip relative z-[2] overflow-hidden border-y py-6"
         style={{ borderColor: C.line, background: "rgba(18,10,32,.6)" }}
         aria-hidden
       >
@@ -234,12 +236,14 @@ function Landing() {
             title="الوكيل يشتغل بأربع خطوات"
             subtitle="من أول رسالة لحد ما يوصل الطلب للوحة مطعمك — تلقائياً وبلا تدخّل."
           />
-          <div className="mt-14 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <StepCard n="٠١" icon={<MessageSquare className="h-5 w-5" />} title="يستقبل الرسالة" text="يستلم رسالة الزبون من تيليجرام أو واتساب فوراً، بأي صيغة كتبها." />
-            <StepCard n="٠٢" icon={<Brain className="h-5 w-5" />} title="يفهم الطلب" text="يفهم الأصناف والكميات حتى لو الزبون كتب بلهجته، ويبني السلة." />
-            <StepCard n="٠٣" icon={<ClipboardCheck className="h-5 w-5" />} title="يؤكّد التفاصيل" text="يتأكد من العنوان، الهاتف، ونوع التوصيل، ويعرض الفاتورة قبل التأكيد." />
-            <StepCard n="٠٤" icon={<LayoutDashboard className="h-5 w-5" />} title="يرسل للوحة" text="الطلب يوصل جاهزاً للوحة المطعم، وينبّهك صوتياً عشان ما يفوتك." />
-          </div>
+          <CinematicSteps
+            steps={[
+              { n: "٠١", icon: <MessageSquare className="h-6 w-6" />, title: "يستقبل الرسالة", text: "يستلم رسالة الزبون من تيليجرام أو واتساب فوراً، بأي صيغة كتبها." },
+              { n: "٠٢", icon: <Brain className="h-6 w-6" />, title: "يفهم الطلب", text: "يفهم الأصناف والكميات حتى لو الزبون كتب بلهجته، ويبني السلة." },
+              { n: "٠٣", icon: <ClipboardCheck className="h-6 w-6" />, title: "يؤكّد التفاصيل", text: "يتأكد من العنوان، الهاتف، ونوع التوصيل، ويعرض الفاتورة قبل التأكيد." },
+              { n: "٠٤", icon: <LayoutDashboard className="h-6 w-6" />, title: "يرسل للوحة", text: "الطلب يوصل جاهزاً للوحة المطعم، وينبّهك صوتياً عشان ما يفوتك." },
+            ]}
+          />
         </div>
       </section>
 
@@ -418,24 +422,6 @@ function NeonCard({ icon, title, text, danger }: { icon: React.ReactNode; title:
             : { background: "rgba(77,225,255,.1)", color: C.cyan }
         }
       >
-        {icon}
-      </div>
-      <h3 className="text-base font-bold">{title}</h3>
-      <p className="mt-2 text-sm font-light leading-relaxed" style={{ color: C.muted }}>{text}</p>
-    </div>
-  );
-}
-
-function StepCard({ n, icon, title, text }: { n: string; icon: React.ReactNode; title: string; text: string }) {
-  return (
-    <div className="relative rounded-2xl border p-6 pt-8" style={{ borderColor: C.line, background: C.card }}>
-      <div
-        className="pointer-events-none absolute -top-5 left-4 text-5xl font-black"
-        style={{ WebkitTextStroke: `1.5px rgba(255,61,129,.5)`, color: "transparent" }}
-      >
-        {n}
-      </div>
-      <div className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: "rgba(139,92,246,.14)", color: C.violet }}>
         {icon}
       </div>
       <h3 className="text-base font-bold">{title}</h3>
