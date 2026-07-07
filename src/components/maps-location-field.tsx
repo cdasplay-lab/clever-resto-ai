@@ -76,7 +76,7 @@ export function MapsLocationField({ url, lat, lng, onChange }: Props) {
   }
 
   function onMapChange(la: number, ln: number) {
-    const generated = `https://maps.google.com/?q=${la.toFixed(6)},${ln.toFixed(6)}`;
+    const generated = `https://www.google.com/maps/search/?api=1&query=${la.toFixed(6)},${ln.toFixed(6)}`;
     setValue(generated);
     setError(null);
     commit(generated, la, ln);
@@ -99,7 +99,7 @@ export function MapsLocationField({ url, lat, lng, onChange }: Props) {
         <div className="mt-2 flex gap-2">
           <Input
             dir="ltr"
-            placeholder="https://maps.app.goo.gl/... أو https://maps.google.com/?q=lat,lng"
+            placeholder="https://maps.app.goo.gl/... أو https://www.google.com/maps/search/?api=1&query=lat,lng"
             value={value}
             onChange={(e) => tryParse(e.target.value)}
             disabled={expanding}
@@ -119,7 +119,7 @@ export function MapsLocationField({ url, lat, lng, onChange }: Props) {
             الموقع محفوظ <span dir="ltr" className="font-mono">{lat!.toFixed(5)}, {lng!.toFixed(5)}</span>
           </Badge>
           <a
-            href={`https://maps.google.com/?q=${lat},${lng}`}
+            href={`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-primary underline"
