@@ -1,239 +1,387 @@
 import { useEffect, useRef, useState } from "react";
 
-/**
- * Global landing effects: subtle magnetic attraction for [data-magnetic]
- * elements and a soft pointer glow. Purely presentational, no state.
- */
-export function LandingFX() {
-  useEffect(() => {
-    const els = Array.from(document.querySelectorAll<HTMLElement>("[data-magnetic]"));
-    const cleanups: Array<() => void> = [];
-    for (const el of els) {
-      const onMove = (e: MouseEvent) => {
-        const r = el.getBoundingClientRect();
-        const x = e.clientX - (r.left + r.width / 2);
-        const y = e.clientY - (r.top + r.height / 2);
-        el.style.transform = `translate(${x * 0.15}px, ${y * 0.2}px)`;
-      };
-      const onLeave = () => {
-        el.style.transform = "translate(0,0)";
-      };
-      el.addEventListener("mousemove", onMove);
-      el.addEventListener("mouseleave", onLeave);
-      el.style.transition = "transform .25s ease";
-      cleanups.push(() => {
-        el.removeEventListener("mousemove", onMove);
-        el.removeEventListener("mouseleave", onLeave);
-      });
-    }
-    return () => cleanups.forEach((fn) => fn());
-  }, []);
-  return null;
-}
+/* ============================================================
+   Landing page effects layer — zero external dependencies.
+   - <AuroraCanvas/>: raw-WebGL warm liquid gradient, follows mouse
+   - <LandingFX/>: custom cursor, magnetic buttons, scroll reveals
+   - <LiveChatDemo/>: self-typing Iraqi-dialect order conversation
+   All effects respect prefers-reduced-motion and are desktop-aware.
+   ============================================================ */
 
-/**
- * Animated aurora canvas — soft moving blobs on a dark background.
- */
+const isReduced = () =>
+  typeof window !== "undefined" &&
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+const isTouch = () =>
+  typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
+
+/* ---------------- Aurora shader (hero background) ---------------- */
+
+const FRAG = `
+precision highp float;
+uniform float u_time;
+uniform vec2  u_res;
+uniform vec2  u_mouse;
+uniform float u_vel;
+
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1.,0.)), u.x),
+             mix(hash(i+vec2(0.,1.)), hash(i+vec2(1.,1.)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int k=0;k<4;k++){ v += a*noise(p); p *= 2.05; a *= 0.5; }
+  return v;
+}
+void main(){
+  float asp = u_res.x/u_res.y;
+  vec2 uv = gl_FragCoord.xy/u_res.xy;
+  vec2 p = uv; p.x *= asp;
+  vec2 m = u_mouse; m.x *= asp;
+  float t = u_time*0.08;
+
+  vec2 q = vec2(fbm(p*1.5 + t), fbm(p*1.5 - t*0.7));
+  float d = distance(p, m);
+  vec2 warp = q*1.3 + (m - p) * exp(-d*2.8) * (0.5 + u_vel*2.5);
+  float f  = fbm(p*2.0 + warp + vec2(0.0, t*1.4));
+  float f2 = fbm(p*2.8 - warp*0.7 - vec2(t, 0.0));
+
+  // Neon palette: pink, violet, cyan
+  vec3 pink = vec3(1.00, 0.24, 0.51);
+  vec3 vio  = vec3(0.545, 0.361, 0.965);
+  vec3 cyan = vec3(0.302, 0.882, 1.00);
+
+  vec3 col = vec3(0.0);
+  col += pink * smoothstep(0.45, 0.90, f)  * 0.65;
+  col += vio  * smoothstep(0.52, 0.95, f2) * 0.60;
+  col += cyan * smoothstep(0.65, 1.00, fbm(p*3.5 + q*1.8 + t)) * 0.40;
+
+  // Mouse glow, stronger with velocity
+  col += mix(pink, cyan, uv.x) * exp(-d*3.4) * (0.28 + u_vel*1.3);
+
+  // Fade toward bottom so it melts into the page
+  float fade = smoothstep(0.0, 0.55, uv.y);
+  // Alpha carries the shape; page background shows through
+  float alpha = clamp(max(max(col.r, col.g), col.b), 0.0, 1.0) * fade;
+  gl_FragColor = vec4(col, alpha * 0.85);
+}`;
+
+const VERT = `
+attribute vec2 a_pos;
+void main(){ gl_Position = vec4(a_pos, 0.0, 1.0); }`;
+
 export function AuroraCanvas() {
   const ref = useRef<HTMLCanvasElement>(null);
+
   useEffect(() => {
+    if (isReduced()) return;
     const canvas = ref.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    const gl = canvas.getContext("webgl", { alpha: true, antialias: false });
+    if (!gl) return;
 
-    let raf = 0;
-    let w = 0;
-    let h = 0;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const compile = (type: number, src: string) => {
+      const s = gl.createShader(type)!;
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return s;
+    };
+    const prog = gl.createProgram()!;
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, VERT));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, FRAG));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
 
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    const aPos = gl.getAttribLocation(prog, "a_pos");
+    gl.enableVertexAttribArray(aPos);
+    gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+    const uTime = gl.getUniformLocation(prog, "u_time");
+    const uRes = gl.getUniformLocation(prog, "u_res");
+    const uMouse = gl.getUniformLocation(prog, "u_mouse");
+    const uVel = gl.getUniformLocation(prog, "u_vel");
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+    const dpr = Math.min(window.devicePixelRatio || 1, isTouch() ? 1 : 1.5);
     const resize = () => {
-      const parent = canvas.parentElement;
-      if (!parent) return;
-      w = parent.clientWidth;
-      h = parent.clientHeight;
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-      canvas.style.width = w + "px";
-      canvas.style.height = h + "px";
-      ctx.scale(dpr, dpr);
+      const r = canvas.getBoundingClientRect();
+      canvas.width = r.width * dpr;
+      canvas.height = r.height * dpr;
+      gl.viewport(0, 0, canvas.width, canvas.height);
     };
     resize();
     window.addEventListener("resize", resize);
 
-    const blobs = [
-      { x: 0.25, y: 0.35, r: 320, c: "rgba(255,61,129,.35)", s: 0.0004 },
-      { x: 0.75, y: 0.55, r: 380, c: "rgba(139,92,246,.35)", s: 0.0003 },
-      { x: 0.5, y: 0.75, r: 300, c: "rgba(77,225,255,.28)", s: 0.0005 },
-    ];
-
-    const render = (t: number) => {
-      ctx.clearRect(0, 0, w, h);
-      for (const b of blobs) {
-        const cx = (b.x + Math.sin(t * b.s) * 0.08) * w;
-        const cy = (b.y + Math.cos(t * b.s * 0.9) * 0.08) * h;
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, b.r);
-        g.addColorStop(0, b.c);
-        g.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, w, h);
-      }
-      raf = requestAnimationFrame(render);
+    // Smoothed mouse + velocity (normalized to canvas)
+    const M = { x: 0.5, y: 0.6, sx: 0.5, sy: 0.6, vel: 0 };
+    const onMove = (e: MouseEvent) => {
+      const r = canvas.getBoundingClientRect();
+      M.x = (e.clientX - r.left) / r.width;
+      M.y = 1 - (e.clientY - r.top) / r.height;
     };
-    raf = requestAnimationFrame(render);
+    window.addEventListener("mousemove", onMove);
+
+    let raf = 0;
+    let px = M.sx, py = M.sy;
+    const loop = (t: number) => {
+      M.sx += (M.x - M.sx) * 0.06;
+      M.sy += (M.y - M.sy) * 0.06;
+      const inst = Math.min(Math.hypot(M.sx - px, M.sy - py) * 22, 1.2);
+      M.vel += (inst - M.vel) * 0.08;
+      px = M.sx; py = M.sy;
+
+      gl.uniform1f(uTime, t * 0.001);
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+      gl.uniform2f(uMouse, M.sx, M.sy);
+      gl.uniform1f(uVel, M.vel);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+
     return () => {
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", resize);
+      window.removeEventListener("mousemove", onMove);
     };
   }, []);
+
   return (
     <canvas
       ref={ref}
-      className="pointer-events-none absolute inset-0 z-0"
       aria-hidden
+      className="pointer-events-none absolute inset-0 z-0 h-full w-full opacity-70"
     />
   );
 }
 
-/**
- * Reveal words one at a time with a soft rise + fade.
- */
-export function RevealWords({ text, delay = 0 }: { text: string; delay?: number }) {
-  const words = text.split(" ");
+/* --------------- Cursor + magnetic + scroll reveals --------------- */
+
+export function LandingFX() {
+  useEffect(() => {
+    if (isReduced()) return;
+
+    const cleanups: Array<() => void> = [];
+
+    /* Scroll reveals — auto-target section headers and cards */
+    const targets = document.querySelectorAll(
+      "section .rounded-2xl, section h2, section > div > div > p"
+    );
+    targets.forEach((el) => el.classList.add("fx-rv"));
+    const io = new IntersectionObserver(
+      (entries) =>
+        entries.forEach((e, i) => {
+          if (e.isIntersecting) {
+            (e.target as HTMLElement).style.transitionDelay = `${(i % 4) * 70}ms`;
+            e.target.classList.add("fx-in");
+            io.unobserve(e.target);
+          }
+        }),
+      { threshold: 0.12 }
+    );
+    targets.forEach((el) => io.observe(el));
+    cleanups.push(() => io.disconnect());
+
+    if (!isTouch()) {
+      /* Custom cursor */
+      const dot = document.createElement("div");
+      const ring = document.createElement("div");
+      dot.className = "fx-dot";
+      ring.className = "fx-ring";
+      document.body.append(dot, ring);
+      document.body.classList.add("fx-nocursor");
+
+      let mx = innerWidth / 2, my = innerHeight / 2, rx = mx, ry = my;
+      const onMove = (e: MouseEvent) => { mx = e.clientX; my = e.clientY; };
+      window.addEventListener("mousemove", onMove);
+      let raf = 0;
+      const loop = () => {
+        rx += (mx - rx) * 0.16;
+        ry += (my - ry) * 0.16;
+        dot.style.transform = `translate(${mx}px,${my}px) translate(-50%,-50%)`;
+        ring.style.transform = `translate(${rx}px,${ry}px) translate(-50%,-50%)`;
+        raf = requestAnimationFrame(loop);
+      };
+      raf = requestAnimationFrame(loop);
+
+      const hoverables = document.querySelectorAll("a, button, .rounded-2xl");
+      const grow = () => ring.classList.add("fx-hover");
+      const shrink = () => ring.classList.remove("fx-hover");
+      hoverables.forEach((el) => {
+        el.addEventListener("mouseenter", grow);
+        el.addEventListener("mouseleave", shrink);
+      });
+
+      cleanups.push(() => {
+        cancelAnimationFrame(raf);
+        window.removeEventListener("mousemove", onMove);
+        hoverables.forEach((el) => {
+          el.removeEventListener("mouseenter", grow);
+          el.removeEventListener("mouseleave", shrink);
+        });
+        dot.remove();
+        ring.remove();
+        document.body.classList.remove("fx-nocursor");
+      });
+
+      /* Magnetic buttons (opt-in via [data-magnetic]) */
+      document.querySelectorAll<HTMLElement>("[data-magnetic]").forEach((btn) => {
+        const onBtnMove = (e: MouseEvent) => {
+          const r = btn.getBoundingClientRect();
+          const x = (e.clientX - r.left - r.width / 2) * 0.28;
+          const y = (e.clientY - r.top - r.height / 2) * 0.38;
+          btn.style.transform = `translate(${x}px,${y}px)`;
+        };
+        const onLeave = () => {
+          btn.style.transition = "transform .55s cubic-bezier(.2,.8,.2,1)";
+          btn.style.transform = "";
+          setTimeout(() => (btn.style.transition = ""), 550);
+        };
+        btn.addEventListener("mousemove", onBtnMove);
+        btn.addEventListener("mouseleave", onLeave);
+        cleanups.push(() => {
+          btn.removeEventListener("mousemove", onBtnMove);
+          btn.removeEventListener("mouseleave", onLeave);
+        });
+      });
+    }
+
+    return () => cleanups.forEach((fn) => fn());
+  }, []);
+
+  /* Effect styles — scoped, tiny, no stylesheet changes needed */
   return (
-    <span className="inline-flex flex-wrap justify-center gap-x-[.35em]">
-      {words.map((w, i) => (
-        <span
-          key={i}
-          className="inline-block"
-          style={{
-            animation: `fx-rise .7s cubic-bezier(.2,.8,.2,1) both`,
-            animationDelay: `${delay + i * 0.09}s`,
-          }}
-        >
-          {w}
-        </span>
-      ))}
-      <style>{`
-        @keyframes fx-rise{
-          0%{opacity:0;transform:translateY(24px)}
-          100%{opacity:1;transform:translateY(0)}
-        }
-      `}</style>
-    </span>
+    <style>{`
+      .fx-rv{opacity:0;transform:translateY(28px);transition:opacity .8s cubic-bezier(.2,.8,.2,1),transform .8s cubic-bezier(.2,.8,.2,1)}
+      .fx-in{opacity:1;transform:none}
+      .fx-nocursor, .fx-nocursor a, .fx-nocursor button{cursor:none}
+      .fx-dot,.fx-ring{position:fixed;top:0;left:0;z-index:100;pointer-events:none;border-radius:50%;transform:translate(-50%,-50%)}
+      .fx-dot{width:7px;height:7px;background:#F2A0FF;background:#4DE1FF}
+      .fx-ring{width:36px;height:36px;border:1.5px solid rgba(255,61,129,.6);transition:width .25s,height .25s,background .25s}
+      .fx-ring.fx-hover{width:60px;height:60px;background:rgba(255,61,129,.1)}
+      @keyframes fx-rise{to{transform:translateY(0)}}
+      .fx-w{display:inline-block;overflow:hidden;vertical-align:bottom;padding:0 .06em}
+      .fx-w>span{display:inline-block;transform:translateY(112%);animation:fx-rise .95s cubic-bezier(.2,.8,.2,1) forwards}
+      @media (prefers-reduced-motion:reduce){
+        .fx-rv{opacity:1;transform:none}
+        .fx-w>span{transform:none;animation:none}
+      }
+    `}</style>
   );
 }
 
-/**
- * Simple looping chat demo — customer/agent bubbles with typing indicator.
- */
-type Bubble = { side: "user" | "bot"; text: string };
-const SCRIPT: Bubble[] = [
-  { side: "user", text: "هلو، اريد اثنين برياني دجاج بلا بصل" },
-  { side: "bot", text: "أهلاً بيك 🌷 اثنين برياني دجاج بدون بصل — ٢٠٬٠٠٠ د.ع. تحب تضيف مشروب؟" },
-  { side: "user", text: "اي زيدلي بيبسي كبير" },
-  { side: "bot", text: "تمام ✅ بيبسي كبير أضيف. المجموع ٢٣٬٠٠٠. للعنوان: الكرادة، نفس محل السابق؟" },
-  { side: "user", text: "اي نفسه" },
-  { side: "bot", text: "انطلق الطلب 🚀 يوصل خلال ٣٥-٤٥ دقيقة. شكراً لك 🌟" },
+/* Word-by-word headline reveal */
+export function RevealWords({ text, delay = 0 }: { text: string; delay?: number }) {
+  return (
+    <>
+      {text.split(" ").map((w, i) => (
+        <span key={i} className="fx-w">
+          <span style={{ animationDelay: `${delay + i * 0.1}s` }}>{w}</span>{" "}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/* ------------------- Live self-typing chat demo ------------------- */
+
+const CHAT_SCRIPT = [
+  { who: "user" as const, t: "هلو، عندكم برياني؟", d: 1100 },
+  { who: "bot" as const, t: "هلا بيك نورتنا 🌟 إي عدنا برياني دجاج بـ 7,000 وبرياني لحم بـ 9,000 دينار. شتحب أجهز لك؟", d: 1900 },
+  { who: "user" as const, t: "اثنين برياني لحم ويه بيبسي بارد", d: 1600 },
+  { who: "bot" as const, t: "تمام ✅ 2 برياني لحم + 2 بيبسي = 20,000 دينار. التوصيل لنفس عنوانك السابق؟", d: 2100 },
+  { who: "user" as const, t: "إي عاشت ايدك", d: 1300 },
+  { who: "bot" as const, t: "طلبك انطلق للمطبخ 👨‍🍳 يوصلك خلال 35 دقيقة 🛵 صحتين وعافية!", d: 2600 },
 ];
 
 export function LiveChatDemo() {
-  const [visible, setVisible] = useState<Bubble[]>([]);
+  const [visible, setVisible] = useState(0); // messages currently shown
   const [typing, setTyping] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    let timers: ReturnType<typeof setTimeout>[] = [];
-    const run = async () => {
-      while (!cancelled) {
-        setVisible([]);
-        for (const b of SCRIPT) {
-          if (cancelled) return;
-          if (b.side === "bot") {
+    let alive = true;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const wait = (ms: number) =>
+      new Promise<void>((res) => timers.push(setTimeout(res, ms)));
+
+    (async () => {
+      await wait(1200);
+      while (alive) {
+        for (let i = 0; i < CHAT_SCRIPT.length && alive; i++) {
+          const m = CHAT_SCRIPT[i];
+          if (m.who === "bot") {
             setTyping(true);
-            await new Promise<void>((r) => timers.push(setTimeout(r, 900)));
+            await wait(950);
             setTyping(false);
           } else {
-            await new Promise<void>((r) => timers.push(setTimeout(r, 500)));
+            await wait(350);
           }
-          if (cancelled) return;
-          setVisible((v) => [...v, b]);
-          await new Promise<void>((r) => timers.push(setTimeout(r, 1200)));
+          if (!alive) break;
+          setVisible(i + 1);
+          await wait(m.d);
         }
-        await new Promise<void>((r) => timers.push(setTimeout(r, 2200)));
+        if (!alive) break;
+        await wait(2400);
+        setVisible(0);
       }
-    };
-    run();
+    })();
+
     return () => {
-      cancelled = true;
+      alive = false;
       timers.forEach(clearTimeout);
     };
   }, []);
 
   return (
     <div
-      dir="rtl"
-      className="rounded-[28px] border p-4 shadow-[0_20px_60px_rgba(0,0,0,.4)]"
-      style={{
-        borderColor: "rgba(240,235,255,.09)",
-        background: "linear-gradient(180deg, #16092A, #0B0614)",
-        minHeight: 460,
-      }}
+      className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0E0818] shadow-[0_30px_80px_rgba(0,0,0,.6),0_0_100px_rgba(139,92,246,.15)]"
+      style={{ aspectRatio: "3 / 4" }}
     >
-      <div className="mb-3 flex items-center justify-between px-1 text-xs" style={{ color: "#9D93B8" }}>
-        <span>محادثة مباشرة</span>
-        <span className="inline-flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ background: "#4DE1FF", boxShadow: "0 0 8px #4DE1FF" }} />
-          متصل
+      {/* header */}
+      <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#FF3D81] to-[#8B5CF6] text-base">
+          🍽️
+        </div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-bold text-[#F2EEFF]">مطعم بيت بغداد</div>
+          <div className="text-[11px] text-emerald-500">● متصل — يرد خلال ثوانٍ</div>
+        </div>
+        <span className="mr-auto rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-[#9D93B8]">
+          ديمو حي
         </span>
       </div>
-      <div className="flex flex-col gap-2">
-        {visible.map((b, i) => (
+      {/* messages */}
+      <div ref={bodyRef} className="flex h-[calc(100%-57px)] flex-col justify-end gap-2 overflow-hidden p-3">
+        {CHAT_SCRIPT.slice(0, visible).map((m, i) => (
           <div
-            key={i}
-            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-              b.side === "user" ? "self-start" : "self-end"
-            }`}
-            style={
-              b.side === "user"
-                ? { background: "rgba(240,235,255,.08)", color: "#F2EEFF" }
-                : { background: "linear-gradient(135deg,#FF3D81,#8B5CF6)", color: "white" }
+            key={`${i}-${m.t.slice(0, 8)}`}
+            className={
+              "max-w-[85%] animate-in fade-in slide-in-from-bottom-2 rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed duration-300 " +
+              (m.who === "bot"
+                ? "self-end rounded-bl-md bg-gradient-to-br from-[#FF3D81] to-[#8B5CF6] text-white"
+                : "self-start rounded-br-md bg-[#251A3D] text-[#F2EEFF]")
             }
           >
-            {b.text}
+            {m.t}
           </div>
         ))}
         {typing && (
-          <div
-            className="self-end inline-flex items-center gap-1 rounded-2xl px-4 py-3"
-            style={{ background: "rgba(139,92,246,.2)" }}
-            aria-label="typing"
-          >
-            <Dot />
-            <Dot delay={0.15} />
-            <Dot delay={0.3} />
+          <div className="flex gap-1 self-end rounded-2xl rounded-bl-md bg-[#FF3D81]/15 px-4 py-3">
+            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#FF3D81] [animation-delay:0ms]" />
+            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#FF3D81] [animation-delay:150ms]" />
+            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#FF3D81] [animation-delay:300ms]" />
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-function Dot({ delay = 0 }: { delay?: number }) {
-  return (
-    <span
-      className="inline-block h-1.5 w-1.5 rounded-full bg-white/80"
-      style={{
-        animation: "fx-blink 1s ease-in-out infinite",
-        animationDelay: `${delay}s`,
-      }}
-    >
-      <style>{`
-        @keyframes fx-blink{
-          0%,100%{opacity:.3;transform:translateY(0)}
-          50%{opacity:1;transform:translateY(-2px)}
-        }
-      `}</style>
-    </span>
   );
 }
