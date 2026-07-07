@@ -34,6 +34,10 @@ async function acquireConversationLock(db: any, conversationId: string, token: s
       _conversation_id: conversationId, _token: token, _ttl_seconds: LOCK_TTL_SECONDS,
     });
     if (!error && data === true) return true;
+    if (error) {
+      console.warn("claim_conversation failed; continuing without lock", error?.message || error);
+      return false;
+    }
     if (Date.now() >= deadline) return false;
     await sleepMs(LOCK_POLL_MS);
   }
