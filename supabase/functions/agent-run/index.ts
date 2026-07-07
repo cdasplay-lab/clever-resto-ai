@@ -148,6 +148,75 @@ function normalizeArabic(input: string): string {
   return s;
 }
 
+function includesAny(haystack: string, needles: string[]): boolean {
+  return needles.some((needle) => haystack.includes(needle));
+}
+
+function isRestaurantLocationRequest(text: string): boolean {
+  const n = normalizeArabic(text);
+  if (!n) return false;
+  return includesAny(n, [
+    "لوكيشن", "لوكشن", "الموقع", "موقعكم", "موقعك", "موقع المطعم",
+    "دزلي الموقع", "دزلي اللوكيشن", "ارسل الموقع", "ارسلي الموقع",
+    "وينكم", "وين انتو", "وين المطعم", "وين موقعكم", "اين موقعكم",
+    "العنوان", "عنوانكم", "خريطه", "خريطة", "ناونيشان", "نیشان",
+  ]);
+}
+
+function branchSearchText(branch: any): string {
+  return normalizeArabic([
+    branch?.name,
+    branch?.address,
+    String(branch?.name || "").replace(/^(فرع|الفرع)\s+/i, ""),
+  ].filter(Boolean).join(" "));
+}
+
+function parseBranchOrdinal(text: string, count: number): number | null {
+  const normalizedDigits = text
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
+  const numeric = normalizedDigits.match(/(?:^|\s)(\d{1,2})(?:\s|$)/)?.[1];
+  if (numeric) {
+    const idx = Number(numeric) - 1;
+    if (idx >= 0 && idx < count) return idx;
+  }
+  const n = normalizeArabic(text);
+  const words: Array<[number, string[]]> = [
+    [0, ["اول", "الاول", "واحد", "اوله"]],
+    [1, ["ثاني", "الثاني", "اثنين", "اتنين"]],
+    [2, ["ثالث", "الثالث", "ثلاثه"]],
+    [3, ["رابع", "الرابع", "اربعه"]],
+  ];
+  for (const [idx, variants] of words) {
+    if (idx < count && variants.some((v) => n.includes(v))) return idx;
+  }
+  return null;
+}
+
+function inferBranchIdFromTexts(texts: string[], branches: any[]): string | null {
+  const active = branches.filter((b: any) => b.is_active);
+  if (!active.length) return null;
+
+  for (const raw of texts) {
+    const ordinal = parseBranchOrdinal(raw, active.length);
+    if (ordinal !== null) return active[ordinal]?.id || null;
+  }
+
+  const matches = new Set<string>();
+  for (const raw of texts) {
+    const n = normalizeArabic(raw);
+    if (!n) continue;
+    for (const b of active) {
+      const target = branchSearchText(b);
+      if (!target) continue;
+      const parts = target.split(" ").filter((p) => p.length >= 3 && p !== "فرع" && p !== "الفرع");
+      if (n.includes(target) || parts.some((p) => n.includes(p))) matches.add(b.id);
+    }
+    if (matches.size === 1) return Array.from(matches)[0];
+  }
+  return null;
+}
+
 type CartItem = {
   menu_item_id: string;
   name: string;
@@ -2716,6 +2785,46 @@ Deno.serve(async (req) => {
     // === /cancel shortcut: clear cart + pending confirmation without calling the model ===
     const lastUserMsg = [...cleanHistory].reverse().find((m) => m.role === "user");
     const lastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim().toLowerCase() : "";
+    const recentUserTexts = [...cleanHistory]
+      .reverse()
+      .filter((m) => m.role === "user" && typeof m.content === "string")
+      .slice(0, 6)
+      .map((m) => String(m.content));
+
+    // Deterministic location shortcut: do not leave this to the model. If the
+    // customer asks for the restaurant/branch location, send Telegram's native
+    // map pin immediately, even on repeat requests like "حاول مرة ثانية".
+    if (isRestaurantLocationRequest(lastUserText)) {
+      const inferredBranchId = inferBranchIdFromTexts(recentUserTexts, branches);
+      const result = await runTool(
+        db,
+        conv,
+        restaurant,
+        "send_restaurant_location",
+        inferredBranchId ? { branch_id: inferredBranchId } : {},
+        media,
+        actions,
+        customerProfile,
+      );
+
+      let reply = "";
+      if (result?.needs_branch_selection) {
+        reply = result.user_message || "أي فرع تحب أدزلك موقعه؟";
+      } else if (result?.error) {
+        reply = result.user_message || "موقعنا على الخريطة مو محدد بعد.";
+      } else {
+        if (inferredBranchId) {
+          await db.from("conversations").update({
+            meta: { ...(conv.meta || {}), branch_id: inferredBranchId },
+          }).eq("id", conversation_id);
+        }
+        reply = `هذا موقع ${result.label || restaurant.name} 📍`;
+      }
+
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: conv.state, media, actions, quick_replies: [] });
+    }
+
     if (["/cancel", "الغاء", "إلغاء", "الغاء الطلب", "إلغاء الطلب", "cancel"].includes(lastUserText)) {
       await db.from("conversations").update({
         cart: [],
