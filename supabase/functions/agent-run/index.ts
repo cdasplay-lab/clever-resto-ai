@@ -2374,20 +2374,49 @@ async function runTool(
     const src: any = branch || restaurant;
     const lat = Number(src.latitude);
     const lng = Number(src.longitude);
-    const url = src.google_maps_url || (Number.isFinite(lat) && Number.isFinite(lng) ? `https://maps.google.com/?q=${lat},${lng}` : null);
-    if (!url) {
-      return { error: "no_location_set", user_message: "موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا للاستفسار." };
-    }
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng);
+    const url = src.google_maps_url || (hasCoords ? `https://maps.google.com/?q=${lat},${lng}` : null);
     const label = branch
       ? (/^(فرع|الفرع)\b/.test(String(branch.name).trim()) ? branch.name : `فرع ${branch.name}`)
       : restaurant.name;
+
+    if (!hasCoords) {
+      // Nudge the owner so they fix the missing coords (throttled by alertFatalError-style dedupe below).
+      const ownerChat = (restaurant as any).owner_telegram_chat_id;
+      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      if (ownerChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+        const key = `no_loc:${restaurant.id}:${branch?.id || "main"}`;
+        const now = Date.now();
+        if (now - (lastAlertAt.get(key) || 0) > 30 * 60 * 1000) {
+          lastAlertAt.set(key, now);
+          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+              "X-Connection-Api-Key": TELEGRAM_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              chat_id: ownerChat,
+              text: `⚠️ زبون طلب موقع ${label} ولا يوجد إحداثيات محفوظة.\nحدد الموقع من: لوحة التحكم → الفروع → تعديل → الخريطة.`,
+            }),
+          }).catch(() => {});
+        }
+      }
+      const phone = src.phone || (restaurant as any).phone;
+      const msg = phone
+        ? `موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا على ${phone}.`
+        : `موقعنا على الخريطة مو محدد بعد، اعتذر للزبون واقترح عليه إعطاء اسم شارع/منطقة.`;
+      return { error: "no_location_set", user_message: msg };
+    }
+
     const isTelegram = conv.channel === "telegram";
-    if (isTelegram && Number.isFinite(lat) && Number.isFinite(lng)) {
+    if (isTelegram) {
       actions.push({ type: "send_location", lat, lng, title: label, address: src.address || null });
     }
     return {
-      ok: true, lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, url, label,
-      note: isTelegram && Number.isFinite(lat) && Number.isFinite(lng)
+      ok: true, lat, lng, url, label,
+      note: isTelegram
         ? `تم إرسال الموقع كخريطة. اكتب سطر قصير فقط مثل: "هذا موقع ${label} 📍".`
         : `اكتب للزبون: "هذا موقع ${label} 📍\n${url}".`,
     };
