@@ -17,6 +17,7 @@ import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TrackOrderIdRouteImport } from './routes/track.$orderId'
+import { Route as ApiPublicExpandMapsUrlRouteImport } from './routes/api/public/expand-maps-url'
 import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
 import { Route as ApiPublicCheckComplaintsRouteImport } from './routes/api/public/check-complaints'
 
@@ -60,6 +61,11 @@ const TrackOrderIdRoute = TrackOrderIdRouteImport.update({
   path: '/track/$orderId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicExpandMapsUrlRoute = ApiPublicExpandMapsUrlRouteImport.update({
+  id: '/api/public/expand-maps-url',
+  path: '/api/public/expand-maps-url',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicCheckDelaysRoute = ApiPublicCheckDelaysRouteImport.update({
   id: '/api/public/check-delays',
   path: '/api/public/check-delays',
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
+  '/api/public/expand-maps-url': typeof ApiPublicExpandMapsUrlRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
+  '/api/public/expand-maps-url': typeof ApiPublicExpandMapsUrlRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -108,6 +116,7 @@ export interface FileRoutesById {
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
+  '/api/public/expand-maps-url': typeof ApiPublicExpandMapsUrlRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
+    | '/api/public/expand-maps-url'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -134,6 +144,7 @@ export interface FileRouteTypes {
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
+    | '/api/public/expand-maps-url'
   id:
     | '__root__'
     | '/'
@@ -146,6 +157,7 @@ export interface FileRouteTypes {
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
+    | '/api/public/expand-maps-url'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -159,6 +171,7 @@ export interface RootRouteChildren {
   TrackOrderIdRoute: typeof TrackOrderIdRoute
   ApiPublicCheckComplaintsRoute: typeof ApiPublicCheckComplaintsRoute
   ApiPublicCheckDelaysRoute: typeof ApiPublicCheckDelaysRoute
+  ApiPublicExpandMapsUrlRoute: typeof ApiPublicExpandMapsUrlRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -219,6 +232,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TrackOrderIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/expand-maps-url': {
+      id: '/api/public/expand-maps-url'
+      path: '/api/public/expand-maps-url'
+      fullPath: '/api/public/expand-maps-url'
+      preLoaderRoute: typeof ApiPublicExpandMapsUrlRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/check-delays': {
       id: '/api/public/check-delays'
       path: '/api/public/check-delays'
@@ -247,7 +267,18 @@ const rootRouteChildren: RootRouteChildren = {
   TrackOrderIdRoute: TrackOrderIdRoute,
   ApiPublicCheckComplaintsRoute: ApiPublicCheckComplaintsRoute,
   ApiPublicCheckDelaysRoute: ApiPublicCheckDelaysRoute,
+  ApiPublicExpandMapsUrlRoute: ApiPublicExpandMapsUrlRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
