@@ -1,6 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { LandingFX, AuroraCanvas, RevealWords, LiveChatDemo, HeroExit, CinematicSteps } from "@/components/landing-fx";
 import { Button } from "@/components/ui/button";
 import {
