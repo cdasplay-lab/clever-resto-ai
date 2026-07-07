@@ -20,7 +20,9 @@ export function MapsLocationField({ url, lat, lng, onChange }: Props) {
   const [showMap, setShowMap] = useState<boolean>(lat == null || lng == null);
   const [expanding, setExpanding] = useState(false);
 
-  const hasCoords = lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+  const hasCoords = lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)
+    && (Math.abs(lat) > 0.001 || Math.abs(lng) > 0.001);
+
 
   function commit(nextUrl: string | null, la: number | null, ln: number | null) {
     onChange(nextUrl, la, ln);
