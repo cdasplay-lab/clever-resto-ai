@@ -478,8 +478,14 @@ const TOOLS = [
     type: "function",
     function: {
       name: "send_restaurant_location",
-      description: "أرسل موقع المطعم (أو الفرع المختار إذا تم تحديده) للزبون كنقطة جغرافية حقيقية. استخدمها لما يسأل الزبون 'وين موقعكم'، 'دزلي اللوكيشن'، 'فين المطعم'، أو يطلب يجي بنفسه (pickup).",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+      description: "أرسل موقع المطعم (أو فرع محدد) للزبون كنقطة جغرافية. لو المطعم عنده أكثر من فرع ولم يُحدَّد فرع بعد، اسأل الزبون أول شي (أو مرر branch_id إذا الزبون سمّى الفرع). لما ما يُحدد branch_id ويوجد أكثر من فرع، الأداة ترجع قائمة الفروع لتسأل الزبون.",
+      parameters: {
+        type: "object",
+        properties: {
+          branch_id: { type: "string", description: "اختياري: id فرع معيّن لإرسال موقعه." },
+        },
+        additionalProperties: false,
+      },
     },
   },
   {
