@@ -189,17 +189,19 @@ export function MapsLocationPicker({ lat, lng, onChange, height = 320 }: Props) 
           موقعي
         </Button>
       </form>
-      <div
-        ref={mapEl}
-        style={{ height, width: "100%" }}
-        className="rounded border bg-muted"
-      >
+      <div className="relative">
+        <div
+          ref={mapEl}
+          style={{ height, width: "100%" }}
+          className="rounded border bg-muted"
+        />
         {!ready && !error && (
-          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
             <Loader2 className="ml-2 h-4 w-4 animate-spin" /> جاري تحميل الخريطة…
           </div>
         )}
       </div>
+
       {error && (
         <div className="flex items-start gap-1 rounded border border-destructive/30 bg-destructive/10 p-2 text-xs text-destructive">
           <X className="mt-0.5 h-3 w-3 shrink-0" />
