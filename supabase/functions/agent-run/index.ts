@@ -478,8 +478,14 @@ const TOOLS = [
     type: "function",
     function: {
       name: "send_restaurant_location",
-      description: "أرسل موقع المطعم (أو الفرع المختار إذا تم تحديده) للزبون كنقطة جغرافية حقيقية. استخدمها لما يسأل الزبون 'وين موقعكم'، 'دزلي اللوكيشن'، 'فين المطعم'، أو يطلب يجي بنفسه (pickup).",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+      description: "أرسل موقع المطعم (أو فرع محدد) للزبون كنقطة جغرافية. لو المطعم عنده أكثر من فرع ولم يُحدَّد فرع بعد، اسأل الزبون أول شي (أو مرر branch_id إذا الزبون سمّى الفرع). لما ما يُحدد branch_id ويوجد أكثر من فرع، الأداة ترجع قائمة الفروع لتسأل الزبون.",
+      parameters: {
+        type: "object",
+        properties: {
+          branch_id: { type: "string", description: "اختياري: id فرع معيّن لإرسال موقعه." },
+        },
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -2368,9 +2374,41 @@ async function runTool(
   }
 
   if (name === "send_restaurant_location") {
-    const branchId = conv.meta?.branch_id;
     const branches: any[] = (restaurant as any).__branches || [];
-    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    const activeBranches = branches.filter((b: any) => b.is_active);
+    const hasBranchCoords = (b: any) => {
+      const la = Number(b?.latitude), ln = Number(b?.longitude);
+      return Number.isFinite(la) && Number.isFinite(ln) && (Math.abs(la) > 0.001 || Math.abs(ln) > 0.001);
+    };
+
+    const requestedId = args.branch_id || conv.meta?.branch_id;
+    let branch: any = requestedId ? branches.find((b: any) => b.id === requestedId) : null;
+
+    // Multi-branch: if no branch chosen, ask the customer which one.
+    if (!branch && activeBranches.length > 1) {
+      const withCoords = activeBranches.filter(hasBranchCoords);
+      // If exactly one branch actually has coordinates, use it silently.
+      if (withCoords.length === 1) {
+        branch = withCoords[0];
+      } else {
+        return {
+          needs_branch_selection: true,
+          branches: activeBranches.map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            address: b.address || null,
+            has_location: hasBranchCoords(b),
+          })),
+          user_message: `عندنا ${activeBranches.length} فروع. أي فرع تحب أدزلك موقعه؟\n` +
+            activeBranches.map((b: any, i: number) => `${i + 1}. ${b.name}${b.address ? ` — ${b.address}` : ""}`).join("\n"),
+          note: "اسأل الزبون يختار فرع بالاسم أو الرقم، ثم استدعِ send_restaurant_location مرة ثانية مع branch_id المناسب. لا ترسل أي موقع الآن.",
+        };
+      }
+    }
+
+    // Single active branch → use it. Otherwise fall back to restaurant.
+    if (!branch && activeBranches.length === 1) branch = activeBranches[0];
+
     const src: any = branch || restaurant;
     const lat = Number(src.latitude);
     const lng = Number(src.longitude);
