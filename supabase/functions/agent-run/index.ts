@@ -18,9 +18,9 @@ const PER_TOOL_TIMEOUT_MS = 15_000;
 const MAX_CONSECUTIVE_TOOL_STEPS = 4; // bdoun nass mn al-model
 
 // --- Per-conversation lock (serializes concurrent runs on the same chat) ---
-const LOCK_TTL_SECONDS = 120;   // a run older than this is considered crashed
-const LOCK_MAX_WAIT_MS = 30_000; // how long a queued run waits for the lock
-const LOCK_POLL_MS = 400;
+const LOCK_TTL_SECONDS = 45;     // a run older than this is considered crashed
+const LOCK_MAX_WAIT_MS = 4_000;  // don't make customers wait 30s on a stale lock
+const LOCK_POLL_MS = 250;
 
 function sleepMs(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
