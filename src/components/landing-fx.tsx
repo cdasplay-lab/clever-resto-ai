@@ -130,6 +130,7 @@ export function AuroraCanvas() {
     window.addEventListener("mousemove", onMove);
 
     let raf = 0;
+    let running = false;
     let px = M.sx, py = M.sy;
     const loop = (t: number) => {
       M.sx += (M.x - M.sx) * 0.06;
@@ -145,10 +146,26 @@ export function AuroraCanvas() {
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       raf = requestAnimationFrame(loop);
     };
-    raf = requestAnimationFrame(loop);
+    const start = () => { if (!running) { running = true; raf = requestAnimationFrame(loop); } };
+    const stop = () => { if (running) { running = false; cancelAnimationFrame(raf); } };
+
+    // Only render while the hero canvas is on-screen — no wasted GPU frames after scroll.
+    const io = new IntersectionObserver(
+      ([e]) => (e.isIntersecting && !document.hidden ? start() : stop()),
+      { threshold: 0 }
+    );
+    io.observe(canvas);
+    // Also pause on background tabs.
+    const onVisibility = () => {
+      if (document.hidden) stop();
+      else if (canvas.getBoundingClientRect().bottom > 0) start();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
 
     return () => {
-      cancelAnimationFrame(raf);
+      stop();
+      io.disconnect();
+      document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("resize", resize);
       window.removeEventListener("mousemove", onMove);
     };
