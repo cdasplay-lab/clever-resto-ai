@@ -1,13 +1,20 @@
-// agent-run: core AI agent. Called by channel webhooks (telegram-webhook etc).
-// Input: { conversation_id }
+// agent-run: core AI agent. Called server-to-server by channel webhooks
+// (telegram-webhook etc) ONLY. Not callable from the browser.
+// Input: { conversation_id, image_url? }  — authenticated via a shared secret.
 // It loads the conversation, builds messages, runs the LLM with tools in a loop,
 // persists messages, and returns the final assistant text to send to the user.
+//
+// SECURITY: this function runs with the service role and consumes AI quota +
+// sends customer messages, so it MUST stay internal. Access is gated by the
+// AGENT_RUN_SECRET shared secret (see _shared/agent-auth.ts). The tenant is
+// always derived from the conversation row in the DB — never from the client.
 
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
 import { retryFetch } from "../_shared/retry.ts";
 import { checkBranchCoverage, GOVERNORATES as IQ_GOVS } from "../_shared/geo.ts";
+import { authorizeAgentRun, validatePayload, clientErrorFor } from "../_shared/agent-auth.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
@@ -2588,14 +2595,41 @@ async function callModel(messages: any[], tools: any) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const runStartedAt = Date.now();
   let runRestaurantId: string | null = null;
   let runConversationId: string | null = null;
   let lockToken: string | null = null;
   let lockDb: any = null;
+
+  // --- SECURITY GATE: internal callers only, via shared secret. ---
+  // Fail-closed. Log a non-PII security event on rejection (console only, so a
+  // flood of bogus requests can't be used to spam the DB).
+  const auth = authorizeAgentRun(
+    req.headers.get("X-Agent-Secret"),
+    Deno.env.get("AGENT_RUN_SECRET"),
+  );
+  if (!auth.ok) {
+    console.warn(`[security] agent-run rejected: ${auth.reason}`);
+    // Generic body — never reveal which check failed.
+    return json({ error: "unauthorized" }, auth.status === 503 ? 503 : 401);
+  }
+
+  // --- Strict payload validation: never trust client input. ---
+  let body: unknown;
   try {
-    const { conversation_id, image_url } = await req.json();
-    if (!conversation_id) return json({ error: "conversation_id required" }, 400);
+    body = await req.json();
+  } catch {
+    return json({ error: "bad_request" }, 400);
+  }
+  const valid = validatePayload(body);
+  if (!valid.ok) {
+    console.warn(`[security] agent-run bad payload: ${valid.reason}`);
+    return json({ error: "bad_request" }, 400);
+  }
+  const { conversation_id, image_url } = valid.payload;
+
+  try {
     runConversationId = conversation_id;
     const db = admin();
     lockDb = db;
@@ -3089,12 +3123,15 @@ Deno.serve(async (req) => {
         });
       } catch (_) { /* swallow */ }
     }
-    if (msg === "rate_limited") return json({ error: "rate_limited" }, 429);
-    if (msg === "payment_required") return json({ error: "payment_required" }, 402);
-    // Genuinely fatal (unexpected) error — alert the platform admin in real time.
-    await alertFatalError(runRestaurantId, msg, runConversationId);
+    // Alert the platform admin in real time for genuinely fatal errors.
+    if (msg !== "rate_limited" && msg !== "payment_required") {
+      await alertFatalError(runRestaurantId, msg, runConversationId);
+    }
     console.error("agent-run error:", e);
-    return json({ error: msg }, 500);
+    // Sanitized response — internal messages (table names, stack, etc.) are
+    // logged server-side above but never returned to the caller.
+    const safe = clientErrorFor(msg);
+    return json(safe.body, safe.status);
   } finally {
     // Always release the conversation lock, on every exit path.
     await releaseConversationLock(lockDb, runConversationId, lockToken);

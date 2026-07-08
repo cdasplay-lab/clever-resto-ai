@@ -400,7 +400,11 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
   try {
     const r = await retryFetch(`${baseUrl}/functions/v1/agent-run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        // Shared secret so agent-run accepts only internal (webhook) calls.
+        "X-Agent-Secret": Deno.env.get("AGENT_RUN_SECRET") ?? "",
+      },
       body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
     }, { attempts: 2, label: "agent-run" });
     data = await r.json().catch(() => ({}));
