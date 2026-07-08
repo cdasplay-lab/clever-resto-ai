@@ -34,6 +34,7 @@ const MORE: { value: string; label: string }[] = [
   { value: "complaints", label: "الشكاوى" },
   { value: "subscription", label: "الاشتراك" },
   { value: "health", label: "صحة البوت" },
+  { value: "integration", label: "تكامل API" },
   { value: "settings", label: "الإعدادات" },
 ];
 

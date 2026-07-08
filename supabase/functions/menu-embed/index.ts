@@ -2,12 +2,26 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
+import { getCallerUserId, isInternalCall, ownsRestaurant } from "../_shared/auth.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const { menu_item_id, restaurant_id } = await req.json();
     const db = admin();
+
+    // Authorize: internal service call, or the owner of the target restaurant.
+    if (!isInternalCall(req)) {
+      const uid = await getCallerUserId(req);
+      if (!uid) return json({ error: "unauthorized" }, 401);
+      let rid: string | null = restaurant_id ?? null;
+      if (!rid && menu_item_id) {
+        const { data: mi } = await db.from("menu_items").select("restaurant_id").eq("id", menu_item_id).maybeSingle();
+        rid = mi?.restaurant_id ?? null;
+      }
+      if (!rid || !(await ownsRestaurant(uid, rid))) return json({ error: "forbidden" }, 403);
+    }
+
     const q = db.from("menu_items").select("id,name,description,category");
     if (menu_item_id) q.eq("id", menu_item_id);
     else if (restaurant_id) q.eq("restaurant_id", restaurant_id);

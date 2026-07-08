@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Save, Users } from "lucide-react";
 import { toast } from "sonner";
+import { mergeFeatureFlags } from "@/lib/feature-flags";
 
 type Memory = {
   id: string;
@@ -48,11 +49,13 @@ export function CustomersTab({ restaurantId }: { restaurantId: string }) {
 
   async function toggleFlag(v: boolean) {
     setEnabled(v);
-    const { data: r } = await supabase.from("restaurants").select("feature_flags").eq("id", restaurantId).maybeSingle();
-    const flags = { ...((r?.feature_flags as any) || {}), customer_memory_enabled: v };
-    const { error } = await supabase.from("restaurants").update({ feature_flags: flags }).eq("id", restaurantId);
-    if (error) { toast.error("تعذّر الحفظ"); setEnabled(!v); }
-    else toast.success(v ? "تم تفعيل ذاكرة الزبون" : "تم إيقاف ذاكرة الزبون");
+    try {
+      await mergeFeatureFlags(restaurantId, { customer_memory_enabled: v });
+      toast.success(v ? "تم تفعيل ذاكرة الزبون" : "تم إيقاف ذاكرة الزبون");
+    } catch {
+      toast.error("تعذّر الحفظ");
+      setEnabled(!v);
+    }
   }
 
   async function saveRow(row: Memory) {

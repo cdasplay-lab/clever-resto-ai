@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { mergeFeatureFlags } from "@/lib/feature-flags";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -69,10 +70,13 @@ export function SocialTab({ restaurantId }: { restaurantId: string }) {
 
   async function setFlag(key: "story_replies_enabled" | "comment_replies_enabled", v: boolean) {
     if (key === "story_replies_enabled") setStoryOn(v); else setCommentOn(v);
-    const { data: r } = await supabase.from("restaurants").select("feature_flags").eq("id", restaurantId).maybeSingle();
-    const flags = { ...((r?.feature_flags as any) || {}), [key]: v };
-    const { error } = await supabase.from("restaurants").update({ feature_flags: flags }).eq("id", restaurantId);
-    if (error) { toast.error("تعذّر الحفظ"); void load(); } else toast.success("تم");
+    try {
+      await mergeFeatureFlags(restaurantId, { [key]: v });
+      toast.success("تم");
+    } catch {
+      toast.error("تعذّر الحفظ");
+      void load();
+    }
   }
 
   async function saveReply(row: Row) {

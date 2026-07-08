@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { toast } from "sonner";
 import { Loader2, Plus, Trash2, Pencil, MapPin, Phone, Clock } from "lucide-react";
 import { MapsLocationField } from "@/components/maps-location-field";
-import { GOVERNORATES } from "@/lib/governorates-iq";
+import { GOVERNORATES, getGovernorate, loadGovernorateBoundary } from "@/lib/governorates-iq";
+
+const LocationPickerMap = lazy(() =>
+  import("@/components/location-picker-map").then((m) => ({ default: m.LocationPickerMap })),
+);
 
 type DayHours = { open: string; close: string; closed: boolean };
 type OpenHours = Record<string, DayHours>;
@@ -191,6 +195,21 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
   const [b, setB] = useState<Branch>(branch);
   const [areaInput, setAreaInput] = useState("");
   const [saving, setSaving] = useState(false);
+  // Real governorate boundary shown on the map and persisted as the precise
+  // coverage polygon the agent checks against.
+  const [govBoundary, setGovBoundary] = useState<[number, number][] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    if (b.coverage_type === "governorate" && b.coverage_governorate) {
+      loadGovernorateBoundary(b.coverage_governorate).then((poly) => {
+        if (alive) setGovBoundary(poly);
+      });
+    } else {
+      setGovBoundary(null);
+    }
+    return () => { alive = false; };
+  }, [b.coverage_type, b.coverage_governorate]);
 
   function addArea() {
     const v = areaInput.trim();
@@ -223,7 +242,14 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
       coverage_type: b.coverage_type,
       coverage_governorate: b.coverage_type === "governorate" ? b.coverage_governorate : null,
       coverage_radius_km: b.coverage_type === "radius" ? Number(b.coverage_radius_km) || null : null,
-      coverage_polygon: b.coverage_type === "polygon" ? (b.coverage_polygon as any) : null,
+      // In governorate mode, persist the real boundary so the agent checks the
+      // precise shape instead of the coarse fallback rectangle.
+      coverage_polygon:
+        b.coverage_type === "polygon"
+          ? (b.coverage_polygon as any)
+          : b.coverage_type === "governorate" && govBoundary && govBoundary.length >= 3
+            ? (govBoundary.map(([lat, lng]) => ({ lat, lng })) as any)
+            : null,
     } as any).eq("id", b.id);
     setSaving(false);
     if (error) return toast.error(error.message);
@@ -269,7 +295,7 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
               ))}
             </div>
             {b.coverage_type === "governorate" && (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <Label className="text-xs">اختر المحافظة</Label>
                 <select
                   className="w-full rounded border bg-background p-2 text-sm"
@@ -279,6 +305,22 @@ function BranchEditDialog({ branch, onClose, onSaved }: { branch: Branch; onClos
                   <option value="">— اختر —</option>
                   {GOVERNORATES.map((g) => (<option key={g.code} value={g.code}>{g.name_ar}</option>))}
                 </select>
+                {b.coverage_governorate && (
+                  <>
+                    <Suspense fallback={<div className="h-56 w-full animate-pulse rounded-lg border bg-muted" />}>
+                      <LocationPickerMap
+                        lat={b.latitude}
+                        lng={b.longitude}
+                        boundary={govBoundary}
+                        className="h-56 w-full rounded-lg border z-0"
+                      />
+                    </Suspense>
+                    <p className="text-[11px] text-muted-foreground">
+                      حدود {getGovernorate(b.coverage_governorate)?.name_ar ?? "المحافظة"} الحقيقية — الوكيل يقبل
+                      الطلبات داخل الخط الوردي فقط.
+                    </p>
+                  </>
+                )}
               </div>
             )}
             {b.coverage_type === "radius" && (

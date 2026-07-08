@@ -2,6 +2,7 @@
 // and configure webhook. Authenticated via X-API-Key header (hashed in api_keys table).
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
+import { internalHeaders } from "../_shared/auth.ts";
 
 async function sha256(s: string) {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
@@ -68,7 +69,7 @@ Deno.serve(async (req) => {
       const baseUrl = Deno.env.get("SUPABASE_URL");
       fetch(`${baseUrl}/functions/v1/menu-embed`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: internalHeaders(),
         body: JSON.stringify({ restaurant_id: restaurantId }),
       }).catch(() => {});
       return json({ ok: true, count: rows.length });
@@ -95,7 +96,7 @@ Deno.serve(async (req) => {
       const baseUrl = Deno.env.get("SUPABASE_URL");
       fetch(`${baseUrl}/functions/v1/menu-embed`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: internalHeaders(),
         body: JSON.stringify({ menu_item_id: data.id }),
       }).catch(() => {});
       return json({ item: data });

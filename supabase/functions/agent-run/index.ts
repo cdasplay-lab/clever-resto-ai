@@ -8,6 +8,7 @@ import { admin } from "../_shared/supabase.ts";
 import { embedText } from "../_shared/embed.ts";
 import { retryFetch } from "../_shared/retry.ts";
 import { checkBranchCoverage, GOVERNORATES as IQ_GOVS } from "../_shared/geo.ts";
+import { isInternalCall } from "../_shared/auth.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
@@ -51,6 +52,8 @@ async function releaseConversationLock(db: any, conversationId: string | null, t
 // real-time alerts. Throttled per restaurant (warm-isolate memory) to avoid spam.
 const ALERT_THROTTLE_MS = 10 * 60 * 1000;
 const lastAlertAt = new Map<string, number>();
+// Throttle for the "customer asked for your location but it isn't set" owner nag.
+const lastLocationNagAt = new Map<string, number>();
 
 async function alertFatalError(restaurantId: string | null, message: string, conversationId: string | null) {
   try {
@@ -2376,6 +2379,34 @@ async function runTool(
     const lng = Number(src.longitude);
     const url = src.google_maps_url || (Number.isFinite(lat) && Number.isFinite(lng) ? `https://maps.google.com/?q=${lat},${lng}` : null);
     if (!url) {
+      // Don't fail silently: nag the owner (throttled) so they learn customers
+      // are asking for a location that was never configured.
+      try {
+        const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+        const now = Date.now();
+        if (LOVABLE_API_KEY && TELEGRAM_API_KEY && now - (lastLocationNagAt.get(conv.restaurant_id) || 0) > ALERT_THROTTLE_MS) {
+          lastLocationNagAt.set(conv.restaurant_id, now);
+          const { data: rr } = await db
+            .from("restaurants")
+            .select("owner_telegram_chat_id")
+            .eq("id", conv.restaurant_id)
+            .maybeSingle();
+          if (rr?.owner_telegram_chat_id) {
+            fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${LOVABLE_API_KEY}`,
+                "X-Connection-Api-Key": TELEGRAM_API_KEY,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                chat_id: rr.owner_telegram_chat_id,
+                text: "⚠️ زبون طلب موقع مطعمك وما گدرنا ندزّه لأن الموقع مو محدد.\nافتح الداشبورد → الإعدادات وحدد الموقع على الخريطة (سحب دبوس — ثواني وحدة) حتى يوصل زبائنك دبوس حقيقي.",
+              }),
+            }).catch(() => {});
+          }
+        }
+      } catch (_) { /* alerting must never block the customer reply */ }
       return { error: "no_location_set", user_message: "موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا للاستفسار." };
     }
     const label = branch
@@ -2443,6 +2474,9 @@ async function callModel(messages: any[], tools: any) {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  // Internal-only endpoint (webhooks call it service-to-service). Without this,
+  // anyone could drive the LLM for any conversation — cost burn + messaging abuse.
+  if (!isInternalCall(req)) return json({ error: "unauthorized" }, 401);
   const runStartedAt = Date.now();
   let runRestaurantId: string | null = null;
   let runConversationId: string | null = null;

@@ -38,3 +38,20 @@ export function getGovernorate(code: string | null | undefined): Gov | null {
   if (!code) return null;
   return GOVERNORATES.find((g) => g.code === code) ?? null;
 }
+
+// Real (simplified) governorate boundaries from geoBoundaries ADM1, lazy-loaded
+// as a separate chunk (~57KB). Falls back to the coarse rectangles above for
+// codes missing from the dataset (halabja) or if the chunk fails to load.
+let geoCache: Record<string, [number, number][]> | null = null;
+
+export async function loadGovernorateBoundary(code: string | null | undefined): Promise<[number, number][] | null> {
+  if (!code) return null;
+  try {
+    if (!geoCache) {
+      geoCache = (await import("./governorates-geo.json")).default as unknown as Record<string, [number, number][]>;
+    }
+    return geoCache[code] ?? getGovernorate(code)?.polygon ?? null;
+  } catch {
+    return getGovernorate(code)?.polygon ?? null;
+  }
+}

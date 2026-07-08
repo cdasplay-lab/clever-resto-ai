@@ -75,6 +75,14 @@ export function checkBranchCoverage(
   }
 
   if (type === "governorate") {
+    // Prefer the precise boundary the dashboard saved into coverage_polygon
+    // (real ADM1 shape); fall back to the coarse rectangle for old branches.
+    const saved = Array.isArray(branch.coverage_polygon)
+      ? (branch.coverage_polygon as any[]).map((p) => [Number(p.lat ?? p[0]), Number(p.lng ?? p[1])] as [number, number])
+      : [];
+    if (saved.length >= 3) {
+      return { covered: pointInPolygon(customer, saved), mode: "governorate" };
+    }
     const gov = GOVERNORATES[branch.coverage_governorate];
     if (!gov) return { covered: true, mode: "governorate", reason: "gov_not_configured" };
     return { covered: pointInPolygon(customer, gov.polygon), mode: "governorate" };

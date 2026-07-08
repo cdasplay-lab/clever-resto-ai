@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil, MapPin, ArrowRight } from "lucide-react";
 import { MapsLocationField } from "@/components/maps-location-field";
+import { mergeFeatureFlags } from "@/lib/feature-flags";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -193,7 +194,13 @@ function RestaurantManager({
   onLogout: () => void;
   onChange: (r: Restaurant) => void;
 }) {
-  const [tab, setTab] = useState("menu");
+  // Honor ?tab= deep-links (e.g. complaints → "افتح المحادثة" builds
+  // ?tab=conversations&conv=<id>). Renders client-side only (behind auth),
+  // so reading location in the initializer is hydration-safe.
+  const [tab, setTab] = useState(() => {
+    if (typeof window === "undefined") return "menu";
+    return new URLSearchParams(window.location.search).get("tab") || "menu";
+  });
   return (
     <div className="min-h-screen bg-background p-3 pt-safe pb-20 md:p-6 md:pb-6" dir="rtl">
       <div className="mx-auto max-w-5xl">
@@ -229,7 +236,7 @@ function RestaurantManager({
             <TabsTrigger value="marketing">تسويق</TabsTrigger>
             <TabsTrigger value="combos">كومبوهات</TabsTrigger>
             <TabsTrigger value="complaints">الشكاوى</TabsTrigger>
-
+            <TabsTrigger value="integration">تكامل API</TabsTrigger>
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
 
@@ -247,6 +254,7 @@ function RestaurantManager({
           <TabsContent value="combos"><Suspense fallback={<TabFallback />}><CombosTab restaurantId={restaurant.id} /></Suspense></TabsContent>
           <TabsContent value="complaints"><Suspense fallback={<TabFallback />}><ComplaintsTab restaurantId={restaurant.id} /></Suspense></TabsContent>
 
+          <TabsContent value="integration"><IntegrationTab restaurant={restaurant} /></TabsContent>
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
         </Tabs>
@@ -559,18 +567,19 @@ function StockControl({ item, restaurantId, onChanged }: { item: MenuItem; resta
     );
   }
   const qty = Number(item.stock_qty ?? 0);
+  // Clear this item's stock-alert flag so future low/out alerts can re-fire.
+  // Merges only the stock_alerts key atomically — doesn't clobber other flags.
+  async function clearStockAlert() {
+    const { data: r } = await supabase.from("restaurants").select("feature_flags").eq("id", restaurantId).maybeSingle();
+    const alerts = { ...(((r as any)?.feature_flags?.stock_alerts) || {}) };
+    delete alerts[item.id];
+    await mergeFeatureFlags(restaurantId, { stock_alerts: alerts }).catch(() => {});
+  }
   async function addStock(delta: number) {
     setBusy(true);
     const newQty = Math.max(0, qty + delta);
-    // Clear stock alert flag for this item so future low/out alerts can re-fire
-    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", restaurantId).maybeSingle();
-    const flags: any = (r as any)?.feature_flags || {};
-    const alerts = { ...(flags.stock_alerts || {}) };
-    delete alerts[item.id];
     const { error } = await supabase.from("menu_items").update({ stock_qty: newQty }).eq("id", item.id);
-    if (!error && r) {
-      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", restaurantId);
-    }
+    if (!error) await clearStockAlert();
     setBusy(false);
     if (error) return toast.error(error.message);
     toast.success(`تم التحديث — متبقي ${newQty}`);
@@ -579,14 +588,8 @@ function StockControl({ item, restaurantId, onChanged }: { item: MenuItem; resta
   async function setStock(value: number) {
     setBusy(true);
     const newQty = Math.max(0, value);
-    const { data: r } = await supabase.from("restaurants").select("id,feature_flags").eq("id", restaurantId).maybeSingle();
-    const flags: any = (r as any)?.feature_flags || {};
-    const alerts = { ...(flags.stock_alerts || {}) };
-    delete alerts[item.id];
     const { error } = await supabase.from("menu_items").update({ stock_qty: newQty }).eq("id", item.id);
-    if (!error && r) {
-      await supabase.from("restaurants").update({ feature_flags: { ...flags, stock_alerts: alerts } }).eq("id", restaurantId);
-    }
+    if (!error) await clearStockAlert();
     setBusy(false);
     if (error) return toast.error(error.message);
     toast.success(`تم الضبط — متبقي ${newQty}`);
@@ -741,6 +744,7 @@ function EditItemDialog({ item, onSaved }: { item: MenuItem; onSaved: () => void
 
 const ORDER_STATUSES: { value: string; label: string }[] = [
   { value: "pending", label: "قيد الاستلام" },
+  { value: "scheduled", label: "مجدول" },
   { value: "confirmed", label: "مؤكد" },
   { value: "preparing", label: "قيد التحضير" },
   { value: "out_for_delivery", label: "بالطريق" },
@@ -826,9 +830,11 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
   }
 
   function nextStatus(cur: string): { value: string; label: string } | null {
+    // Values must exist in the DB order_status enum — "accepted" is not one of them.
     const flow: Record<string, { value: string; label: string }> = {
-      pending: { value: "accepted", label: "قبول" },
-      accepted: { value: "preparing", label: "بدء التحضير" },
+      pending: { value: "confirmed", label: "قبول" },
+      confirmed: { value: "preparing", label: "بدء التحضير" },
+      scheduled: { value: "confirmed", label: "قبول" },
       preparing: { value: "out_for_delivery", label: "بالطريق" },
       out_for_delivery: { value: "completed", label: "مكتمل" },
     };
@@ -969,7 +975,10 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
 
 function ConversationsTab({ restaurantId }: { restaurantId: string }) {
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URLSearchParams(window.location.search).get("conv");
+  });
   const [messages, setMessages] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "urgent">("all");

@@ -11,6 +11,7 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { retryFetch } from "../_shared/retry.ts";
+import { internalHeaders } from "../_shared/auth.ts";
 
 const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
 const TG_API = "https://api.telegram.org";
@@ -400,7 +401,7 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
   try {
     const r = await retryFetch(`${baseUrl}/functions/v1/agent-run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: internalHeaders(),
       body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
     }, { attempts: 2, label: "agent-run" });
     data = await r.json().catch(() => ({}));

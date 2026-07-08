@@ -2,6 +2,7 @@
 // then insert them into menu_items for the given restaurant.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
+import { getCallerUserId, internalHeaders, ownsRestaurant } from "../_shared/auth.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
 
@@ -100,6 +101,12 @@ Deno.serve(async (req) => {
     if (!restaurant_id) return json({ error: "restaurant_id required" }, 400);
     if (!Array.isArray(images) || images.length === 0) return json({ error: "images[] required" }, 400);
 
+    // verify_jwt only proves the caller is *some* logged-in user — make sure
+    // they actually own the restaurant they're inserting menu items into.
+    const uid = await getCallerUserId(req);
+    if (!uid) return json({ error: "unauthorized" }, 401);
+    if (!(await ownsRestaurant(uid, restaurant_id))) return json({ error: "forbidden" }, 403);
+
     const items = await extractFromImages(images);
     if (items.length === 0) return json({ ok: true, inserted: 0, items: [] });
 
@@ -122,7 +129,7 @@ Deno.serve(async (req) => {
     const baseUrl = Deno.env.get("SUPABASE_URL");
     fetch(`${baseUrl}/functions/v1/menu-embed`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: internalHeaders(),
       body: JSON.stringify({ restaurant_id }),
     }).catch(() => {});
 

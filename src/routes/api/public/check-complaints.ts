@@ -28,7 +28,9 @@ const TYPE_AR: Record<string, string> = {
 export const Route = createFileRoute("/api/public/check-complaints")({
   server: {
     handlers: {
-      POST: async () => {
+      POST: async ({ request }) => {
+        const { isAuthorizedCron, cronUnauthorized } = await import("@/lib/cron-auth");
+        if (!isAuthorizedCron(request)) return cronUnauthorized();
         const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
         const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY || "";
         const TELEGRAM_API_KEY = process.env.TELEGRAM_API_KEY || "";
