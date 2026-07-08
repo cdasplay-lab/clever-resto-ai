@@ -322,7 +322,7 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
   if (location && Number.isFinite(location.latitude) && Number.isFinite(location.longitude)) {
     const lat = location.latitude;
     const lng = location.longitude;
-    const locLine = `[موقع الزبون: lat=${lat}, lng=${lng}] https://maps.google.com/?q=${lat},${lng}`;
+    const locLine = `[موقع الزبون: lat=${lat}, lng=${lng}] https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
     userText = userText ? `${userText}\n${locLine}` : locLine;
   }
 

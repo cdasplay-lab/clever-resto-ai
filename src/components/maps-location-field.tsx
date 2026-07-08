@@ -1,13 +1,11 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MapPin, CheckCircle2, AlertCircle, LocateFixed, Search, Loader2 } from "lucide-react";
+import { MapPin, CheckCircle2, AlertCircle, Loader2, Map as MapIcon } from "lucide-react";
 import { parseMapsUrl, isShortMapsLink } from "@/lib/parse-maps-url";
-
-const LocationPickerMap = lazy(() =>
-  import("@/components/location-picker-map").then((m) => ({ default: m.LocationPickerMap })),
-);
+import { MapsLocationPicker } from "@/components/maps-location-picker";
+import { toast } from "sonner";
 
 type Props = {
   url: string | null;
@@ -16,154 +14,123 @@ type Props = {
   onChange: (url: string | null, lat: number | null, lng: number | null) => void;
 };
 
-/*
- * Location field, easiest path first:
- *  1. drag the pin on the map (or tap the map)
- *  2. "استخدم موقعي الحالي" via browser geolocation
- *  3. search by place name (Nominatim, free)
- *  4. paste a Google Maps link (kept as fallback for owners used to it)
- */
 export function MapsLocationField({ url, lat, lng, onChange }: Props) {
   const [value, setValue] = useState<string>(url ?? "");
   const [error, setError] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
-  const [busy, setBusy] = useState<"locate" | "search" | null>(null);
+  const [showMap, setShowMap] = useState<boolean>(lat == null || lng == null);
+  const [expanding, setExpanding] = useState(false);
 
-  const hasCoords = lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng);
+  const hasCoords = lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)
+    && (Math.abs(lat) > 0.001 || Math.abs(lng) > 0.001);
 
-  function pick(la: number, ln: number) {
-    setError(null);
-    const link = `https://maps.google.com/?q=${la},${ln}`;
-    setValue(link);
-    onChange(link, la, ln);
+
+  function commit(nextUrl: string | null, la: number | null, ln: number | null) {
+    onChange(nextUrl, la, ln);
   }
 
-  function useMyLocation() {
-    if (!("geolocation" in navigator)) {
-      setError("متصفحك ما يدعم تحديد الموقع.");
-      return;
-    }
-    setBusy("locate");
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setBusy(null);
-        pick(Math.round(pos.coords.latitude * 1e6) / 1e6, Math.round(pos.coords.longitude * 1e6) / 1e6);
-      },
-      () => {
-        setBusy(null);
-        setError("ما گدرنا نوصل لموقعك — تأكد من السماح للمتصفح بالوصول للموقع.");
-      },
-      { enableHighAccuracy: true, timeout: 10000 },
-    );
-  }
-
-  async function searchPlace() {
-    const q = query.trim();
-    if (!q) return;
-    setBusy("search");
-    setError(null);
-    try {
-      const r = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=iq&accept-language=ar&q=${encodeURIComponent(q)}`,
-      );
-      const arr = (await r.json()) as Array<{ lat: string; lon: string }>;
-      if (arr[0]) pick(Number(arr[0].lat), Number(arr[0].lon));
-      else setError("ما لگينا هذا المكان — جرّب اسم أوضح أو حدد الموقع بالخريطة.");
-    } catch {
-      setError("فشل البحث — جرّب مرة ثانية أو حدد الموقع بالخريطة مباشرة.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  function tryParse(next: string) {
+  async function tryParse(next: string) {
     setValue(next);
     setError(null);
     const trimmed = next.trim();
     if (!trimmed) {
-      onChange(null, null, null);
+      commit(null, null, null);
       return;
     }
     const parsed = parseMapsUrl(trimmed);
     if (parsed) {
-      onChange(trimmed, parsed.lat, parsed.lng);
+      commit(trimmed, parsed.lat, parsed.lng);
       return;
     }
-    // Couldn't parse — still save the URL so the customer gets a link,
-    // but warn about short links and missing coordinates.
+    // Short link → ask server to expand it
     if (isShortMapsLink(trimmed)) {
-      setError("هذا رابط مختصر. افتحه بالمتصفح ثم انسخ الرابط الكامل (اللي يحتوي إحداثيات) والصقه هنا.");
-    } else {
-      setError("ما كدرنا نستخرج الإحداثيات. تأكد إنه رابط Google Maps يحتوي موقع.");
+      setExpanding(true);
+      try {
+        const r = await fetch("/api/public/expand-maps-url", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: trimmed }),
+        });
+        const j = await r.json();
+        if (r.ok && Number.isFinite(j.lat) && Number.isFinite(j.lng)) {
+          commit(j.resolved || trimmed, j.lat, j.lng);
+          toast.success("تم استخراج الإحداثيات من الرابط المختصر");
+          return;
+        }
+        setError("ما كدرنا نفك الرابط المختصر. افتحه بالمتصفح ثم انسخ الرابط الكامل من شريط العنوان.");
+      } catch {
+        setError("خطأ اتصال بفك الرابط المختصر.");
+      } finally {
+        setExpanding(false);
+      }
+      commit(trimmed, null, null);
+      return;
     }
-    onChange(trimmed, null, null);
+    setError("ما كدرنا نستخرج الإحداثيات. تأكد إنه رابط Google Maps يحتوي موقع، أو استخدم الخريطة بالأعلى.");
+    commit(trimmed, null, null);
   }
 
   function clear() {
     setValue("");
-    setQuery("");
     setError(null);
-    onChange(null, null, null);
+    commit(null, null, null);
+  }
+
+  function onMapChange(la: number, ln: number) {
+    const generated = `https://www.google.com/maps/search/?api=1&query=${la.toFixed(6)},${ln.toFixed(6)}`;
+    setValue(generated);
+    setError(null);
+    commit(generated, la, ln);
   }
 
   return (
-    <div className="space-y-2">
-      <Suspense fallback={<div className="h-64 w-full animate-pulse rounded-lg border bg-muted" />}>
-        <LocationPickerMap lat={lat} lng={lng} onPick={pick} />
-      </Suspense>
-      <p className="text-xs text-muted-foreground">اضغط على الخريطة أو اسحب الدبوس لتحديد الموقع بدقة.</p>
-
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={useMyLocation} disabled={busy !== null}>
-          {busy === "locate" ? <Loader2 className="ml-1 h-3.5 w-3.5 animate-spin" /> : <LocateFixed className="ml-1 h-3.5 w-3.5" />}
-          استخدم موقعي الحالي
+    <div className="space-y-3">
+      {/* Interactive map (primary UX) */}
+      {showMap ? (
+        <MapsLocationPicker lat={lat} lng={lng} onChange={onMapChange} height={280} />
+      ) : (
+        <Button type="button" variant="outline" size="sm" onClick={() => setShowMap(true)} className="gap-1">
+          <MapIcon className="h-4 w-4" /> عدّل من الخريطة
         </Button>
-        <div className="flex min-w-0 flex-1 gap-2">
+      )}
+
+      {/* Manual URL paste (secondary) */}
+      <details className="rounded border p-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground">أو الصق رابط Google Maps يدوياً</summary>
+        <div className="mt-2 flex gap-2">
           <Input
-            className="h-8 text-sm"
-            placeholder="ابحث: مثلاً مطعم بيت بغداد، الكرادة"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                searchPlace();
-              }
-            }}
+            dir="ltr"
+            placeholder="https://maps.app.goo.gl/... أو https://www.google.com/maps/search/?api=1&query=lat,lng"
+            value={value}
+            onChange={(e) => tryParse(e.target.value)}
+            disabled={expanding}
           />
-          <Button type="button" variant="outline" size="sm" onClick={searchPlace} disabled={busy !== null}>
-            {busy === "search" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-          </Button>
+          {(value || hasCoords) && (
+            <Button type="button" variant="outline" size="sm" onClick={clear}>مسح</Button>
+          )}
+          {expanding && <Loader2 className="h-4 w-4 animate-spin self-center" />}
         </div>
-      </div>
+      </details>
 
-      <div className="flex gap-2">
-        <Input
-          dir="ltr"
-          className="h-8 text-xs"
-          placeholder="أو الصق رابط Google Maps هنا"
-          value={value}
-          onChange={(e) => tryParse(e.target.value)}
-        />
-        {(value || hasCoords) && (
-          <Button type="button" variant="outline" size="sm" onClick={clear}>مسح</Button>
-        )}
-      </div>
-
-      {hasCoords && (
+      {/* Confirmation / status */}
+      {hasCoords ? (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Badge variant="secondary" className="gap-1">
             <CheckCircle2 className="h-3 w-3 text-emerald-500" />
-            <span dir="ltr">{lat!.toFixed(6)}, {lng!.toFixed(6)}</span>
+            الموقع محفوظ <span dir="ltr" className="font-mono">{lat!.toFixed(5)}, {lng!.toFixed(5)}</span>
           </Badge>
           <a
-            href={`https://maps.google.com/?q=${lat},${lng}`}
+            href={`https://www.google.com/maps/search/?api=1&query=${lat},${lng}`}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-primary underline"
           >
-            <MapPin className="h-3 w-3" /> افتح بالخريطة
+            <MapPin className="h-3 w-3" /> افتح بالخريطة للتأكد
           </a>
+        </div>
+      ) : (
+        <div className="flex items-start gap-1 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400">
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>بدون تحديد موقع دقيق، الوكيل ما يقدر يرسل موقعك للزبون على الخريطة.</span>
         </div>
       )}
       {error && (

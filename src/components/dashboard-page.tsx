@@ -908,8 +908,8 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
                 const loc = o.meta?.customer_location;
                 const hasLoc = loc && Number.isFinite(loc.lat) && Number.isFinite(loc.lng);
                 const mapsUrl = hasLoc
-                  ? `https://maps.google.com/?q=${loc.lat},${loc.lng}`
-                  : (o.delivery_address ? `https://maps.google.com/?q=${encodeURIComponent(o.delivery_address)}` : null);
+                  ? `https://www.google.com/maps/search/?api=1&query=${loc.lat},${loc.lng}`
+                  : (o.delivery_address ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.delivery_address)}` : null);
                 return (
                 <div key={o.id} className="rounded-lg border p-3">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

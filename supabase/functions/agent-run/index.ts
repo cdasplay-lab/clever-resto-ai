@@ -19,9 +19,9 @@ const PER_TOOL_TIMEOUT_MS = 15_000;
 const MAX_CONSECUTIVE_TOOL_STEPS = 4; // bdoun nass mn al-model
 
 // --- Per-conversation lock (serializes concurrent runs on the same chat) ---
-const LOCK_TTL_SECONDS = 120;   // a run older than this is considered crashed
-const LOCK_MAX_WAIT_MS = 30_000; // how long a queued run waits for the lock
-const LOCK_POLL_MS = 400;
+const LOCK_TTL_SECONDS = 45;     // a run older than this is considered crashed
+const LOCK_MAX_WAIT_MS = 4_000;  // don't make customers wait 30s on a stale lock
+const LOCK_POLL_MS = 250;
 
 function sleepMs(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
@@ -35,6 +35,10 @@ async function acquireConversationLock(db: any, conversationId: string, token: s
       _conversation_id: conversationId, _token: token, _ttl_seconds: LOCK_TTL_SECONDS,
     });
     if (!error && data === true) return true;
+    if (error) {
+      console.warn("claim_conversation failed; continuing without lock", error?.message || error);
+      return false;
+    }
     if (Date.now() >= deadline) return false;
     await sleepMs(LOCK_POLL_MS);
   }
@@ -52,8 +56,6 @@ async function releaseConversationLock(db: any, conversationId: string | null, t
 // real-time alerts. Throttled per restaurant (warm-isolate memory) to avoid spam.
 const ALERT_THROTTLE_MS = 10 * 60 * 1000;
 const lastAlertAt = new Map<string, number>();
-// Throttle for the "customer asked for your location but it isn't set" owner nag.
-const lastLocationNagAt = new Map<string, number>();
 
 async function alertFatalError(restaurantId: string | null, message: string, conversationId: string | null) {
   try {
@@ -149,6 +151,75 @@ function normalizeArabic(input: string): string {
   // Collapse whitespace
   s = s.replace(/\s+/g, " ").trim();
   return s;
+}
+
+function includesAny(haystack: string, needles: string[]): boolean {
+  return needles.some((needle) => haystack.includes(needle));
+}
+
+function isRestaurantLocationRequest(text: string): boolean {
+  const n = normalizeArabic(text);
+  if (!n) return false;
+  return includesAny(n, [
+    "لوكيشن", "لوكشن", "الموقع", "موقعكم", "موقعك", "موقع المطعم",
+    "دزلي الموقع", "دزلي اللوكيشن", "ارسل الموقع", "ارسلي الموقع",
+    "وينكم", "وين انتو", "وين المطعم", "وين موقعكم", "اين موقعكم",
+    "العنوان", "عنوانكم", "خريطه", "خريطة", "ناونيشان", "نیشان",
+  ]);
+}
+
+function branchSearchText(branch: any): string {
+  return normalizeArabic([
+    branch?.name,
+    branch?.address,
+    String(branch?.name || "").replace(/^(فرع|الفرع)\s+/i, ""),
+  ].filter(Boolean).join(" "));
+}
+
+function parseBranchOrdinal(text: string, count: number): number | null {
+  const normalizedDigits = text
+    .replace(/[٠-٩]/g, (d) => String("٠١٢٣٤٥٦٧٨٩".indexOf(d)))
+    .replace(/[۰-۹]/g, (d) => String("۰۱۲۳۴۵۶۷۸۹".indexOf(d)));
+  const numeric = normalizedDigits.match(/(?:^|\s)(\d{1,2})(?:\s|$)/)?.[1];
+  if (numeric) {
+    const idx = Number(numeric) - 1;
+    if (idx >= 0 && idx < count) return idx;
+  }
+  const n = normalizeArabic(text);
+  const words: Array<[number, string[]]> = [
+    [0, ["اول", "الاول", "واحد", "اوله"]],
+    [1, ["ثاني", "الثاني", "اثنين", "اتنين"]],
+    [2, ["ثالث", "الثالث", "ثلاثه"]],
+    [3, ["رابع", "الرابع", "اربعه"]],
+  ];
+  for (const [idx, variants] of words) {
+    if (idx < count && variants.some((v) => n.includes(v))) return idx;
+  }
+  return null;
+}
+
+function inferBranchIdFromTexts(texts: string[], branches: any[]): string | null {
+  const active = branches.filter((b: any) => b.is_active);
+  if (!active.length) return null;
+
+  for (const raw of texts) {
+    const ordinal = parseBranchOrdinal(raw, active.length);
+    if (ordinal !== null) return active[ordinal]?.id || null;
+  }
+
+  const matches = new Set<string>();
+  for (const raw of texts) {
+    const n = normalizeArabic(raw);
+    if (!n) continue;
+    for (const b of active) {
+      const target = branchSearchText(b);
+      if (!target) continue;
+      const parts = target.split(" ").filter((p) => p.length >= 3 && p !== "فرع" && p !== "الفرع");
+      if (n.includes(target) || parts.some((p) => n.includes(p))) matches.add(b.id);
+    }
+    if (matches.size === 1) return Array.from(matches)[0];
+  }
+  return null;
 }
 
 type CartItem = {
@@ -481,8 +552,14 @@ const TOOLS = [
     type: "function",
     function: {
       name: "send_restaurant_location",
-      description: "أرسل موقع المطعم (أو الفرع المختار إذا تم تحديده) للزبون كنقطة جغرافية حقيقية. استخدمها لما يسأل الزبون 'وين موقعكم'، 'دزلي اللوكيشن'، 'فين المطعم'، أو يطلب يجي بنفسه (pickup).",
-      parameters: { type: "object", properties: {}, additionalProperties: false },
+      description: "أرسل موقع المطعم (أو فرع محدد) للزبون كنقطة جغرافية. لو المطعم عنده أكثر من فرع ولم يُحدَّد فرع بعد، اسأل الزبون أول شي (أو مرر branch_id إذا الزبون سمّى الفرع). لما ما يُحدد branch_id ويوجد أكثر من فرع، الأداة ترجع قائمة الفروع لتسأل الزبون.",
+      parameters: {
+        type: "object",
+        properties: {
+          branch_id: { type: "string", description: "اختياري: id فرع معيّن لإرسال موقعه." },
+        },
+        additionalProperties: false,
+      },
     },
   },
   {
@@ -871,6 +948,8 @@ ${branchRule}
 18) الموقع الجغرافي:
    • إذا الزبون سأل "وين موقعكم"، "دزلي اللوكيشن"، "فين المطعم"، "ناونيشان" (كردي = العنوان)، "ئەو لقە لە کوێیە"، أو يبي يجي بنفسه (pickup) → استدعِ send_restaurant_location مباشرة. لا تكتب الرابط/العنوان النصي بنفسك ولا تدّعي إنك أرسلت بن/نقطة على الخريطة بدون ما تستدعي الأداة فعلاً.
    • ممنوع تقول "أرسلت لك نقطة على Google Maps" أو "نيشانەیەکم بۆت نارد" إلا إذا استدعيت send_restaurant_location في نفس الرد. بدون استدعاء الأداة، اكتفِ بسطر قصير: "ثانية واحدة، أرسلك الموقع 📍" ثم استدعِ الأداة.
+   • إذا الزبون طلب الموقع مرة ثانية أو ثالثة ("ارجع دزلي"، "حاول مرة ثانية"، "ما وصلني") → استدعِ send_restaurant_location من جديد فوراً بدون تردد. الأداة تشتغل بشكل طبيعي في كل مرة.
+   • ممنوع منعاً باتاً تدّعي إن "الخريطة بيها خلل" أو "الموقع يرفض يمتثل" أو "Google Maps ما يشتغل" أو أي عذر تقني من هذا النوع. هذي أعذار كاذبة. إذا الأداة رجعت ok=true فالموقع اترسل فعلاً؛ إذا رجعت error فاتبع user_message الذي ترجعه الأداة بالضبط ولا تخترع عذراً.
    • إذا تحتاج عنوان توصيل ولم يعطك الزبون موقعاً واضحاً، أو وصفه النصي ناقص → استدعِ request_customer_location مرة واحدة فقط بدل ما تسأله سؤال نصي.
    • إذا الزبون شارك موقعه فعلاً (راح يجيك بصيغة "[موقع الزبون: lat=.., lng=..]") اعتبره عنوان التوصيل واستخدمه مع set_delivery_info كنص العنوان، وأكدله بسطر طبيعي مثل: "وصلني موقعك، شكراً 📍" بدون ما تكرر الإحداثيات.
 19) الرسائل الصوتية (قاعدة صارمة جداً):
@@ -2371,54 +2450,90 @@ async function runTool(
   }
 
   if (name === "send_restaurant_location") {
-    const branchId = conv.meta?.branch_id;
     const branches: any[] = (restaurant as any).__branches || [];
-    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    const activeBranches = branches.filter((b: any) => b.is_active);
+    const hasBranchCoords = (b: any) => {
+      const la = Number(b?.latitude), ln = Number(b?.longitude);
+      return Number.isFinite(la) && Number.isFinite(ln) && (Math.abs(la) > 0.001 || Math.abs(ln) > 0.001);
+    };
+
+    const requestedId = args.branch_id || conv.meta?.branch_id;
+    let branch: any = requestedId ? branches.find((b: any) => b.id === requestedId) : null;
+
+    // Multi-branch: if no branch chosen, ask the customer which one.
+    if (!branch && activeBranches.length > 1) {
+      const withCoords = activeBranches.filter(hasBranchCoords);
+      // If exactly one branch actually has coordinates, use it silently.
+      if (withCoords.length === 1) {
+        branch = withCoords[0];
+      } else {
+        return {
+          needs_branch_selection: true,
+          branches: activeBranches.map((b: any) => ({
+            id: b.id,
+            name: b.name,
+            address: b.address || null,
+            has_location: hasBranchCoords(b),
+          })),
+          user_message: `عندنا ${activeBranches.length} فروع. أي فرع تحب أدزلك موقعه؟\n` +
+            activeBranches.map((b: any, i: number) => `${i + 1}. ${b.name}${b.address ? ` — ${b.address}` : ""}`).join("\n"),
+          note: "اسأل الزبون يختار فرع بالاسم أو الرقم، ثم استدعِ send_restaurant_location مرة ثانية مع branch_id المناسب. لا ترسل أي موقع الآن.",
+        };
+      }
+    }
+
+    // Single active branch → use it. Otherwise fall back to restaurant.
+    if (!branch && activeBranches.length === 1) branch = activeBranches[0];
+
     const src: any = branch || restaurant;
     const lat = Number(src.latitude);
     const lng = Number(src.longitude);
-    const url = src.google_maps_url || (Number.isFinite(lat) && Number.isFinite(lng) ? `https://maps.google.com/?q=${lat},${lng}` : null);
-    if (!url) {
-      // Don't fail silently: nag the owner (throttled) so they learn customers
-      // are asking for a location that was never configured.
-      try {
-        const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
-        const now = Date.now();
-        if (LOVABLE_API_KEY && TELEGRAM_API_KEY && now - (lastLocationNagAt.get(conv.restaurant_id) || 0) > ALERT_THROTTLE_MS) {
-          lastLocationNagAt.set(conv.restaurant_id, now);
-          const { data: rr } = await db
-            .from("restaurants")
-            .select("owner_telegram_chat_id")
-            .eq("id", conv.restaurant_id)
-            .maybeSingle();
-          if (rr?.owner_telegram_chat_id) {
-            fetch("https://connector-gateway.lovable.dev/telegram/sendMessage", {
-              method: "POST",
-              headers: {
-                Authorization: `Bearer ${LOVABLE_API_KEY}`,
-                "X-Connection-Api-Key": TELEGRAM_API_KEY,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                chat_id: rr.owner_telegram_chat_id,
-                text: "⚠️ زبون طلب موقع مطعمك وما گدرنا ندزّه لأن الموقع مو محدد.\nافتح الداشبورد → الإعدادات وحدد الموقع على الخريطة (سحب دبوس — ثواني وحدة) حتى يوصل زبائنك دبوس حقيقي.",
-              }),
-            }).catch(() => {});
-          }
-        }
-      } catch (_) { /* alerting must never block the customer reply */ }
-      return { error: "no_location_set", user_message: "موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا للاستفسار." };
-    }
+    // Guard against (0,0) / near-zero — that's the Gulf of Guinea, not a real branch.
+    const hasCoords = Number.isFinite(lat) && Number.isFinite(lng)
+      && (Math.abs(lat) > 0.001 || Math.abs(lng) > 0.001);
+    const url = src.google_maps_url || (hasCoords ? `https://www.google.com/maps/search/?api=1&query=${lat},${lng}` : null);
+
     const label = branch
       ? (/^(فرع|الفرع)\b/.test(String(branch.name).trim()) ? branch.name : `فرع ${branch.name}`)
       : restaurant.name;
+
+    if (!hasCoords) {
+      // Nudge the owner so they fix the missing coords (throttled by alertFatalError-style dedupe below).
+      const ownerChat = (restaurant as any).owner_telegram_chat_id;
+      const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+      if (ownerChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+        const key = `no_loc:${restaurant.id}:${branch?.id || "main"}`;
+        const now = Date.now();
+        if (now - (lastAlertAt.get(key) || 0) > 30 * 60 * 1000) {
+          lastAlertAt.set(key, now);
+          fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+            method: "POST",
+            headers: {
+              "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+              "X-Connection-Api-Key": TELEGRAM_API_KEY,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              chat_id: ownerChat,
+              text: `⚠️ زبون طلب موقع ${label} ولا يوجد إحداثيات محفوظة.\nحدد الموقع من: لوحة التحكم → الفروع → تعديل → الخريطة.`,
+            }),
+          }).catch(() => {});
+        }
+      }
+      const phone = src.phone || (restaurant as any).phone;
+      const msg = phone
+        ? `موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا على ${phone}.`
+        : `موقعنا على الخريطة مو محدد بعد، اعتذر للزبون واقترح عليه إعطاء اسم شارع/منطقة.`;
+      return { error: "no_location_set", user_message: msg };
+    }
+
     const isTelegram = conv.channel === "telegram";
-    if (isTelegram && Number.isFinite(lat) && Number.isFinite(lng)) {
+    if (isTelegram) {
       actions.push({ type: "send_location", lat, lng, title: label, address: src.address || null });
     }
     return {
-      ok: true, lat: Number.isFinite(lat) ? lat : null, lng: Number.isFinite(lng) ? lng : null, url, label,
-      note: isTelegram && Number.isFinite(lat) && Number.isFinite(lng)
+      ok: true, lat, lng, url, label,
+      note: isTelegram
         ? `تم إرسال الموقع كخريطة. اكتب سطر قصير فقط مثل: "هذا موقع ${label} 📍".`
         : `اكتب للزبون: "هذا موقع ${label} 📍\n${url}".`,
     };
@@ -2678,6 +2793,46 @@ Deno.serve(async (req) => {
     // === /cancel shortcut: clear cart + pending confirmation without calling the model ===
     const lastUserMsg = [...cleanHistory].reverse().find((m) => m.role === "user");
     const lastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim().toLowerCase() : "";
+    const recentUserTexts = [...cleanHistory]
+      .reverse()
+      .filter((m) => m.role === "user" && typeof m.content === "string")
+      .slice(0, 6)
+      .map((m) => String(m.content));
+
+    // Deterministic location shortcut: do not leave this to the model. If the
+    // customer asks for the restaurant/branch location, send Telegram's native
+    // map pin immediately, even on repeat requests like "حاول مرة ثانية".
+    if (isRestaurantLocationRequest(lastUserText)) {
+      const inferredBranchId = inferBranchIdFromTexts(recentUserTexts, branches);
+      const result = await runTool(
+        db,
+        conv,
+        restaurant,
+        "send_restaurant_location",
+        inferredBranchId ? { branch_id: inferredBranchId } : {},
+        media,
+        actions,
+        customerProfile,
+      );
+
+      let reply = "";
+      if (result?.needs_branch_selection) {
+        reply = result.user_message || "أي فرع تحب أدزلك موقعه؟";
+      } else if (result?.error) {
+        reply = result.user_message || "موقعنا على الخريطة مو محدد بعد.";
+      } else {
+        if (inferredBranchId) {
+          await db.from("conversations").update({
+            meta: { ...(conv.meta || {}), branch_id: inferredBranchId },
+          }).eq("id", conversation_id);
+        }
+        reply = `هذا موقع ${result.label || restaurant.name} 📍`;
+      }
+
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: conv.state, media, actions, quick_replies: [] });
+    }
+
     if (["/cancel", "الغاء", "إلغاء", "الغاء الطلب", "إلغاء الطلب", "cancel"].includes(lastUserText)) {
       await db.from("conversations").update({
         cart: [],
