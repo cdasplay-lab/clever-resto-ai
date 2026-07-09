@@ -2138,7 +2138,7 @@ async function runTool(
       return {
         ok: false,
         covered: false,
-        user_message: "موقع الزبون خارج نطاق التوصيل لجميع الفروع. اعتذر بلطف، واعرض الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. سيُسجل الطلب كمنطقة مطلوبة للمالك تلقائياً عند المحاولة.",
+        user_message: "آسفين، موقعك خارج نطاق التوصيل حالياً. تقدر تستلم الطلب من المطعم إذا يناسبك.",
         branches: results,
       };
     }
