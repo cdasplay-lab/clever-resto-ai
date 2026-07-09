@@ -2871,9 +2871,9 @@ Deno.serve(async (req) => {
 
       let reply = "";
       if (result?.needs_branch_selection) {
-        reply = result.user_message || "أي فرع تحب أدزلك موقعه؟";
+        reply = safeCustomerText(result.user_message, "أي فرع تحب أدزلك موقعه؟");
       } else if (result?.error) {
-        reply = result.user_message || "موقعنا على الخريطة مو محدد بعد.";
+        reply = safeCustomerText(result.user_message, "موقعنا على الخريطة مو محدد بعد.");
       } else {
         if (inferredBranchId) {
           await db.from("conversations").update({
@@ -3029,6 +3029,10 @@ Deno.serve(async (req) => {
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
+      if (!msg.tool_calls?.length) {
+        msg.content = safeFinalReply(msg.content ?? "", actions, restaurant);
+      }
+
       // Persist assistant message
       await db.from("messages").insert({
         conversation_id,
@@ -3091,11 +3095,12 @@ Deno.serve(async (req) => {
 
           // Quick-reply buttons disabled — الزبون يرد نصياً
 
+          const safeResult = sanitizeToolResultForModel(result);
           const toolMsg = {
             role: "tool",
             tool_call_id: tc.id,
             name,
-            content: JSON.stringify(result),
+            content: JSON.stringify(safeResult),
           };
           await db.from("messages").insert({
             conversation_id,
@@ -3111,7 +3116,7 @@ Deno.serve(async (req) => {
 
       // Model produced a text reply -> reset counter and finish
       consecutiveToolSteps = 0;
-      finalText = msg.content ?? "";
+      finalText = safeFinalReply(msg.content ?? "", actions, restaurant);
       break;
     }
 
@@ -3129,6 +3134,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
+    finalText = safeFinalReply(finalText, actions, restaurant);
     return json({ reply: finalText, state: conv.state, media, actions, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";
