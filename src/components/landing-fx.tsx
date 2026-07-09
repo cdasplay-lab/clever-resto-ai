@@ -15,6 +15,123 @@ const isReduced = () =>
 const isTouch = () =>
   typeof window !== "undefined" && window.matchMedia("(max-width: 900px)").matches;
 
+/* ---------------- Cinematic hero video layer ----------------
+   Sits behind the Aurora canvas. Hides itself entirely when the asset is
+   missing or motion is reduced — Aurora alone remains the hero backdrop,
+   so the page never looks broken while assets are being produced. */
+
+export function HeroVideo({ src, poster }: { src: string; poster?: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const [ok, setOk] = useState(true);
+
+  useEffect(() => {
+    if (isReduced()) {
+      setOk(false);
+      return;
+    }
+    const v = ref.current;
+    if (!v) return;
+    // Same battery discipline as Aurora: play only on-screen + visible tab.
+    const io = new IntersectionObserver(([e]) => {
+      if (e.isIntersecting && !document.hidden) v.play().catch(() => {});
+      else v.pause();
+    });
+    io.observe(v);
+    const onVis = () => {
+      if (document.hidden) v.pause();
+      else if (v.getBoundingClientRect().bottom > 0) v.play().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      io.disconnect();
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  if (!ok) return null;
+  return (
+    <video
+      ref={ref}
+      className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-45"
+      src={src}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      autoPlay
+      aria-hidden
+      onError={() => setOk(false)}
+    />
+  );
+}
+
+/* ---------------- Dish showcase (AI-generated stills) ----------------
+   Neon gallery card: shows the generated photo when the asset exists,
+   falls back to a branded gradient + big glyph when it doesn't. */
+
+// Probe the asset off-screen and only mount the <img> once it actually
+// loaded — the browser's broken-image glyph must never flash.
+function useImageReady(src: string): boolean {
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const im = new Image();
+    im.onload = () => { if (alive) setReady(true); };
+    im.src = src;
+    return () => { alive = false; };
+  }, [src]);
+  return ready;
+}
+
+export function DishCard({ name, img, emoji }: { name: string; img: string; emoji: string }) {
+  const ready = useImageReady(img);
+  return (
+    <figure
+      className="group relative h-64 w-52 flex-none snap-center overflow-hidden rounded-3xl border sm:h-80 sm:w-64"
+      style={{ borderColor: "rgba(240,235,255,.1)", background: "linear-gradient(170deg, #241238, #120A20)" }}
+    >
+      {ready ? (
+        <img
+          src={img}
+          alt={name}
+          className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+        />
+      ) : (
+        <div className="absolute inset-0 grid place-items-center text-7xl" aria-hidden>
+          <span className="drop-shadow-[0_10px_30px_rgba(255,61,129,.45)]">{emoji}</span>
+        </div>
+      )}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{ background: "linear-gradient(180deg, transparent 45%, rgba(11,6,20,.92) 100%)" }}
+      />
+      <figcaption className="absolute inset-x-0 bottom-0 p-4 text-lg font-black" style={{ color: "#F2EEFF" }}>
+        {name}
+      </figcaption>
+    </figure>
+  );
+}
+
+/* Floating "3D" dish accent — hides itself when the asset is missing. */
+export function FloatingDish({ src, alt }: { src: string; alt: string }) {
+  const ready = useImageReady(src);
+  if (!ready) return null;
+  return (
+    <>
+      <img
+        src={src}
+        alt={alt}
+        className="fx-float pointer-events-none mx-auto w-56 max-w-full drop-shadow-[0_30px_60px_rgba(139,92,246,.35)] sm:w-72"
+      />
+      <style>{`
+        @keyframes fx-float{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-16px) rotate(2deg)}}
+        .fx-float{animation:fx-float 7s ease-in-out infinite}
+        @media (prefers-reduced-motion:reduce){.fx-float{animation:none}}
+      `}</style>
+    </>
+  );
+}
+
 /* ---------------- Aurora shader (hero background) ---------------- */
 
 const FRAG = `

@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { LandingFX, AuroraCanvas, RevealWords, LiveChatDemo, HeroExit, CinematicSteps } from "@/components/landing-fx";
+import { LandingFX, AuroraCanvas, RevealWords, LiveChatDemo, HeroExit, CinematicSteps, HeroVideo, DishCard, FloatingDish } from "@/components/landing-fx";
 import { Button } from "@/components/ui/button";
 import {
   Bot,
@@ -39,6 +39,7 @@ export const Route = createFileRoute("/")({
         content: "يرد على زبائنك، يستلم الطلبات، ويدير مطعمك تلقائياً 24/7.",
       },
       { property: "og:locale", content: "ar_IQ" },
+      { property: "og:image", content: "/landing/hero-poster.jpg" },
     ],
   }),
   component: Landing,
@@ -123,6 +124,7 @@ function Landing() {
 
       {/* ============================= HERO ============================= */}
       <section className="relative flex min-h-[92vh] flex-col items-center justify-center overflow-hidden px-4 text-center">
+        <HeroVideo src="/landing/hero.mp4" poster="/landing/hero-poster.jpg" />
         <AuroraCanvas />
         <div
           className="pointer-events-none absolute inset-0 z-[1]"
@@ -251,10 +253,31 @@ function Landing() {
             <LiveChatDemo />
           </div>
           <div className="space-y-6">
+            <FloatingDish src="/landing/dish-3d.png" alt="طبق عراقي" />
             <DemoPoint color={C.pink} title="يفهم العراقي عدل" text="«اريد اثنين برياني بس بلا بصل» — بحث ذكي يفهم الغلطات الإملائية والأسماء المحلية للأكلات." />
             <DemoPoint color={C.violet} title="يبيع أكثر منك" text="اقتراحات مدروسة بلحظتها حسب محتوى السلة — ترفع متوسط قيمة الطلب بدون إزعاج." />
             <DemoPoint color={C.cyan} title="ذاكرة زبون" text="يتذكر عنوان الزبون وطلباته السابقة، فيخدمه أسرع كل مرة يرجع بيها." />
           </div>
+        </div>
+      </section>
+
+      {/* ===================== DISH SHOWCASE ===================== */}
+      <section
+        className="relative z-[2] overflow-hidden border-y py-20"
+        style={{ borderColor: C.line, background: "rgba(18,10,32,.7)" }}
+      >
+        <div className="mx-auto max-w-6xl px-4">
+          <SectionHeader
+            eyebrow="من المطبخ"
+            title="الأكل بطل القصة"
+            subtitle="الوكيل يعرض المنيو بصور تفتح الشهية — والزبون يطلب من أول نظرة."
+          />
+        </div>
+        <div className="tabs-scroll mt-12 flex snap-x snap-mandatory gap-5 overflow-x-auto px-[max(1rem,calc((100vw-72rem)/2))] pb-2">
+          <DishCard name="برياني" img="/landing/dish-biryani.jpg" emoji="🍛" />
+          <DishCard name="مسگوف" img="/landing/dish-masgouf.jpg" emoji="🐟" />
+          <DishCard name="كباب" img="/landing/dish-kebab.jpg" emoji="🍢" />
+          <DishCard name="دولمة" img="/landing/dish-dolma.jpg" emoji="🥘" />
         </div>
       </section>
 
