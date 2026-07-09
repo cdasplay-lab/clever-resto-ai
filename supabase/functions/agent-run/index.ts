@@ -606,6 +606,60 @@ function detectComplaint(text: string): string | null {
   return null;
 }
 
+// Guardrails: tool notes and system instructions must never reach customers.
+const INTERNAL_REPLY_RE = /(استدعِ|استدعي|استدعاء|user_message|tool_call|tool result|JSON|branch_id|branch_required|confirmation_token|payment_method_required|customer_location_required|preview_order|submit_order|request_customer_location|send_restaurant_location|set_delivery_info|resolve_branch|handoff_to_human|السيستم|النظام|قاعدة البيانات|invalid input|error\s*:|اقترح للزبون|اقترح على الزبون|لا تؤكد|لا تأكد|مرّر|مرر|أداة|الأداة|الخريطة بيها خلل|الموقع يرفض|Google Maps ما يشتغل|كوكل ما يشتغل|غوغل ما يشتغل)/i;
+
+function hasInternalLeak(text: unknown): boolean {
+  return typeof text === "string" && INTERNAL_REPLY_RE.test(text);
+}
+
+function safeCustomerText(text: unknown, fallback = "صار خلل بسيط، ممكن نعيد المحاولة؟"): string {
+  const s = typeof text === "string" ? text.trim() : "";
+  if (!s) return fallback;
+  return hasInternalLeak(s) ? fallback : s;
+}
+
+function sanitizeToolResultForModel(value: any): any {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const cleaned: Record<string, any> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (["note", "instruction", "hint", "internal", "debug", "stack", "details"].includes(key)) continue;
+    if (key === "error") {
+      cleaned.ok = false;
+      continue;
+    }
+    if (key === "user_message") {
+      cleaned[key] = safeCustomerText(raw);
+      continue;
+    }
+    if (typeof raw === "string" && hasInternalLeak(raw)) continue;
+    cleaned[key] = raw;
+  }
+  return cleaned;
+}
+
+function sanitizeStoredMessageForModel(m: any): string | null {
+  if (m.role === "tool") {
+    try {
+      return JSON.stringify(sanitizeToolResultForModel(JSON.parse(m.content || "{}")));
+    } catch (_) {
+      return "{}";
+    }
+  }
+  if (m.role === "assistant" && hasInternalLeak(m.content)) {
+    return "صار خلل بسيط، ممكن نعيد المحاولة؟";
+  }
+  return m.content;
+}
+
+function safeFinalReply(text: string, actions: any[], restaurant: any): string {
+  const trimmed = (text || "").trim();
+  if (!hasInternalLeak(trimmed)) return trimmed;
+  if (actions.some((a: any) => a?.type === "send_location")) return `هذا موقع ${restaurant?.name || "المطعم"} 📍`;
+  if (actions.some((a: any) => a?.type === "request_location")) return "شارك موقعك من الزر اللي تحت حتى نتأكد من التوصيل 👇";
+  return "صار خلل بسيط، ممكن نعيد المحاولة؟";
+}
+
 const COMPLAINT_TYPE_AR: Record<string, string> = {
   late: "تأخير", cold: "طعام بارد", missing: "صنف ناقص",
   wrong: "طلب غلط", quality: "جودة سيئة", rude: "سوء معاملة", other: "شكوى عامة",
@@ -1392,7 +1446,7 @@ async function runTool(
     if (!delivery.payment_method) {
       return {
         error: "payment_method_required",
-        user_message: "اسأل الزبون قبل التأكيد: 'تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟' ثم استدعِ set_delivery_info مع payment_method (cash أو card_on_delivery) وبعدها preview_order مرة ثانية.",
+          user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟",
       };
     }
     const branchId = conv.meta?.branch_id || null;
@@ -1401,7 +1455,7 @@ async function runTool(
     if (!branchId && activeBranches.length > 1) {
       return {
         error: "branch_required",
-        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch بعنوان الزبون.",
+          user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد.",
         available_branches: activeBranches.map((b: any) => ({ id: b.id, name: b.name })),
       };
     }
@@ -1415,7 +1469,7 @@ async function runTool(
       if (!customerLocForCov || !Number.isFinite(customerLocForCov.lat) || !Number.isFinite(customerLocForCov.lng)) {
         return {
           error: "customer_location_required",
-          user_message: "يحتاج موقع الزبون الجغرافي حتى نتأكد إنه ضمن منطقة التوصيل. استدعِ request_customer_location مرة واحدة، وبعدها preview_order من جديد.",
+          user_message: "حتى نتأكد إن منطقتك ضمن التوصيل، شارك موقعك من الزر اللي تحت 👇",
         };
       }
       const covering = targetBranches.filter((b: any) => checkBranchCoverage(b, customerLocForCov).covered);
@@ -1438,8 +1492,8 @@ async function runTool(
         return {
           error: "out_of_coverage",
           user_message: fallback
-            ? `موقع الزبون خارج نطاق التوصيل لهذا الفرع، لكن فرع "${fallback.name}" يغطي منطقته. اعرض عليه التحويل لهذا الفرع، أو خيار الاستلام من المطعم (Pickup). لا تأكد توصيل ما لم يطلب الزبون استثناء صريح.`
-            : `موقع الزبون خارج نطاق التوصيل لكل فروعنا حالياً. اعتذر بلطف، واعرض عليه خيار الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. لا تأكد طلب توصيل.`,
+            ? `منطقتك خارج توصيل هذا الفرع، لكن فرع "${fallback.name}" يوصل لمنطقتك. تحب أحوّل الطلب عليه؟`
+            : `آسفين، منطقتك خارج نطاق التوصيل حالياً. تقدر تستلم الطلب من المطعم إذا يناسبك.`,
           alternate_branch: fallback ? { id: fallback.id, name: fallback.name } : null,
         };
       }
@@ -1648,13 +1702,13 @@ async function runTool(
     if (!branchId && activeBranches.length > 1) {
       return {
         error: "branch_required",
-        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد.",
+        user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد.",
       };
     }
     if (!delivery.payment_method) {
       return {
         error: "payment_method_required",
-        user_message: "اسأل الزبون عن طريقة الدفع (نقدي/بطاقة عند الاستلام) ثم set_delivery_info ثم preview_order من جديد.",
+        user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟",
       };
     }
     const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
@@ -1846,10 +1900,10 @@ async function runTool(
     const branchesAll: any[] = (restaurant as any).__branches || [];
     const activeBranches = branchesAll.filter((b: any) => b.is_active);
     if (!branchId && activeBranches.length > 1) {
-      return { error: "branch_required", user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد." };
+      return { error: "branch_required", user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد." };
     }
     if (!delivery.payment_method) {
-      return { error: "payment_method_required", user_message: "اسأل الزبون عن طريقة الدفع ثم set_delivery_info ثم preview_order من جديد." };
+      return { error: "payment_method_required", user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟" };
     }
     const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     if (currentFp !== pending.fp) {
@@ -2102,7 +2156,7 @@ async function runTool(
       return {
         ok: false,
         covered: false,
-        user_message: "موقع الزبون خارج نطاق التوصيل لجميع الفروع. اعتذر بلطف، واعرض الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. سيُسجل الطلب كمنطقة مطلوبة للمالك تلقائياً عند المحاولة.",
+        user_message: "آسفين، موقعك خارج نطاق التوصيل حالياً. تقدر تستلم الطلب من المطعم إذا يناسبك.",
         branches: results,
       };
     }
@@ -2777,7 +2831,7 @@ Deno.serve(async (req) => {
     const llmMessages: any[] = [
       { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
       ...cleanHistory.map((m) => {
-        const base: any = { role: m.role, content: m.content };
+        const base: any = { role: m.role, content: sanitizeStoredMessageForModel(m) };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
         if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
         if (m.name) base.name = m.name;
@@ -2835,9 +2889,9 @@ Deno.serve(async (req) => {
 
       let reply = "";
       if (result?.needs_branch_selection) {
-        reply = result.user_message || "أي فرع تحب أدزلك موقعه؟";
+        reply = safeCustomerText(result.user_message, "أي فرع تحب أدزلك موقعه؟");
       } else if (result?.error) {
-        reply = result.user_message || "موقعنا على الخريطة مو محدد بعد.";
+        reply = safeCustomerText(result.user_message, "موقعنا على الخريطة مو محدد بعد.");
       } else {
         if (inferredBranchId) {
           await db.from("conversations").update({
@@ -2993,6 +3047,12 @@ Deno.serve(async (req) => {
       const msg = resp.choices?.[0]?.message;
       if (!msg) break;
 
+      if (msg.tool_calls?.length && hasInternalLeak(msg.content ?? "")) {
+        msg.content = null;
+      } else if (!msg.tool_calls?.length) {
+        msg.content = safeFinalReply(msg.content ?? "", actions, restaurant);
+      }
+
       // Persist assistant message
       await db.from("messages").insert({
         conversation_id,
@@ -3055,11 +3115,12 @@ Deno.serve(async (req) => {
 
           // Quick-reply buttons disabled — الزبون يرد نصياً
 
+          const safeResult = sanitizeToolResultForModel(result);
           const toolMsg = {
             role: "tool",
             tool_call_id: tc.id,
             name,
-            content: JSON.stringify(result),
+            content: JSON.stringify(safeResult),
           };
           await db.from("messages").insert({
             conversation_id,
@@ -3075,7 +3136,7 @@ Deno.serve(async (req) => {
 
       // Model produced a text reply -> reset counter and finish
       consecutiveToolSteps = 0;
-      finalText = msg.content ?? "";
+      finalText = safeFinalReply(msg.content ?? "", actions, restaurant);
       break;
     }
 
@@ -3093,6 +3154,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
+    finalText = safeFinalReply(finalText, actions, restaurant);
     return json({ reply: finalText, state: conv.state, media, actions, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";
