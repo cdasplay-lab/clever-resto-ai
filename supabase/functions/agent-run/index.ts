@@ -624,6 +624,10 @@ function sanitizeToolResultForModel(value: any): any {
   const cleaned: Record<string, any> = {};
   for (const [key, raw] of Object.entries(value)) {
     if (["note", "instruction", "hint", "internal", "debug", "stack", "details"].includes(key)) continue;
+    if (key === "error") {
+      cleaned.ok = false;
+      continue;
+    }
     if (key === "user_message") {
       cleaned[key] = safeCustomerText(raw);
       continue;
