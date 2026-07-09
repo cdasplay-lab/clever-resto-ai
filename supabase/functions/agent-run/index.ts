@@ -634,6 +634,20 @@ function sanitizeToolResultForModel(value: any): any {
   return cleaned;
 }
 
+function sanitizeStoredMessageForModel(m: any): string | null {
+  if (m.role === "tool") {
+    try {
+      return JSON.stringify(sanitizeToolResultForModel(JSON.parse(m.content || "{}")));
+    } catch (_) {
+      return "{}";
+    }
+  }
+  if (m.role === "assistant" && hasInternalLeak(m.content)) {
+    return "صار خلل بسيط، ممكن نعيد المحاولة؟";
+  }
+  return m.content;
+}
+
 function safeFinalReply(text: string, actions: any[], restaurant: any): string {
   const trimmed = (text || "").trim();
   if (!hasInternalLeak(trimmed)) return trimmed;
@@ -2813,7 +2827,7 @@ Deno.serve(async (req) => {
     const llmMessages: any[] = [
       { role: "system", content: systemPrompt(restaurant, conv, branches, customerProfile) },
       ...cleanHistory.map((m) => {
-        const base: any = { role: m.role, content: m.content };
+        const base: any = { role: m.role, content: sanitizeStoredMessageForModel(m) };
         if (m.tool_calls) base.tool_calls = m.tool_calls;
         if (m.tool_call_id) base.tool_call_id = m.tool_call_id;
         if (m.name) base.name = m.name;
