@@ -606,6 +606,42 @@ function detectComplaint(text: string): string | null {
   return null;
 }
 
+// Guardrails: tool notes and system instructions must never reach customers.
+const INTERNAL_REPLY_RE = /(استدعِ|استدعي|استدعاء|user_message|tool_call|tool result|JSON|branch_id|confirmation_token|payment_method_required|customer_location_required|preview_order|submit_order|request_customer_location|send_restaurant_location|set_delivery_info|resolve_branch|handoff_to_human|السيستم|النظام|قاعدة البيانات|invalid input|error\s*:|اقترح للزبون|اقترح على الزبون|لا تؤكد|لا تأكد|مرّر|مرر|أداة|الأداة)/i;
+
+function hasInternalLeak(text: unknown): boolean {
+  return typeof text === "string" && INTERNAL_REPLY_RE.test(text);
+}
+
+function safeCustomerText(text: unknown, fallback = "صار خلل بسيط، ممكن نعيد المحاولة؟"): string {
+  const s = typeof text === "string" ? text.trim() : "";
+  if (!s) return fallback;
+  return hasInternalLeak(s) ? fallback : s;
+}
+
+function sanitizeToolResultForModel(value: any): any {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const cleaned: Record<string, any> = {};
+  for (const [key, raw] of Object.entries(value)) {
+    if (["note", "instruction", "hint", "internal", "debug", "stack", "details"].includes(key)) continue;
+    if (key === "user_message") {
+      cleaned[key] = safeCustomerText(raw);
+      continue;
+    }
+    if (typeof raw === "string" && hasInternalLeak(raw)) continue;
+    cleaned[key] = raw;
+  }
+  return cleaned;
+}
+
+function safeFinalReply(text: string, actions: any[], restaurant: any): string {
+  const trimmed = (text || "").trim();
+  if (!hasInternalLeak(trimmed)) return trimmed;
+  if (actions.some((a: any) => a?.type === "send_location")) return `هذا موقع ${restaurant?.name || "المطعم"} 📍`;
+  if (actions.some((a: any) => a?.type === "request_location")) return "شارك موقعك من الزر اللي تحت حتى نتأكد من التوصيل 👇";
+  return "صار خلل بسيط، ممكن نعيد المحاولة؟";
+}
+
 const COMPLAINT_TYPE_AR: Record<string, string> = {
   late: "تأخير", cold: "طعام بارد", missing: "صنف ناقص",
   wrong: "طلب غلط", quality: "جودة سيئة", rude: "سوء معاملة", other: "شكوى عامة",
