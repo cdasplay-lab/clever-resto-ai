@@ -1428,7 +1428,7 @@ async function runTool(
     if (!delivery.payment_method) {
       return {
         error: "payment_method_required",
-        user_message: "اسأل الزبون قبل التأكيد: 'تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟' ثم استدعِ set_delivery_info مع payment_method (cash أو card_on_delivery) وبعدها preview_order مرة ثانية.",
+          user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟",
       };
     }
     const branchId = conv.meta?.branch_id || null;
@@ -1437,7 +1437,7 @@ async function runTool(
     if (!branchId && activeBranches.length > 1) {
       return {
         error: "branch_required",
-        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch بعنوان الزبون.",
+          user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد.",
         available_branches: activeBranches.map((b: any) => ({ id: b.id, name: b.name })),
       };
     }
@@ -1451,7 +1451,7 @@ async function runTool(
       if (!customerLocForCov || !Number.isFinite(customerLocForCov.lat) || !Number.isFinite(customerLocForCov.lng)) {
         return {
           error: "customer_location_required",
-          user_message: "يحتاج موقع الزبون الجغرافي حتى نتأكد إنه ضمن منطقة التوصيل. استدعِ request_customer_location مرة واحدة، وبعدها preview_order من جديد.",
+          user_message: "حتى نتأكد إن منطقتك ضمن التوصيل، شارك موقعك من الزر اللي تحت 👇",
         };
       }
       const covering = targetBranches.filter((b: any) => checkBranchCoverage(b, customerLocForCov).covered);
@@ -1474,8 +1474,8 @@ async function runTool(
         return {
           error: "out_of_coverage",
           user_message: fallback
-            ? `موقع الزبون خارج نطاق التوصيل لهذا الفرع، لكن فرع "${fallback.name}" يغطي منطقته. اعرض عليه التحويل لهذا الفرع، أو خيار الاستلام من المطعم (Pickup). لا تأكد توصيل ما لم يطلب الزبون استثناء صريح.`
-            : `موقع الزبون خارج نطاق التوصيل لكل فروعنا حالياً. اعتذر بلطف، واعرض عليه خيار الاستلام من المطعم (Pickup) — استدعِ send_restaurant_location لو وافق. لا تأكد طلب توصيل.`,
+            ? `منطقتك خارج توصيل هذا الفرع، لكن فرع "${fallback.name}" يوصل لمنطقتك. تحب أحوّل الطلب عليه؟`
+            : `آسفين، منطقتك خارج نطاق التوصيل حالياً. تقدر تستلم الطلب من المطعم إذا يناسبك.`,
           alternate_branch: fallback ? { id: fallback.id, name: fallback.name } : null,
         };
       }
@@ -1684,13 +1684,13 @@ async function runTool(
     if (!branchId && activeBranches.length > 1) {
       return {
         error: "branch_required",
-        user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد.",
+        user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد.",
       };
     }
     if (!delivery.payment_method) {
       return {
         error: "payment_method_required",
-        user_message: "اسأل الزبون عن طريقة الدفع (نقدي/بطاقة عند الاستلام) ثم set_delivery_info ثم preview_order من جديد.",
+        user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟",
       };
     }
     const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
