@@ -1882,10 +1882,10 @@ async function runTool(
     const branchesAll: any[] = (restaurant as any).__branches || [];
     const activeBranches = branchesAll.filter((b: any) => b.is_active);
     if (!branchId && activeBranches.length > 1) {
-      return { error: "branch_required", user_message: "لازم نحدد الفرع أولاً. استدعِ resolve_branch ثم preview_order من جديد." };
+      return { error: "branch_required", user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد." };
     }
     if (!delivery.payment_method) {
-      return { error: "payment_method_required", user_message: "اسأل الزبون عن طريقة الدفع ثم set_delivery_info ثم preview_order من جديد." };
+      return { error: "payment_method_required", user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟" };
     }
     const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
     if (currentFp !== pending.fp) {
