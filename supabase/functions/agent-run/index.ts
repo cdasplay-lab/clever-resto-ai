@@ -607,7 +607,7 @@ function detectComplaint(text: string): string | null {
 }
 
 // Guardrails: tool notes and system instructions must never reach customers.
-const INTERNAL_REPLY_RE = /(استدعِ|استدعي|استدعاء|user_message|tool_call|tool result|JSON|branch_id|branch_required|confirmation_token|payment_method_required|customer_location_required|preview_order|submit_order|request_customer_location|send_restaurant_location|set_delivery_info|resolve_branch|handoff_to_human|السيستم|النظام|قاعدة البيانات|invalid input|error\s*:|اقترح للزبون|اقترح على الزبون|لا تؤكد|لا تأكد|مرّر|مرر|أداة|الأداة)/i;
+const INTERNAL_REPLY_RE = /(استدعِ|استدعي|استدعاء|user_message|tool_call|tool result|JSON|branch_id|branch_required|confirmation_token|payment_method_required|customer_location_required|preview_order|submit_order|request_customer_location|send_restaurant_location|set_delivery_info|resolve_branch|handoff_to_human|السيستم|النظام|قاعدة البيانات|invalid input|error\s*:|اقترح للزبون|اقترح على الزبون|لا تؤكد|لا تأكد|مرّر|مرر|أداة|الأداة|الخريطة بيها خلل|الموقع يرفض|Google Maps ما يشتغل|كوكل ما يشتغل|غوغل ما يشتغل)/i;
 
 function hasInternalLeak(text: unknown): boolean {
   return typeof text === "string" && INTERNAL_REPLY_RE.test(text);
