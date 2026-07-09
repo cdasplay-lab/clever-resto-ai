@@ -2485,7 +2485,19 @@ async function runTool(
     // Single active branch → use it. Otherwise fall back to restaurant.
     if (!branch && activeBranches.length === 1) branch = activeBranches[0];
 
-    const src: any = branch || restaurant;
+    // Coordinate fallback chain: chosen branch → restaurant (settings screen)
+    // → any other active branch with coords. A branch saved without coordinates
+    // must not shadow a location the owner configured elsewhere.
+    let src: any = branch || restaurant;
+    if (!hasBranchCoords(src)) {
+      if (hasBranchCoords(restaurant)) {
+        src = restaurant;
+        branch = null;
+      } else {
+        const alt = activeBranches.find(hasBranchCoords);
+        if (alt) { src = alt; branch = alt; }
+      }
+    }
     const lat = Number(src.latitude);
     const lng = Number(src.longitude);
     // Guard against (0,0) / near-zero — that's the Gulf of Guinea, not a real branch.
@@ -2520,11 +2532,17 @@ async function runTool(
           }).catch(() => {});
         }
       }
+      // user_message must be customer-facing text only — the model tends to
+      // forward it verbatim, so instructions belong in note.
       const phone = src.phone || (restaurant as any).phone;
       const msg = phone
-        ? `موقعنا على الخريطة مو محدد بعد، تكدر تتصل بينا على ${phone}.`
-        : `موقعنا على الخريطة مو محدد بعد، اعتذر للزبون واقترح عليه إعطاء اسم شارع/منطقة.`;
-      return { error: "no_location_set", user_message: msg };
+        ? `عذراً، موقعنا مو محدد على الخريطة حالياً 🙏 تگدر تتصل بينا على ${phone}.`
+        : `عذراً، موقعنا مو محدد على الخريطة حالياً 🙏 إذا تحب نوصلّك، اكتبلنا اسم الشارع والمنطقة وإحنا نتدبرها.`;
+      return {
+        error: "no_location_set",
+        user_message: msg,
+        note: "أرسل user_message كما هي أو بصياغة قريبة. لا تعد الزبون بإرسال موقع، ولا تذكر السيستم أو الإعدادات.",
+      };
     }
 
     const isTelegram = conv.channel === "telegram";
