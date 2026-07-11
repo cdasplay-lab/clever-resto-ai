@@ -931,7 +931,9 @@ export type Database = {
           telegram_bot_username: string | null
           tone: string
           updated_at: string
+          whatsapp_business_account_id: string | null
           whatsapp_number: string | null
+          whatsapp_phone_number_id: string | null
         }
         Insert: {
           created_at?: string
@@ -961,7 +963,9 @@ export type Database = {
           telegram_bot_username?: string | null
           tone?: string
           updated_at?: string
+          whatsapp_business_account_id?: string | null
           whatsapp_number?: string | null
+          whatsapp_phone_number_id?: string | null
         }
         Update: {
           created_at?: string
@@ -991,7 +995,9 @@ export type Database = {
           telegram_bot_username?: string | null
           tone?: string
           updated_at?: string
+          whatsapp_business_account_id?: string | null
           whatsapp_number?: string | null
+          whatsapp_phone_number_id?: string | null
         }
         Relationships: []
       }
