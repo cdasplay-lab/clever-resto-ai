@@ -1496,13 +1496,128 @@ function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
       </Card>
 
       <TelegramConnectCard restaurant={restaurant} />
+      <WhatsAppConnectCard restaurant={restaurant} />
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <SimpleChannelCard restaurant={restaurant} channel="whatsapp" />
         <SimpleChannelCard restaurant={restaurant} channel="instagram" />
         <SimpleChannelCard restaurant={restaurant} channel="facebook" />
       </div>
     </div>
+  );
+}
+
+function WhatsAppConnectCard({ restaurant }: { restaurant: Restaurant }) {
+  const [phoneId, setPhoneId] = useState("");
+  const [waNumber, setWaNumber] = useState("");
+  const [savedId, setSavedId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase
+        .from("restaurants")
+        .select("whatsapp_phone_number_id, whatsapp_number")
+        .eq("id", restaurant.id)
+        .maybeSingle();
+      if (!data) return;
+      const pid = (data as any).whatsapp_phone_number_id || "";
+      setPhoneId(pid);
+      setSavedId(pid || null);
+      setWaNumber((data as any).whatsapp_number || "");
+    })();
+  }, [restaurant.id]);
+
+  async function save() {
+    const pid = phoneId.trim().replace(/\D/g, "");
+    if (!pid) return toast.error("ادخل Phone number ID من Meta");
+    setBusy(true);
+    const { error } = await supabase
+      .from("restaurants")
+      .update({
+        whatsapp_phone_number_id: pid,
+        whatsapp_number: waNumber.trim().replace(/[^\d+]/g, "") || null,
+      } as any)
+      .eq("id", restaurant.id);
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    setSavedId(pid);
+    toast.success("تم ربط رقم واتساب بالمطعم");
+  }
+
+  async function disconnect() {
+    setBusy(true);
+    const { error } = await supabase
+      .from("restaurants")
+      .update({ whatsapp_phone_number_id: null } as any)
+      .eq("id", restaurant.id);
+    setBusy(false);
+    if (error) return toast.error(error.message);
+    setSavedId(null);
+    setPhoneId("");
+    toast.success("تم الفصل");
+  }
+
+  const connected = !!savedId;
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <Phone className="h-5 w-5" />
+          </div>
+          <div>
+            <CardTitle className="text-base">WhatsApp Cloud API</CardTitle>
+            <CardDescription className="text-xs">
+              {connected ? <>مربوط — <span dir="ltr" className="font-mono">{savedId}</span></> : "غير مربوط"}
+            </CardDescription>
+          </div>
+        </div>
+        {connected && (
+          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
+          </Badge>
+        )}
+      </CardHeader>
+
+      <CardContent className="space-y-3">
+        <div className="space-y-2">
+          <Label className="text-xs">Phone number ID (من Meta → WhatsApp → API Setup)</Label>
+          <Input
+            placeholder="1106797942497330"
+            value={phoneId}
+            onChange={(e) => setPhoneId(e.target.value)}
+            dir="ltr"
+            autoComplete="off"
+          />
+        </div>
+        <div className="space-y-2">
+          <Label className="text-xs">رقم الواتساب المعروض (اختياري)</Label>
+          <Input
+            placeholder="+9647712345678"
+            value={waNumber}
+            onChange={(e) => setWaNumber(e.target.value)}
+            dir="ltr"
+          />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={save} disabled={busy}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : (<><Link2 className="h-4 w-4 ml-1" /> حفظ الربط</>)}
+          </Button>
+          {connected && (
+            <Button variant="destructive" onClick={disconnect} disabled={busy}>فصل</Button>
+          )}
+        </div>
+        <div className="rounded border border-muted p-3 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground">وين ألگه Phone number ID؟</p>
+          <ol className="list-decimal pr-4 space-y-1">
+            <li>افتح <span dir="ltr" className="font-mono">developers.facebook.com</span> → تطبيقك → WhatsApp → API Setup.</li>
+            <li>انسخ قيمة <span dir="ltr" className="font-mono">Phone number ID</span> والصقها هنا.</li>
+            <li>تأكد إن الـ Callback URL و <span dir="ltr" className="font-mono">messages</span> مشترك عليها بالـ Webhook.</li>
+          </ol>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
