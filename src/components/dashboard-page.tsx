@@ -200,7 +200,7 @@ function RestaurantManager({
   // ?tab=conversations&conv=<id>). Renders client-side only (behind auth),
   // so reading location in the initializer is hydration-safe.
   const [tab, setTab] = useState(() => {
-    if (typeof window === "undefined") return "menu";
+    if (typeof window === "undefined") return "overview";
     return new URLSearchParams(window.location.search).get("tab") || "overview";
   });
   return (
