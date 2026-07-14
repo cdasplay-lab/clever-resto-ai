@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil, MapPin, ArrowRight } from "lucide-react";
+import { Loader2, Copy, LogOut, Plus, Trash2, Search, MessageSquare, Send, Instagram, Facebook, Phone, Link2, CheckCircle2, Radio, Pencil, MapPin, ArrowRight, Bell, ChevronDown } from "lucide-react";
 import { MapsLocationField } from "@/components/maps-location-field";
 import { mergeFeatureFlags } from "@/lib/feature-flags";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
+import { MadaLogo } from "@/components/mada-logo";
 
 // Lazy-load every secondary tab — they each load only when the user opens them.
 // Massively reduces initial JS bundle for the dashboard.
@@ -29,6 +30,7 @@ const MarketingTab = lazy(() => import("@/components/marketing-tab").then((m) =>
 const CombosTab = lazy(() => import("@/components/combos-tab").then((m) => ({ default: m.CombosTab })));
 const AnalyticsTab = lazy(() => import("@/components/analytics-tab").then((m) => ({ default: m.AnalyticsTab })));
 const ComplaintsTab = lazy(() => import("@/components/complaints-tab").then((m) => ({ default: m.ComplaintsTab })));
+const OverviewTab = lazy(() => import("@/components/overview-tab"));
 
 function TabFallback() {
   // Skeleton "feels" faster than a spinner — show the shape of content while the chunk loads.
@@ -199,30 +201,40 @@ function RestaurantManager({
   // so reading location in the initializer is hydration-safe.
   const [tab, setTab] = useState(() => {
     if (typeof window === "undefined") return "menu";
-    return new URLSearchParams(window.location.search).get("tab") || "menu";
+    return new URLSearchParams(window.location.search).get("tab") || "overview";
   });
   return (
-    <div className="min-h-screen bg-background p-3 pt-safe pb-20 md:p-6 md:pb-6" dir="rtl">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-4 flex items-center justify-between gap-2 md:mb-6">
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-xl font-bold md:text-2xl">{restaurant.name}</h1>
-            <p className="hidden text-sm text-muted-foreground md:block">لوحة إدارة الـ AI Agent</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-1 md:gap-2">
-            <ThemeToggle />
-            <Button variant="ghost" size="icon" onClick={onLogout} aria-label="خروج" className="md:hidden">
-              <LogOut className="h-5 w-5" />
+    <div className="mada-app min-h-screen bg-background px-3 pb-24 pt-safe sm:px-5 md:px-7 md:pb-8" dir="rtl">
+      <div className="mx-auto max-w-6xl">
+        <header className="mb-4 flex items-center justify-between gap-3 border-b border-border/65 py-3 md:mb-6 md:py-4">
+          <MadaLogo compact />
+          <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
+            <Button variant="ghost" size="icon" aria-label="الإشعارات" className="relative rounded-full">
+              <Bell className="h-5 w-5" />
+              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border-2 border-background bg-destructive" />
             </Button>
-            <Button variant="ghost" onClick={onLogout} className="hidden md:inline-flex">
+            <ThemeToggle />
+            <Button variant="ghost" onClick={onLogout} className="hidden rounded-full px-3 md:inline-flex">
               <LogOut className="ml-2 h-4 w-4" />خروج
             </Button>
           </div>
-        </div>
+        </header>
+
+        <section className="mb-4 flex items-end justify-between gap-3 rounded-[1.65rem] bg-card/65 px-4 py-4 shadow-[0_18px_50px_-45px_oklch(0.3_0.05_150/0.5)] md:mb-6 md:px-6 md:py-5">
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground">مرحباً، أهلاً برجعتك 👋</p>
+            <h1 className="mt-1 truncate text-xl font-bold md:text-2xl">{restaurant.name}</h1>
+            <p className="mt-1 hidden text-xs text-muted-foreground sm:block">إليك ملخص نشاط مطعمك اليوم</p>
+          </div>
+          <Button variant="outline" size="sm" className="shrink-0 rounded-full bg-background/80" onClick={() => setTab("settings")}>
+            مطعمك <ChevronDown className="h-3.5 w-3.5" />
+          </Button>
+        </section>
 
         <Tabs value={tab} onValueChange={setTab} dir="rtl">
           {/* Desktop tabs — on mobile we use the bottom nav below */}
-          <TabsList className="mb-4 hidden md:inline-flex">
+          <TabsList className="tabs-scroll mb-6 hidden h-auto w-full justify-start gap-1 rounded-2xl bg-card p-1.5 shadow-sm md:flex">
+            <TabsTrigger value="overview">الرئيسية</TabsTrigger>
             <TabsTrigger value="menu">المنيو</TabsTrigger>
             <TabsTrigger value="branches">الفروع</TabsTrigger>
             <TabsTrigger value="orders">الطلبات</TabsTrigger>
@@ -240,6 +252,7 @@ function RestaurantManager({
             <TabsTrigger value="settings">الإعدادات</TabsTrigger>
           </TabsList>
 
+          <TabsContent value="overview"><Suspense fallback={<TabFallback />}><OverviewTab restaurantId={restaurant.id} currency={restaurant.currency} onNavigate={setTab} /></Suspense></TabsContent>
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="branches"><Suspense fallback={<TabFallback />}><BranchesTab restaurantId={restaurant.id} /></Suspense></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
@@ -268,6 +281,8 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
   const [items, setItems] = useState<MenuItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [adding, setAdding] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("الكل");
 
   async function load() {
     const { data } = await supabase
@@ -392,8 +407,24 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
     }
   }
 
+  const categories = ["الكل", ...Array.from(new Set(items.map((item) => item.category).filter((value): value is string => !!value)))];
+  const visibleItems = items.filter((item) => {
+    const matchesCategory = categoryFilter === "الكل" || item.category === categoryFilter;
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch = !query || item.name.toLowerCase().includes(query) || (item.description || "").toLowerCase().includes(query);
+    return matchesCategory && matchesSearch;
+  });
+
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold md:text-2xl">المنتجات</h2>
+          <p className="mt-1 text-xs text-muted-foreground">إدارة المنيو، الأسعار، الصور والمخزون</p>
+        </div>
+        <div className="rounded-full bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary">{items.length} منتج</div>
+      </div>
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <CardTitle>إضافة صنف</CardTitle>
@@ -425,6 +456,30 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
         </CardContent>
       </Card>
 
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+            placeholder="ابحث عن منتج..."
+            className="h-12 rounded-2xl bg-card pr-11"
+          />
+        </div>
+        <div className="tabs-scroll flex gap-2 pb-1">
+          {categories.map((category) => (
+            <button
+              key={category}
+              type="button"
+              onClick={() => setCategoryFilter(category)}
+              className={`shrink-0 rounded-full border px-4 py-2 text-xs font-medium transition-colors ${categoryFilter === category ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/30"}`}
+            >
+              {category}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>المنيو ({items.length})</CardTitle>
@@ -433,36 +488,34 @@ function MenuTab({ restaurantId }: { restaurantId: string }) {
         <CardContent>
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : items.length === 0 ? (
             <p className="text-sm text-muted-foreground">لا يوجد أصناف بعد</p>
+          ) : visibleItems.length === 0 ? (
+            <p className="rounded-2xl bg-muted/40 p-8 text-center text-sm text-muted-foreground">ما لكينا منتج يطابق بحثك</p>
           ) : (
             <div className="space-y-2">
-              {items.map((it) => (
-                <div key={it.id} className="rounded-lg border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-3 min-w-0">
+              {visibleItems.map((it) => (
+                <div key={it.id} className="rounded-2xl border border-border/70 bg-background/55 p-3 transition-colors hover:border-primary/20">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 w-full items-center gap-3">
                       {it.image_url ? (
-                        <img src={it.image_url} alt={it.name} className="h-14 w-14 rounded object-cover" />
+                        <img src={it.image_url} alt={it.name} className="h-20 w-20 shrink-0 rounded-2xl object-cover sm:h-16 sm:w-16" />
                       ) : (
-                        <div className="h-14 w-14 rounded bg-muted flex items-center justify-center text-xs text-muted-foreground">لا صورة</div>
+                        <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-muted text-xs text-muted-foreground sm:h-16 sm:w-16">لا صورة</div>
                       )}
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="font-medium truncate">{it.name} {it.category && <Badge variant="secondary" className="mr-2">{it.category}</Badge>}{Array.isArray(it.options) && it.options.length > 0 && <Badge variant="outline" className="mr-2">{it.options.length} خيارات</Badge>}</div>
                         {it.description && <div className="text-sm text-muted-foreground truncate">{it.description}</div>}
+                        <div className="mt-1 font-bold text-primary">{Number(it.price).toLocaleString("ar-IQ")} د.ع</div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="font-mono">{it.price}</div>
+                    <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
                       {!it.is_available && <Badge variant="destructive">خلصان</Badge>}
-                      <Button
-                        variant={it.is_available ? "outline" : "default"}
-                        size="sm"
-                        onClick={() => toggleAvailable(it)}
-                        title={it.is_available ? "ضع كخلصان" : "أعد توفيره"}
-                      >
-                        {it.is_available ? "خلصان" : "متوفر"}
-                      </Button>
+                      <label className="flex items-center gap-2 rounded-xl border bg-card px-2.5 py-1.5 text-xs">
+                        <Switch checked={it.is_available} onCheckedChange={() => toggleAvailable(it)} />
+                        {it.is_available ? "متوفر" : "غير متوفر"}
+                      </label>
                       <label className="cursor-pointer">
                         <input type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) setItemImage(it, f); e.currentTarget.value = ""; }} />
-                        <span className="inline-flex h-9 items-center rounded-md border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
+                        <span className="inline-flex h-9 items-center rounded-xl border px-2 text-xs hover:bg-accent">{it.image_url ? "تغيير الصورة" : "رفع صورة"}</span>
                       </label>
                       {it.image_url && <Button variant="ghost" size="sm" onClick={() => removeItemImage(it)}>حذف الصورة</Button>}
                       <EditItemDialog item={it} onSaved={load} />

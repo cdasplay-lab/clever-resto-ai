@@ -74,15 +74,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1, viewport-fit=cover" },
-      { title: "مطعمي AI — موظف ذكاء اصطناعي يستلم طلبات مطعمك 24/7" },
+      { title: "Mada — منصة إدارة المطاعم الذكية" },
       { name: "description", content: "وكيل ذكاء اصطناعي للمطاعم في العراق والشرق الأوسط: يستقبل رسائل الزبائن على تيليجرام وواتساب، يفهم الطلب، يؤكّد التوصيل، ويرسل الطلب للوحة التحكم — بلهجتك المحلية." },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "مطعمي AI — موظف ذكاء اصطناعي يستلم طلبات مطعمك 24/7" },
+      { name: "author", content: "Mada" },
+      { property: "og:title", content: "Mada — منصة إدارة المطاعم الذكية" },
       { property: "og:description", content: "وكيل ذكاء اصطناعي للمطاعم في العراق والشرق الأوسط: يستقبل رسائل الزبائن على تيليجرام وواتساب، يفهم الطلب، يؤكّد التوصيل، ويرسل الطلب للوحة التحكم — بلهجتك المحلية." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
-      { name: "twitter:title", content: "مطعمي AI — موظف ذكاء اصطناعي يستلم طلبات مطعمك 24/7" },
+      { name: "twitter:title", content: "Mada — منصة إدارة المطاعم الذكية" },
       { name: "twitter:description", content: "وكيل ذكاء اصطناعي للمطاعم في العراق والشرق الأوسط: يستقبل رسائل الزبائن على تيليجرام وواتساب، يفهم الطلب، يؤكّد التوصيل، ويرسل الطلب للوحة التحكم — بلهجتك المحلية." },
       { property: "og:image", content: "/landing/hero-poster.jpg" },
       { name: "twitter:image", content: "/landing/hero-poster.jpg" },
@@ -110,7 +109,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 
 function RootShell({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="ar" dir="rtl">
       <head>
         <HeadContent />
       </head>
