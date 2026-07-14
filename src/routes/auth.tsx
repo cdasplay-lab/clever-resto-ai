@@ -71,7 +71,7 @@ function AuthPage() {
     setOauthLoading(provider);
     try {
       const result = await lovable.auth.signInWithOAuth(provider, {
-        redirect_uri: window.location.origin + "/dashboard",
+        redirect_uri: window.location.origin,
       });
       if (result.error) {
         toast.error(result.error.message ?? "فشل تسجيل الدخول");
@@ -85,6 +85,7 @@ function AuthPage() {
       setOauthLoading(null);
     }
   }
+
 
   return (
     <div className="mada-auth relative min-h-screen overflow-hidden bg-background px-4 py-8 sm:px-6 lg:px-10" dir="rtl">
