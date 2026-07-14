@@ -66,7 +66,7 @@ export function HeroVideo({ src, poster }: { src: string; poster?: string }) {
 }
 
 /* ---------------- Dish showcase (AI-generated stills) ----------------
-   Neon gallery card: shows the generated photo when the asset exists,
+   Mada gallery card: shows the generated photo when the asset exists,
    falls back to a branded gradient + big glyph when it doesn't. */
 
 // Probe the asset off-screen and only mount the <img> once it actually
@@ -88,7 +88,7 @@ export function DishCard({ name, img, emoji }: { name: string; img: string; emoj
   return (
     <figure
       className="group relative h-64 w-52 flex-none snap-center overflow-hidden rounded-3xl border sm:h-80 sm:w-64"
-      style={{ borderColor: "rgba(240,235,255,.1)", background: "linear-gradient(170deg, #241238, #120A20)" }}
+      style={{ borderColor: "rgba(247,243,232,.1)", background: "linear-gradient(170deg, #183126, #12281E)" }}
     >
       {ready ? (
         <img
@@ -98,14 +98,14 @@ export function DishCard({ name, img, emoji }: { name: string; img: string; emoj
         />
       ) : (
         <div className="absolute inset-0 grid place-items-center text-7xl" aria-hidden>
-          <span className="drop-shadow-[0_10px_30px_rgba(255,61,129,.45)]">{emoji}</span>
+          <span className="drop-shadow-[0_10px_30px_rgba(214,168,95,.34)]">{emoji}</span>
         </div>
       )}
       <div
         className="pointer-events-none absolute inset-0"
-        style={{ background: "linear-gradient(180deg, transparent 45%, rgba(11,6,20,.92) 100%)" }}
+        style={{ background: "linear-gradient(180deg, transparent 45%, rgba(13,31,23,.94) 100%)" }}
       />
-      <figcaption className="absolute inset-x-0 bottom-0 p-4 text-lg font-black" style={{ color: "#F2EEFF" }}>
+      <figcaption className="absolute inset-x-0 bottom-0 p-4 text-lg font-black" style={{ color: "#F7F3E8" }}>
         {name}
       </figcaption>
     </figure>
@@ -121,7 +121,7 @@ export function FloatingDish({ src, alt }: { src: string; alt: string }) {
       <img
         src={src}
         alt={alt}
-        className="fx-float pointer-events-none mx-auto w-56 max-w-full drop-shadow-[0_30px_60px_rgba(139,92,246,.35)] sm:w-72"
+        className="fx-float pointer-events-none mx-auto w-56 max-w-full drop-shadow-[0_30px_60px_rgba(47,125,90,.38)] sm:w-72"
       />
       <style>{`
         @keyframes fx-float{0%,100%{transform:translateY(0) rotate(-2deg)}50%{transform:translateY(-16px) rotate(2deg)}}
@@ -166,10 +166,10 @@ void main(){
   float f  = fbm(p*2.0 + warp + vec2(0.0, t*1.4));
   float f2 = fbm(p*2.8 - warp*0.7 - vec2(t, 0.0));
 
-  // Neon palette: pink, violet, cyan
-  vec3 pink = vec3(1.00, 0.24, 0.51);
-  vec3 vio  = vec3(0.545, 0.361, 0.965);
-  vec3 cyan = vec3(0.302, 0.882, 1.00);
+  // Mada palette: brass, forest green, soft sage
+  vec3 pink = vec3(0.839, 0.659, 0.373);
+  vec3 vio  = vec3(0.184, 0.490, 0.353);
+  vec3 cyan = vec3(0.549, 0.784, 0.659);
 
   vec3 col = vec3(0.0);
   col += pink * smoothstep(0.45, 0.90, f)  * 0.65;
@@ -423,9 +423,9 @@ export function LandingFX() {
       .fx-in{opacity:1;transform:none}
       .fx-nocursor, .fx-nocursor a, .fx-nocursor button{cursor:none}
       .fx-dot,.fx-ring{position:fixed;top:0;left:0;z-index:100;pointer-events:none;border-radius:50%;transform:translate(-50%,-50%)}
-      .fx-dot{width:7px;height:7px;background:#F2A0FF;background:#4DE1FF}
-      .fx-ring{width:36px;height:36px;border:1.5px solid rgba(255,61,129,.6);transition:width .25s,height .25s,background .25s}
-      .fx-ring.fx-hover{width:60px;height:60px;background:rgba(255,61,129,.1)}
+      .fx-dot{width:7px;height:7px;background:#8CC8A8}
+      .fx-ring{width:36px;height:36px;border:1.5px solid rgba(214,168,95,.65);transition:width .25s,height .25s,background .25s}
+      .fx-ring.fx-hover{width:60px;height:60px;background:rgba(214,168,95,.1)}
       @keyframes fx-rise{to{transform:translateY(0)}}
       .fx-w{display:inline-block;overflow:hidden;vertical-align:bottom;padding:0 .06em}
       .fx-w>span{display:inline-block;transform:translateY(112%);animation:fx-rise .95s cubic-bezier(.2,.8,.2,1) forwards}
@@ -476,7 +476,7 @@ export function HeroExit({ children }: { children: React.ReactNode }) {
 
 type CinStep = { n: string; title: string; text: string; icon: React.ReactNode };
 
-const STEP_HUES = ["#FF3D81", "#8B5CF6", "#4DE1FF", "#34D399"];
+const STEP_HUES = ["#D6A85F", "#2F7D5A", "#8CC8A8", "#B97745"];
 
 export function CinematicSteps({ steps }: { steps: CinStep[] }) {
   const [cinema, setCinema] = useState(false);
@@ -524,22 +524,22 @@ export function CinematicSteps({ steps }: { steps: CinStep[] }) {
           <div
             key={s.n}
             className="relative rounded-2xl border p-6 pt-8"
-            style={{ borderColor: "rgba(240,235,255,.09)", background: "#1A0F2E" }}
+            style={{ borderColor: "rgba(247,243,232,.09)", background: "#183126" }}
           >
             <div
               className="pointer-events-none absolute -top-5 left-4 text-5xl font-black"
-              style={{ WebkitTextStroke: "1.5px rgba(255,61,129,.5)", color: "transparent" }}
+              style={{ WebkitTextStroke: "1.5px rgba(214,168,95,.5)", color: "transparent" }}
             >
               {s.n}
             </div>
             <div
               className="mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl"
-              style={{ background: "rgba(139,92,246,.14)", color: "#8B5CF6" }}
+              style={{ background: "rgba(47,125,90,.18)", color: "#8CC8A8" }}
             >
               {s.icon}
             </div>
             <h3 className="text-base font-bold">{s.title}</h3>
-            <p className="mt-2 text-sm font-light leading-relaxed" style={{ color: "#9D93B8" }}>{s.text}</p>
+            <p className="mt-2 text-sm font-light leading-relaxed" style={{ color: "#AABAAF" }}>{s.text}</p>
           </div>
         ))}
       </div>
@@ -580,14 +580,14 @@ export function CinematicSteps({ steps }: { steps: CinStep[] }) {
             {s.icon}
           </div>
           <h3 className="text-3xl font-black md:text-5xl">{s.title}</h3>
-          <p className="mx-auto mt-4 max-w-md text-base font-light leading-loose md:text-lg" style={{ color: "#9D93B8" }}>
+          <p className="mx-auto mt-4 max-w-md text-base font-light leading-loose md:text-lg" style={{ color: "#AABAAF" }}>
             {s.text}
           </p>
         </div>
         {/* timeline progress */}
         <div className="absolute bottom-10 z-[1] flex w-full max-w-xs items-center gap-2 px-6" dir="rtl">
           {steps.map((st, i) => (
-            <div key={st.n} className="h-1 flex-1 overflow-hidden rounded-full" style={{ background: "rgba(240,235,255,.12)" }}>
+            <div key={st.n} className="h-1 flex-1 overflow-hidden rounded-full" style={{ background: "rgba(247,243,232,.12)" }}>
               <div
                 className="h-full rounded-full transition-[width] duration-300"
                 style={{
@@ -674,19 +674,19 @@ export function LiveChatDemo() {
 
   return (
     <div
-      className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0E0818] shadow-[0_30px_80px_rgba(0,0,0,.6),0_0_100px_rgba(139,92,246,.15)]"
+      className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#0D1F17] shadow-[0_30px_80px_rgba(0,0,0,.6),0_0_100px_rgba(47,125,90,.2)]"
       style={{ aspectRatio: "3 / 4" }}
     >
       {/* header */}
       <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#FF3D81] to-[#8B5CF6] text-base">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-[#D6A85F] to-[#2F7D5A] text-base">
           🍽️
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-bold text-[#F2EEFF]">مطعم بيت بغداد</div>
+          <div className="truncate text-sm font-bold text-[#F7F3E8]">مطعم بيت بغداد</div>
           <div className="text-[11px] text-emerald-500">● متصل — يرد خلال ثوانٍ</div>
         </div>
-        <span className="mr-auto rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-[#9D93B8]">
+        <span className="mr-auto rounded-full border border-white/10 px-2 py-0.5 text-[10px] text-[#AABAAF]">
           ديمو حي
         </span>
       </div>
@@ -698,18 +698,18 @@ export function LiveChatDemo() {
             className={
               "max-w-[85%] animate-in fade-in slide-in-from-bottom-2 rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed duration-300 " +
               (m.who === "bot"
-                ? "self-end rounded-bl-md bg-gradient-to-br from-[#FF3D81] to-[#8B5CF6] text-white"
-                : "self-start rounded-br-md bg-[#251A3D] text-[#F2EEFF]")
+                ? "self-end rounded-bl-md bg-gradient-to-br from-[#D6A85F] to-[#2F7D5A] text-white"
+                : "self-start rounded-br-md bg-[#183126] text-[#F7F3E8]")
             }
           >
             {m.t}
           </div>
         ))}
         {typing && (
-          <div className="flex gap-1 self-end rounded-2xl rounded-bl-md bg-[#FF3D81]/15 px-4 py-3">
-            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#FF3D81] [animation-delay:0ms]" />
-            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#FF3D81] [animation-delay:150ms]" />
-            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#FF3D81] [animation-delay:300ms]" />
+          <div className="flex gap-1 self-end rounded-2xl rounded-bl-md bg-[#D6A85F]/15 px-4 py-3">
+            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D6A85F] [animation-delay:0ms]" />
+            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D6A85F] [animation-delay:150ms]" />
+            <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-[#D6A85F] [animation-delay:300ms]" />
           </div>
         )}
       </div>

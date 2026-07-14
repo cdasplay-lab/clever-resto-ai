@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LandingFX, AuroraCanvas, RevealWords, LiveChatDemo, HeroExit, CinematicSteps, HeroVideo, DishCard, FloatingDish } from "@/components/landing-fx";
 import { Button } from "@/components/ui/button";
+import { MadaMark } from "@/components/mada-logo";
 import {
-  Bot,
   MessageSquare,
   ShoppingBag,
   Sparkles,
@@ -26,14 +26,14 @@ import {
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "مطعمي AI — موظف ذكاء اصطناعي يستلم طلبات مطعمك 24/7" },
+      { title: "Mada — منصة إدارة المطاعم والـ AI Agent" },
       {
         name: "description",
         content:
           "وكيل ذكاء اصطناعي للمطاعم في العراق والشرق الأوسط: يستقبل رسائل الزبائن على تيليجرام وواتساب، يفهم الطلب، يؤكّد التوصيل، ويرسل الطلب للوحة التحكم — بلهجتك المحلية.",
       },
-      { name: "theme-color", content: "#0B0614" },
-      { property: "og:title", content: "مطعمي AI — موظف ذكاء اصطناعي يستلم طلبات مطعمك 24/7" },
+      { name: "theme-color", content: "#0D1F17" },
+      { property: "og:title", content: "Mada — منصة إدارة المطاعم والـ AI Agent" },
       {
         property: "og:description",
         content: "وكيل ذكاء اصطناعي للمطاعم في العراق والشرق الأوسط: يستقبل رسائل الزبائن على تيليجرام وواتساب، يفهم الطلب، يؤكّد التوصيل، ويرسل الطلب للوحة التحكم — بلهجتك المحلية.",
@@ -45,17 +45,18 @@ export const Route = createFileRoute("/")({
   component: Landing,
 });
 
-/* Fixed neon palette — the landing is intentionally dark regardless of theme */
+/* Mada cinematic palette — the marketing page stays dramatic while sharing
+ * the dashboard's forest green, warm ivory and brass identity. */
 const C = {
-  bg: "#0B0614",
-  bg2: "#120A20",
-  card: "#1A0F2E",
-  line: "rgba(240,235,255,.09)",
-  pink: "#FF3D81",
-  cyan: "#4DE1FF",
-  violet: "#8B5CF6",
-  cream: "#F2EEFF",
-  muted: "#9D93B8",
+  bg: "#0D1F17",
+  bg2: "#12281E",
+  card: "#183126",
+  line: "rgba(247,243,232,.10)",
+  pink: "#D6A85F",
+  cyan: "#8CC8A8",
+  violet: "#2F7D5A",
+  cream: "#F7F3E8",
+  muted: "#AABAAF",
 };
 
 function Landing() {
@@ -73,24 +74,13 @@ function Landing() {
       {/* ============================= NAV ============================= */}
       <header
         className="sticky top-0 z-40 border-b backdrop-blur-xl"
-        style={{ borderColor: C.line, background: "rgba(11,6,20,.72)" }}
+        style={{ borderColor: C.line, background: "rgba(13,31,23,.78)" }}
       >
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-2">
-            <div
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-white"
-              style={{ background: `linear-gradient(135deg, ${C.pink}, ${C.violet})` }}
-            >
-              <Bot className="h-4 w-4" />
-            </div>
-            <span className="text-base font-black tracking-tight">
-              مطعمي{" "}
-              <span
-                className="bg-clip-text text-transparent"
-                style={{ backgroundImage: `linear-gradient(90deg, ${C.pink}, ${C.cyan})` }}
-              >
-                AI
-              </span>
+            <MadaMark className="h-9 w-9 rounded-xl bg-[#2F7D5A]" />
+            <span className="font-serif text-xl font-semibold tracking-tight" style={{ color: C.cream }}>
+              Mada <span className="font-sans text-[10px] font-medium tracking-[.18em]" style={{ color: C.pink }}>AI</span>
             </span>
           </div>
           <nav className="hidden items-center gap-7 text-sm md:flex" style={{ color: C.muted }}>
@@ -111,8 +101,8 @@ function Landing() {
               to="/auth"
               className="rounded-full border px-5 py-2 text-sm font-bold backdrop-blur transition-colors"
               style={{
-                borderColor: "rgba(255,61,129,.45)",
-                background: "rgba(255,61,129,.12)",
+                borderColor: "rgba(214,168,95,.45)",
+                background: "rgba(214,168,95,.12)",
                 color: C.cream,
               }}
             >
@@ -128,7 +118,7 @@ function Landing() {
         <AuroraCanvas />
         <div
           className="pointer-events-none absolute inset-0 z-[1]"
-          style={{ background: "radial-gradient(1100px 550px at 50% 0%, transparent, rgba(11,6,20,.6) 75%)" }}
+          style={{ background: "radial-gradient(1100px 550px at 50% 0%, transparent, rgba(13,31,23,.68) 75%)" }}
         />
         <div className="relative z-[2] mx-auto max-w-4xl pt-20 pb-16">
           <HeroExit>
@@ -160,7 +150,7 @@ function Landing() {
             <Link
               to="/auth"
               data-magnetic
-              className="inline-flex h-13 items-center gap-2 rounded-full px-9 py-4 text-base font-bold text-white shadow-[0_10px_40px_rgba(255,61,129,.35)] transition-shadow hover:shadow-[0_14px_55px_rgba(255,61,129,.5)]"
+              className="inline-flex h-13 items-center gap-2 rounded-full px-9 py-4 text-base font-bold text-white shadow-[0_10px_40px_rgba(214,168,95,.24)] transition-shadow hover:shadow-[0_14px_55px_rgba(47,125,90,.42)]"
               style={{ background: `linear-gradient(90deg, ${C.pink}, ${C.violet})` }}
             >
               جرّب الديمو
@@ -170,7 +160,7 @@ function Landing() {
               href="#how"
               data-magnetic
               className="inline-flex items-center gap-2 rounded-full border px-8 py-4 text-sm font-medium backdrop-blur transition-colors"
-              style={{ borderColor: C.line, background: "rgba(11,6,20,.4)", color: C.cream }}
+              style={{ borderColor: C.line, background: "rgba(13,31,23,.46)", color: C.cream }}
             >
               شلون يشتغل؟
             </a>
@@ -185,7 +175,7 @@ function Landing() {
       {/* ======================= KINETIC STRIPS ======================= */}
       <div
         className="fx-strip relative z-[2] overflow-hidden border-y py-6"
-        style={{ borderColor: C.line, background: "rgba(18,10,32,.6)" }}
+        style={{ borderColor: C.line, background: "rgba(18,40,30,.68)" }}
         aria-hidden
       >
         <div className="fx-marquee flex w-max gap-14 whitespace-nowrap font-black" style={{ fontSize: "clamp(20px,2.6vw,30px)" }}>
@@ -222,7 +212,7 @@ function Landing() {
       <section
         id="how"
         className="relative z-[2] border-y"
-        style={{ borderColor: C.line, background: "rgba(18,10,32,.7)" }}
+        style={{ borderColor: C.line, background: "rgba(18,40,30,.76)" }}
       >
         <div className="mx-auto max-w-6xl px-4 py-24">
           <SectionHeader
@@ -264,7 +254,7 @@ function Landing() {
       {/* ===================== DISH SHOWCASE ===================== */}
       <section
         className="relative z-[2] overflow-hidden border-y py-20"
-        style={{ borderColor: C.line, background: "rgba(18,10,32,.7)" }}
+        style={{ borderColor: C.line, background: "rgba(18,40,30,.76)" }}
       >
         <div className="mx-auto max-w-6xl px-4">
           <SectionHeader
@@ -285,7 +275,7 @@ function Landing() {
       <section
         id="features"
         className="relative z-[2] border-y"
-        style={{ borderColor: C.line, background: "rgba(18,10,32,.7)" }}
+        style={{ borderColor: C.line, background: "rgba(18,40,30,.76)" }}
       >
         <div className="mx-auto max-w-6xl px-4 py-24">
           <SectionHeader
@@ -343,7 +333,7 @@ function Landing() {
       <section id="contact" className="relative z-[2] overflow-hidden border-t px-4 py-32 text-center" style={{ borderColor: C.line }}>
         <div
           className="pointer-events-none absolute inset-0"
-          style={{ background: `radial-gradient(600px 320px at 50% 100%, rgba(255,61,129,.14), transparent 70%)` }}
+          style={{ background: `radial-gradient(600px 320px at 50% 100%, rgba(214,168,95,.14), transparent 70%)` }}
         />
         <div className="relative mx-auto max-w-3xl">
           <h2 className="text-[clamp(32px,5.5vw,72px)] font-black leading-[1.3] tracking-tight">
@@ -363,7 +353,7 @@ function Landing() {
             <Link
               to="/auth"
               data-magnetic
-              className="inline-flex items-center gap-2 rounded-full px-9 py-4 text-base font-bold text-white shadow-[0_10px_40px_rgba(255,61,129,.35)]"
+              className="inline-flex items-center gap-2 rounded-full px-9 py-4 text-base font-bold text-white shadow-[0_10px_40px_rgba(214,168,95,.24)]"
               style={{ background: `linear-gradient(90deg, ${C.pink}, ${C.violet})` }}
             >
               جرّب الديمو الآن
@@ -373,7 +363,7 @@ function Landing() {
               href="mailto:cdasplay@gmail.com"
               data-magnetic
               className="inline-flex items-center gap-2 rounded-full border px-8 py-4 text-sm font-medium backdrop-blur"
-              style={{ borderColor: C.line, background: "rgba(11,6,20,.4)", color: C.cream }}
+              style={{ borderColor: C.line, background: "rgba(13,31,23,.46)", color: C.cream }}
             >
               <Send className="h-4 w-4" />
               تواصل معنا
@@ -390,7 +380,7 @@ function Landing() {
       {/* ============================ FOOTER ============================ */}
       <footer className="relative z-[2] border-t" style={{ borderColor: C.line }}>
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-6 text-xs md:flex-row" style={{ color: C.muted }}>
-          <div>© {new Date().getFullYear()} مطعمي AI — صُنع بحُب في العراق 🇮🇶</div>
+          <div>© {new Date().getFullYear()} Mada — صُنع بحُب في العراق 🇮🇶</div>
           <div className="flex items-center gap-4">
             <a href="#features" className="hover:text-white">المزايا</a>
             <a href="#pricing" className="hover:text-white">الأسعار</a>
@@ -426,15 +416,15 @@ function SectionHeader({ eyebrow, title, subtitle }: { eyebrow: string; title: s
 function NeonCard({ icon, title, text, danger }: { icon: React.ReactNode; title: string; text: string; danger?: boolean }) {
   return (
     <div
-      className="group rounded-2xl border p-6 transition-colors duration-300 hover:border-[#FF3D81]/50"
+      className="group rounded-2xl border p-6 transition-colors duration-300 hover:border-[#D6A85F]/50"
       style={{ borderColor: C.line, background: C.card }}
     >
       <div
         className="mb-4 inline-flex h-10 w-10 items-center justify-center rounded-xl"
         style={
           danger
-            ? { background: "rgba(255,61,129,.12)", color: C.pink }
-            : { background: "rgba(77,225,255,.1)", color: C.cyan }
+            ? { background: "rgba(214,168,95,.12)", color: C.pink }
+            : { background: "rgba(140,200,168,.1)", color: C.cyan }
         }
       >
         {icon}
@@ -467,7 +457,7 @@ function PricingCard({
       className="relative flex flex-col rounded-2xl border p-7"
       style={
         highlighted
-          ? { borderColor: "rgba(255,61,129,.6)", background: "linear-gradient(170deg, rgba(255,61,129,.12), rgba(139,92,246,.08)), #1A0F2E", boxShadow: "0 24px 80px rgba(255,61,129,.15)" }
+          ? { borderColor: "rgba(214,168,95,.58)", background: "linear-gradient(170deg, rgba(214,168,95,.11), rgba(47,125,90,.12)), #183126", boxShadow: "0 24px 80px rgba(6,20,13,.32)" }
           : { borderColor: C.line, background: C.card }
       }
     >

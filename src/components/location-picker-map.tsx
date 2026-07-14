@@ -82,7 +82,7 @@ export function LocationPickerMap({ lat, lng, onPick, boundary, className }: Pro
       className: "",
       html:
         '<div style="width:22px;height:22px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);' +
-        "background:linear-gradient(135deg,#FF3D81,#8B5CF6);border:2px solid #fff;" +
+        "background:linear-gradient(135deg,#D6A85F,#2F7D5A);border:2px solid #fff;" +
         'box-shadow:0 2px 8px rgba(0,0,0,.45)"></div>',
       iconSize: [22, 22],
       iconAnchor: [11, 22],
@@ -112,7 +112,7 @@ export function LocationPickerMap({ lat, lng, onPick, boundary, className }: Pro
     polyRef.current?.remove();
     polyRef.current = null;
     if (b && b.length >= 3) {
-      const poly = L.polygon(b, { color: "#FF3D81", weight: 2, fillColor: "#FF3D81", fillOpacity: 0.08 }).addTo(map);
+      const poly = L.polygon(b, { color: "#2F7D5A", weight: 2, fillColor: "#2F7D5A", fillOpacity: 0.08 }).addTo(map);
       polyRef.current = poly;
       map.fitBounds(poly.getBounds(), { padding: [16, 16] });
     }

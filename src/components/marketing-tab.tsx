@@ -129,7 +129,17 @@ export function MarketingTab({ restaurantId }: { restaurantId: string }) {
 
   return (
     <div className="space-y-6">
-      <Card>
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold md:text-2xl">التسويق الذكي</h2>
+          <p className="mt-1 text-xs text-muted-foreground">أنشئ حملات مرتبة وأرسلها للفئة الصحيحة من زبائنك</p>
+        </div>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+          <Megaphone className="h-5 w-5" />
+        </div>
+      </div>
+
+      <Card className="border-0">
         <CardHeader>
           <CardTitle className="text-base flex items-center gap-2">
             <Megaphone className="h-4 w-4" /> حملة جديدة
@@ -218,7 +228,7 @@ export function MarketingTab({ restaurantId }: { restaurantId: string }) {
 
       <div className="space-y-3">
         {list.map((c) => (
-          <Card key={c.id}>
+          <Card key={c.id} className="border-0">
             <CardContent className="pt-4 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">

@@ -4,10 +4,10 @@ export const Route = createFileRoute("/data-deletion")({
   component: DataDeletionPage,
   head: () => ({
     meta: [
-      { title: "حذف بيانات المستخدم — مطعمي AI" },
-      { name: "description", content: "تعليمات حذف بيانات المستخدم من منصة مطعمي AI." },
-      { property: "og:title", content: "حذف بيانات المستخدم — مطعمي AI" },
-      { property: "og:description", content: "كيفية طلب حذف بياناتك من منصة مطعمي AI." },
+      { title: "حذف بيانات المستخدم — Mada" },
+      { name: "description", content: "تعليمات حذف بيانات المستخدم من منصة Mada." },
+      { property: "og:title", content: "حذف بيانات المستخدم — Mada" },
+      { property: "og:description", content: "كيفية طلب حذف بياناتك من منصة Mada." },
       { property: "og:url", content: "https://clever-resto-ai.lovable.app/data-deletion" },
     ],
     links: [{ rel: "canonical", href: "https://clever-resto-ai.lovable.app/data-deletion" }],
@@ -29,7 +29,7 @@ function DataDeletionPage() {
           <section>
             <h2 className="text-xl font-semibold mb-2">١. ما البيانات التي نحتفظ بها</h2>
             <p>
-              تحتفظ منصّة «مطعمي AI» ببيانات الطلبات والمحادثات التي يتبادلها الزبون مع بوت
+              تحتفظ منصّة «Mada» ببيانات الطلبات والمحادثات التي يتبادلها الزبون مع بوت
               المطعم عبر واتساب أو تيليجرام، بما في ذلك: اسم الزبون، رقم الهاتف، الموقع الجغرافي
               إن شاركه، الأصناف المطلوبة، ومحتوى الرسائل.
             </p>
