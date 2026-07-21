@@ -4,14 +4,14 @@ import { MarketingLanding3B } from "@/components/marketing-landing-3b";
 export const Route = createFileRoute("/")({
   head: () => ({
     meta: [
-      { title: "Mada — وكيل الطلبات الذكي للمطاعم" },
+      { title: "Clever — وكيل الطلبات الذكي للمطاعم" },
       {
         name: "description",
         content:
-          "من أول رسالة إلى طلب جاهز للمطبخ. منصة Mada تستقبل طلبات الزبائن، تؤكد التفاصيل، وتدير القنوات والفروع من لوحة واحدة.",
+          "من أول رسالة إلى طلب جاهز للمطبخ. منصة Clever تستقبل طلبات الزبائن، تؤكد التفاصيل، وتدير القنوات والفروع من لوحة واحدة.",
       },
       { name: "theme-color", content: "#f7f2e7" },
-      { property: "og:title", content: "Mada — وكيل الطلبات الذكي للمطاعم" },
+      { property: "og:title", content: "Clever — وكيل الطلبات الذكي للمطاعم" },
       {
         property: "og:description",
         content: "وكيل ذكي يفهم طلب الزبون، يؤكد التفاصيل، ويرسل الطلب جاهزاً للمطبخ.",

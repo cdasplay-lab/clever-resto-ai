@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   ChefHat,
   CircleDollarSign,
-  Clock3,
   Headphones,
   LayoutDashboard,
   MapPin,
@@ -27,7 +26,6 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { MadaLogo, MadaMark } from "@/components/mada-logo";
 
 const palette = {
   paper: "#f7f2e7",
@@ -40,6 +38,39 @@ const palette = {
   line: "rgba(174, 132, 56, .27)",
   muted: "#66746d",
 };
+
+function CleverMark({ className = "h-10 w-10" }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" className={className} role="img" aria-label="شعار Clever" fill="none">
+      <circle cx="24" cy="24" r="18.5" stroke="#bd8b2e" strokeWidth="4.5" />
+      <path
+        d="M31.5 14.5a13 13 0 1 0 0 19"
+        stroke="#bd8b2e"
+        strokeWidth="4.5"
+        strokeLinecap="round"
+      />
+      <path
+        d="M33 18.5h7M33 24h7M33 29.5h7"
+        stroke="#bd8b2e"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function CleverLogo({ compact = false }: { compact?: boolean }) {
+  return (
+    <div dir="ltr" className="flex items-center gap-2.5">
+      <CleverMark className={compact ? "h-8 w-8" : "h-10 w-10"} />
+      <span
+        className={`${compact ? "text-lg" : "text-[1.7rem]"} font-extrabold tracking-[-.04em] text-[#184d39]`}
+      >
+        Clever
+      </span>
+    </div>
+  );
+}
 
 const channels = [
   { name: "واتساب", mark: "W", color: "#25a75b", copy: "طلبات وردود تلقائية على مدار الساعة" },
@@ -144,13 +175,17 @@ export function MarketingLanding3B() {
       <LandingStyles />
 
       <header className="sticky top-0 z-50 border-b border-[#d9c69f]/45 bg-[#fbf7ee]/88 backdrop-blur-xl">
-        <div className="mx-auto flex h-[74px] max-w-[1480px] items-center justify-between px-5 sm:px-8 lg:px-12">
-          <Link to="/" aria-label="Mada — الصفحة الرئيسية" className="shrink-0">
-            <MadaLogo compact />
+        <div
+          dir="ltr"
+          className="mx-auto flex h-[74px] max-w-[1480px] items-center justify-between px-5 sm:px-8 lg:px-12"
+        >
+          <Link to="/" aria-label="Clever — الصفحة الرئيسية" className="shrink-0">
+            <CleverLogo />
           </Link>
 
           <nav
-            className="hidden items-center gap-9 text-sm font-medium lg:flex"
+            dir="rtl"
+            className="hidden items-center gap-12 text-sm font-medium lg:flex"
             aria-label="التنقل الرئيسي"
           >
             <a className="ml3b-nav" href="#agent">
@@ -159,32 +194,13 @@ export function MarketingLanding3B() {
             <a className="ml3b-nav" href="#channels">
               القنوات
             </a>
-            <a className="ml3b-nav" href="#platform">
-              المنصة
-            </a>
-            <a className="ml3b-nav" href="#pricing">
-              الأسعار
+            <a className="ml3b-nav" href="#results">
+              النتائج
             </a>
             <a className="ml3b-nav" href="#contact">
               تواصل معنا
             </a>
           </nav>
-
-          <div className="hidden items-center gap-3 sm:flex">
-            <Link
-              to="/auth"
-              className="rounded-xl px-4 py-2.5 text-sm font-bold text-[#315747] transition hover:bg-white/70"
-            >
-              تسجيل الدخول
-            </Link>
-            <Link
-              to="/auth"
-              className="ml3b-primary inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-bold text-white"
-            >
-              جرّب المنصة
-              <ArrowLeft className="h-4 w-4" />
-            </Link>
-          </div>
 
           <button
             type="button"
@@ -203,8 +219,7 @@ export function MarketingLanding3B() {
               {[
                 ["#agent", "الوكيل"],
                 ["#channels", "القنوات"],
-                ["#platform", "المنصة"],
-                ["#pricing", "الأسعار"],
+                ["#results", "النتائج"],
                 ["#contact", "تواصل معنا"],
               ].map(([href, label]) => (
                 <a
@@ -236,7 +251,7 @@ export function MarketingLanding3B() {
                 <Sparkles className="h-3.5 w-3.5 text-[#b8872d]" />
                 شاهد الوكيل يعمل الآن
               </div>
-              <h1 className="text-[clamp(2.8rem,5.6vw,6.2rem)] font-extrabold leading-[1.18] tracking-[-.055em] text-[#194d39]">
+              <h1 className="text-[clamp(2.8rem,5vw,4.45rem)] font-extrabold leading-[1.18] tracking-[-.055em] text-[#194d39]">
                 من أول رسالة...
                 <br />
                 إلى طلب جاهز <span className="text-[#b8872d]">للمطبخ.</span>
@@ -260,20 +275,6 @@ export function MarketingLanding3B() {
                   استكشف المنصة
                 </a>
               </div>
-              <div className="mt-7 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-[#68766f] xl:justify-start">
-                <span className="inline-flex items-center gap-2">
-                  <CheckCircle2 className="h-4 w-4 text-[#2f7d59]" />
-                  بدون بطاقة ائتمان
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <Clock3 className="h-4 w-4 text-[#2f7d59]" />
-                  إعداد سريع
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <ShieldCheck className="h-4 w-4 text-[#2f7d59]" />
-                  بيانات معزولة لكل مطعم
-                </span>
-              </div>
             </div>
 
             <div className="order-2" data-ml3b-reveal style={{ transitionDelay: "120ms" }}>
@@ -281,12 +282,12 @@ export function MarketingLanding3B() {
             </div>
           </div>
 
-          <div className="relative mx-auto mt-8 max-w-[1320px]" data-ml3b-reveal>
+          <div id="results" className="relative mx-auto mt-8 max-w-[1320px]" data-ml3b-reveal>
             <ResultsRibbon />
           </div>
         </section>
 
-        <section id="platform" className="px-4 py-16 sm:px-7 lg:px-10 lg:py-24">
+        <section id="platform" className="px-4 py-5 sm:px-7 lg:px-10 lg:py-8">
           <div className="mx-auto grid max-w-[1320px] items-center gap-11 rounded-[2rem] border border-[#d5bd8e]/65 bg-[#fffdf8]/75 p-5 shadow-[0_30px_90px_-60px_rgba(37,72,53,.42)] sm:p-8 lg:grid-cols-[.9fr_1.25fr] lg:p-10">
             <div data-ml3b-reveal>
               <SectionTag icon={LayoutDashboard}>المنصة</SectionTag>
@@ -534,8 +535,8 @@ export function MarketingLanding3B() {
 
       <footer className="px-5 py-9 sm:px-8 lg:px-12">
         <div className="mx-auto flex max-w-[1320px] flex-col items-center justify-between gap-5 border-t border-[#dac8a5] pt-8 text-sm text-[#6a766f] md:flex-row">
-          <MadaLogo compact />
-          <div>© {new Date().getFullYear()} Mada — منصة المطاعم الذكية</div>
+          <CleverLogo />
+          <div>© {new Date().getFullYear()} Clever — منصة المطاعم الذكية</div>
           <nav
             className="flex flex-wrap items-center justify-center gap-5"
             aria-label="روابط قانونية"
@@ -572,7 +573,7 @@ function JourneyBoard() {
   ];
 
   return (
-    <div className="relative min-h-[560px] overflow-hidden rounded-[2rem] border border-[#d9c49b] bg-[#173f31] shadow-[0_36px_90px_-50px_rgba(19,59,43,.7)] sm:min-h-[620px] lg:min-h-[690px]">
+    <div className="relative min-h-[510px] overflow-hidden rounded-[2rem] border border-[#d9c49b] bg-[#173f31] shadow-[0_36px_90px_-50px_rgba(19,59,43,.7)] sm:min-h-[540px] lg:min-h-[510px]">
       <img
         src="/landing/kitchen-hero.webp"
         alt="فريق مطبخ يعمل أثناء استلام الطلبات"
@@ -580,7 +581,10 @@ function JourneyBoard() {
         fetchPriority="high"
       />
       <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(13,39,29,.08)_0%,rgba(13,39,29,.02)_42%,rgba(247,242,231,.95)_64%,#f7f2e7_100%)]" />
-      <div className="absolute inset-x-0 bottom-0 top-[18%] hidden items-end gap-4 px-5 pb-7 lg:grid lg:grid-cols-3 xl:px-7">
+      <div
+        dir="ltr"
+        className="absolute inset-x-0 bottom-0 top-[18%] hidden items-end gap-4 px-5 pb-7 lg:grid lg:grid-cols-3 xl:px-7"
+      >
         {[
           <CustomerMessageCard key="m" />,
           <UnderstoodOrderCard key="u" />,
@@ -588,6 +592,7 @@ function JourneyBoard() {
         ].map((card, index) => (
           <div
             key={index}
+            dir="rtl"
             className={`ml3b-journey-card transition duration-700 ${active === index ? "-translate-y-3 opacity-100" : "translate-y-1 opacity-[.86]"}`}
             aria-current={active === index ? "step" : undefined}
           >
@@ -611,10 +616,6 @@ function JourneyBoard() {
         <div className="mx-auto max-w-[360px]" aria-live="polite">
           {cards[active]}
         </div>
-      </div>
-
-      <div className="absolute left-5 top-5 rounded-xl border border-white/30 bg-[#fffdf8]/88 px-4 py-2 text-xs font-extrabold text-[#194d39] backdrop-blur">
-        تجربة مباشرة
       </div>
     </div>
   );
@@ -756,7 +757,7 @@ function DashboardPreview() {
       <div className="grid min-h-[410px] grid-cols-[72px_1fr] sm:grid-cols-[105px_1fr]">
         <aside className="border-l border-[#e7dcc6] bg-[#f6f2e8] p-2 sm:p-3">
           <div className="mb-5 hidden justify-center sm:flex">
-            <MadaMark className="h-8 w-8" />
+            <CleverMark className="h-8 w-8" />
           </div>
           {[LayoutDashboard, ShoppingBag, Store, BarChart3, ShieldCheck].map((Icon, index) => (
             <div
