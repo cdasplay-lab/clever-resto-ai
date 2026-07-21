@@ -19,6 +19,7 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as TrackOrderIdRouteImport } from './routes/track.$orderId'
 import { Route as ApiPublicExpandMapsUrlRouteImport } from './routes/api/public/expand-maps-url'
+import { Route as ApiPublicCheckHealthRouteImport } from './routes/api/public/check-health'
 import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
 import { Route as ApiPublicCheckComplaintsRouteImport } from './routes/api/public/check-complaints'
 
@@ -72,6 +73,11 @@ const ApiPublicExpandMapsUrlRoute = ApiPublicExpandMapsUrlRouteImport.update({
   path: '/api/public/expand-maps-url',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicCheckHealthRoute = ApiPublicCheckHealthRouteImport.update({
+  id: '/api/public/check-health',
+  path: '/api/public/check-health',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiPublicCheckDelaysRoute = ApiPublicCheckDelaysRouteImport.update({
   id: '/api/public/check-delays',
   path: '/api/public/check-delays',
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
+  '/api/public/check-health': typeof ApiPublicCheckHealthRoute
   '/api/public/expand-maps-url': typeof ApiPublicExpandMapsUrlRoute
 }
 export interface FileRoutesByTo {
@@ -110,6 +117,7 @@ export interface FileRoutesByTo {
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
+  '/api/public/check-health': typeof ApiPublicCheckHealthRoute
   '/api/public/expand-maps-url': typeof ApiPublicExpandMapsUrlRoute
 }
 export interface FileRoutesById {
@@ -125,6 +133,7 @@ export interface FileRoutesById {
   '/track/$orderId': typeof TrackOrderIdRoute
   '/api/public/check-complaints': typeof ApiPublicCheckComplaintsRoute
   '/api/public/check-delays': typeof ApiPublicCheckDelaysRoute
+  '/api/public/check-health': typeof ApiPublicCheckHealthRoute
   '/api/public/expand-maps-url': typeof ApiPublicExpandMapsUrlRoute
 }
 export interface FileRouteTypes {
@@ -141,6 +150,7 @@ export interface FileRouteTypes {
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
+    | '/api/public/check-health'
     | '/api/public/expand-maps-url'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -155,6 +165,7 @@ export interface FileRouteTypes {
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
+    | '/api/public/check-health'
     | '/api/public/expand-maps-url'
   id:
     | '__root__'
@@ -169,6 +180,7 @@ export interface FileRouteTypes {
     | '/track/$orderId'
     | '/api/public/check-complaints'
     | '/api/public/check-delays'
+    | '/api/public/check-health'
     | '/api/public/expand-maps-url'
   fileRoutesById: FileRoutesById
 }
@@ -184,6 +196,7 @@ export interface RootRouteChildren {
   TrackOrderIdRoute: typeof TrackOrderIdRoute
   ApiPublicCheckComplaintsRoute: typeof ApiPublicCheckComplaintsRoute
   ApiPublicCheckDelaysRoute: typeof ApiPublicCheckDelaysRoute
+  ApiPublicCheckHealthRoute: typeof ApiPublicCheckHealthRoute
   ApiPublicExpandMapsUrlRoute: typeof ApiPublicExpandMapsUrlRoute
 }
 
@@ -259,6 +272,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicExpandMapsUrlRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/check-health': {
+      id: '/api/public/check-health'
+      path: '/api/public/check-health'
+      fullPath: '/api/public/check-health'
+      preLoaderRoute: typeof ApiPublicCheckHealthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/public/check-delays': {
       id: '/api/public/check-delays'
       path: '/api/public/check-delays'
@@ -288,6 +308,7 @@ const rootRouteChildren: RootRouteChildren = {
   TrackOrderIdRoute: TrackOrderIdRoute,
   ApiPublicCheckComplaintsRoute: ApiPublicCheckComplaintsRoute,
   ApiPublicCheckDelaysRoute: ApiPublicCheckDelaysRoute,
+  ApiPublicCheckHealthRoute: ApiPublicCheckHealthRoute,
   ApiPublicExpandMapsUrlRoute: ApiPublicExpandMapsUrlRoute,
 }
 export const routeTree = rootRouteImport

@@ -17,6 +17,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { retryFetch } from "../_shared/retry.ts";
 import { internalHeaders } from "../_shared/auth.ts";
+import { heartbeat } from "../_shared/monitoring.ts";
 
 const GRAPH = "https://graph.facebook.com/v20.0";
 const WA_MAX_LEN = 3900;
@@ -219,6 +220,7 @@ async function processMessage(
   phoneNumberId: string,
   restaurantId: string,
 ): Promise<void> {
+  await heartbeat(admin(), "whatsapp-webhook", restaurantId, "ok", { message_id: message?.id });
   const from: string = message.from; // customer's WhatsApp phone (E.164 no +)
   if (!from) return;
 

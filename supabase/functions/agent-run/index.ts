@@ -129,6 +129,19 @@ function branchAreaName(a: any): string {
 
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
+const REJECT_CONFIRM_RE = /(^|[\s،,.!؟?])(لا|مو|مش|غير|الغ|ألغي|الغي|بدل|غيّر|غير)([\s،,.!؟?]|$)/i;
+const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
+
+async function latestExplicitConfirmation(db: any, conversationId: string, pending: any): Promise<string | null> {
+  const createdAt = new Date(String(pending?.created_at || "")).getTime();
+  if (!Number.isFinite(createdAt) || Date.now() - createdAt > CONFIRMATION_TTL_MS) return null;
+  const { data } = await db.from("messages").select("content,created_at")
+    .eq("conversation_id", conversationId).eq("role", "user")
+    .gte("created_at", pending.created_at).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const text = String(data?.content || "").trim();
+  if (!text || REJECT_CONFIRM_RE.test(text) || !CONFIRM_RE.test(text)) return null;
+  return text;
+}
 
 // Arabic text normalizer: strips diacritics, unifies alef/ya/ta, collapses repeats.
 // Mirrors public.normalize_ar() in SQL for consistent matching client/edge side.
@@ -1720,8 +1733,8 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
       return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
     }
-    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
-    if (!userOk) {
+    const actualConfirmation = await latestExplicitConfirmation(db, conv.id, pending);
+    if (!actualConfirmation) {
       return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم' أو 'أكد' بصراحة ثم أعد المحاولة." };
     }
 
@@ -1911,8 +1924,8 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
       return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
     }
-    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
-    if (!userOk) {
+    const actualConfirmation = await latestExplicitConfirmation(db, conv.id, pending);
+    if (!actualConfirmation) {
       return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم/أكد/تمام' بصراحة ثم أعد المحاولة." };
     }
     const when = new Date(String(args.scheduled_for || ""));
@@ -1947,6 +1960,16 @@ async function runTool(
       console.error("schedule_order insert failed:", error);
       try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "schedule_order", error: error.message, payload: { args } }); } catch (_) {}
       return { error: "ORDER_SCHEDULE_FAILED", user_message: "ما كدرت أحجز الطلب الحين، جرّب مرة ثانية أو اطلب التحويل لموظف." };
+    }
+
+    const { data: scheduledQuota, error: scheduledQuotaError } = await db.rpc("consume_quota", {
+      _restaurant_id: restaurant.id, _kind: "confirmed_order", _ref: order.id,
+    });
+    if (scheduledQuotaError || !(scheduledQuota as any)?.allowed) {
+      await db.rpc("transition_order_status", {
+        _order_id: order.id, _from: ["scheduled"], _to: "cancelled", _notes: "quota_exceeded",
+      });
+      return { error: "عذراً، المطعم وصل لحدّه الشهري من الطلبات. حاول لاحقاً." };
     }
 
     await db
@@ -2003,32 +2026,16 @@ async function runTool(
     }
     const items = Array.isArray(ord.items) ? ord.items : [];
 
-    // Cancel the order
+    // Cancel and restore stock atomically. A concurrent kitchen acceptance or
+    // webhook retry cannot result in a double restock.
     const reason = name === "cancel_order"
       ? (String(args.reason || "").trim() || "إلغاء بطلب الزبون")
       : "تعديل بطلب الزبون";
-    await db.from("orders")
-      .update({ status: "cancelled", notes: reason })
-      .eq("id", ord.id);
-
-    // Restock tracked items (only if was pending — scheduled didn't decrement)
-    if (ord.status === "pending" && items.length) {
-      try {
-        for (const it of items) {
-          const mid = (it as any).menu_item_id;
-          const qty = Number((it as any).qty || 0);
-          if (!mid || qty <= 0) continue;
-          const { data: mi } = await db
-            .from("menu_items")
-            .select("id,track_stock,stock_qty")
-            .eq("id", mid)
-            .maybeSingle();
-          if (mi && (mi as any).track_stock) {
-            const newQty = Number((mi as any).stock_qty || 0) + qty;
-            await db.from("menu_items").update({ stock_qty: newQty }).eq("id", mid);
-          }
-        }
-      } catch (_) {}
+    const { data: transition, error: transitionError } = await db.rpc("transition_order_status", {
+      _order_id: ord.id, _from: ["pending", "scheduled"], _to: "cancelled", _notes: reason,
+    });
+    if (transitionError || !(transition as any)?.ok) {
+      return { error: "تغيّرت حالة الطلب قبل الإلغاء. راح أحوّلك لموظف حتى يتأكد منه.", needs_handoff: true };
     }
 
     // Notify branch via telegram (best effort)
@@ -2757,28 +2764,6 @@ Deno.serve(async (req) => {
     runRestaurantId = restaurant.id;
 
 
-    // ===== Quota gate: check subscription + consume one AI reply =====
-    const { data: quotaRes, error: quotaErr } = await db.rpc("consume_quota", {
-      _restaurant_id: restaurant.id,
-      _kind: "ai_reply",
-      _ref: conversation_id,
-    });
-    if (quotaErr) {
-      console.error("consume_quota error:", quotaErr);
-    } else if (quotaRes && (quotaRes as any).allowed === false) {
-      const reason = (quotaRes as any).reason;
-      console.log("Bot blocked for restaurant", restaurant.id, "reason:", reason);
-      const reply = reason === "no_active_subscription"
-        ? "النظام متوقف مؤقتاً لأن اشتراك المطعم منتهي. تواصل مع إدارة المطعم حتى يجددون الخدمة."
-        : reason === "ai_reply_limit"
-        ? "وصل المطعم للحد الشهري من ردود البوت. تواصل مع إدارة المطعم حتى يرفعون الباقة."
-        : reason === "branch_limit_exceeded"
-        ? "النظام يحتاج تحديث إعدادات الفروع من إدارة المطعم قبل ما أكمل الطلب."
-        : "النظام متوقف مؤقتاً من إدارة المطعم. حاول لاحقاً أو تواصل ويا المطعم.";
-      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
-      return json({ reply, state: conv.state, media: [], skipped: "quota_blocked", reason });
-    }
-
     // Load branches for this restaurant (used by resolve_branch tool + system prompt)
     const { data: branchesData } = await db
       .from("branches")
@@ -3033,6 +3018,23 @@ Deno.serve(async (req) => {
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
 
+    // Charge only when this run really needs the model. Deterministic commands,
+    // tracking and paused conversations above remain free. Fail closed on RPC errors.
+    const { data: quotaRes, error: quotaErr } = await db.rpc("consume_quota", {
+      _restaurant_id: restaurant.id, _kind: "ai_reply", _ref: `run:${conversation_id}:${runStartedAt}`,
+    });
+    if (quotaErr || !quotaRes || (quotaRes as any).allowed === false) {
+      const reason = (quotaRes as any)?.reason ?? "quota_check_failed";
+      console.error("AI quota blocked", { restaurant_id: restaurant.id, reason, error: quotaErr?.message });
+      const reply = reason === "no_active_subscription"
+        ? "النظام متوقف مؤقتاً لأن اشتراك المطعم منتهي. تواصل مع إدارة المطعم حتى يجددون الخدمة."
+        : reason === "ai_reply_limit"
+        ? "وصل المطعم للحد الشهري من ردود البوت. تواصل مع إدارة المطعم حتى يرفعون الباقة."
+        : "الخدمة متوقفة مؤقتاً للتحقق من الاشتراك. حاول لاحقاً أو تواصل ويا المطعم.";
+      await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
+      return json({ reply, state: conv.state, media: [], skipped: "quota_blocked", reason });
+    }
+
     for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
       if (Date.now() - loopStartedAt > TOTAL_LOOP_TIMEOUT_MS) {
         await db.from("agent_logs").insert({
@@ -3184,4 +3186,3 @@ Deno.serve(async (req) => {
     await releaseConversationLock(lockDb, runConversationId, lockToken);
   }
 });
-
