@@ -12,6 +12,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { retryFetch } from "../_shared/retry.ts";
 import { internalHeaders } from "../_shared/auth.ts";
+import { heartbeat } from "../_shared/monitoring.ts";
 
 const GATEWAY = "https://connector-gateway.lovable.dev/telegram";
 const TG_API = "https://api.telegram.org";
@@ -199,6 +200,7 @@ async function alreadyProcessed(updateId: number | string | undefined): Promise<
 }
 
 async function processUpdate(update: any, tg: TgClient, restaurantId: string): Promise<void> {
+  await heartbeat(admin(), "telegram-webhook", restaurantId, "ok", { update_id: update?.update_id });
   const cb = update.callback_query;
   if (cb) {
     await tgAnswerCallback(tg, cb.id);

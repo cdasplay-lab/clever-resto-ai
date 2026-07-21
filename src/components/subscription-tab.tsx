@@ -1,9 +1,10 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Loader2, AlertCircle, CheckCircle2, ReceiptText } from "lucide-react";
 
 type Sub = {
   id: string;
@@ -31,12 +32,21 @@ type Plan = {
   is_custom: boolean;
   sort_order: number;
 };
+type Payment = {
+  id: string;
+  amount_iqd: number;
+  method: string;
+  reference: string | null;
+  status: string;
+  paid_at: string;
+};
 
 export function SubscriptionTab({ restaurantId }: { restaurantId: string }) {
   const [loading, setLoading] = useState(true);
   const [sub, setSub] = useState<Sub | null>(null);
   const [usage, setUsage] = useState<Usage | null>(null);
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
   useEffect(() => {
     void load();
@@ -44,26 +54,44 @@ export function SubscriptionTab({ restaurantId }: { restaurantId: string }) {
 
   async function load() {
     setLoading(true);
-    const [{ data: subData }, { data: plansData }] = await Promise.all([
+    const [{ data: subData }, { data: plansData }, { data: paymentData }] = await Promise.all([
       supabase.rpc("get_my_subscription", { _restaurant_id: restaurantId }),
       supabase.from("plans").select("*").eq("is_active", true).order("sort_order"),
+      (supabase.from as any)("subscription_payments")
+        .select("id,amount_iqd,method,reference,status,paid_at")
+        .eq("restaurant_id", restaurantId)
+        .order("paid_at", { ascending: false })
+        .limit(12),
     ]);
     const payload = (subData as { subscription: Sub | null; usage: Usage } | null) ?? null;
     setSub(payload?.subscription ?? null);
     setUsage(payload?.usage ?? null);
     setPlans((plansData as Plan[]) ?? []);
+    setPayments((paymentData as Payment[]) ?? []);
     setLoading(false);
   }
 
   if (loading) {
-    return <div className="flex justify-center p-8"><Loader2 className="animate-spin" /></div>;
+    return (
+      <div className="flex justify-center p-8">
+        <Loader2 className="animate-spin" />
+      </div>
+    );
   }
 
   const expired = sub && new Date(sub.period_end) < new Date();
-  const isActive = sub && sub.status === "active" && !expired;
-  const aiPct = sub && usage ? Math.min(100, (usage.ai_replies_used / sub.max_ai_replies) * 100) : 0;
-  const ordersPct = sub && usage ? Math.min(100, (usage.confirmed_orders_used / sub.max_confirmed_orders) * 100) : 0;
-  const branchPct = sub && usage ? Math.min(100, (usage.branches_used / sub.max_branches) * 100) : 0;
+  const isActive = sub && ["active", "trialing"].includes(sub.status) && !expired;
+  const daysRemaining = sub
+    ? Math.max(0, Math.ceil((new Date(sub.period_end).getTime() - Date.now()) / 86_400_000))
+    : 0;
+  const aiPct =
+    sub && usage ? Math.min(100, (usage.ai_replies_used / sub.max_ai_replies) * 100) : 0;
+  const ordersPct =
+    sub && usage
+      ? Math.min(100, (usage.confirmed_orders_used / sub.max_confirmed_orders) * 100)
+      : 0;
+  const branchPct =
+    sub && usage ? Math.min(100, (usage.branches_used / sub.max_branches) * 100) : 0;
 
   return (
     <div className="space-y-6">
@@ -105,12 +133,16 @@ export function SubscriptionTab({ restaurantId }: { restaurantId: string }) {
                   {sub.price_iqd.toLocaleString()} د.ع / شهرياً
                 </p>
               </div>
-              <Badge className="gap-1"><CheckCircle2 className="h-3 w-3" /> نشطة</Badge>
+              <Badge className="gap-1">
+                <CheckCircle2 className="h-3 w-3" />{" "}
+                {sub.status === "trialing" ? "تجريبية" : "نشطة"}
+              </Badge>
             </div>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="text-sm text-muted-foreground">
-              تنتهي في: {new Date(sub.period_end).toLocaleDateString("ar")}
+              متبقي {daysRemaining.toLocaleString("ar")} يوم — تنتهي في{" "}
+              {new Date(sub.period_end).toLocaleDateString("ar")}
             </div>
 
             <UsageBar
@@ -153,7 +185,11 @@ export function SubscriptionTab({ restaurantId }: { restaurantId: string }) {
                   <Row label="الفروع" v={p.max_branches} custom={p.is_custom} />
                   <Row label="ردود AI / شهر" v={p.max_ai_replies} custom={p.is_custom} />
                   <Row label="طلبات مؤكدة / شهر" v={p.max_confirmed_orders} custom={p.is_custom} />
-                  {current && <Badge variant="secondary" className="mt-2">باقتك الحالية</Badge>}
+                  {current && (
+                    <Badge variant="secondary" className="mt-2">
+                      باقتك الحالية
+                    </Badge>
+                  )}
                 </CardContent>
               </Card>
             );
@@ -163,11 +199,47 @@ export function SubscriptionTab({ restaurantId }: { restaurantId: string }) {
           للترقية أو تفعيل باقة، تواصل مع إدارة المنصة.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <ReceiptText className="h-4 w-4" /> سجل الدفعات
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {!payments.length && (
+            <p className="text-sm text-muted-foreground">لا توجد دفعات مسجلة بعد.</p>
+          )}
+          {payments.map((p) => (
+            <div
+              key={p.id}
+              className="flex flex-wrap items-center justify-between gap-2 border-b pb-2 text-sm"
+            >
+              <span>
+                {p.amount_iqd.toLocaleString("ar-IQ")} د.ع — {p.method}
+              </span>
+              <span className="text-muted-foreground">
+                {p.reference || "بدون مرجع"} · {new Date(p.paid_at).toLocaleDateString("ar")}
+              </span>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function UsageBar({ label, used, max, pct }: { label: string; used: number; max: number; pct: number }) {
+function UsageBar({
+  label,
+  used,
+  max,
+  pct,
+}: {
+  label: string;
+  used: number;
+  max: number;
+  pct: number;
+}) {
   const danger = pct >= 90;
   return (
     <div>

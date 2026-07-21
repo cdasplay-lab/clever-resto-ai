@@ -2,11 +2,13 @@
 // to "pending", decrements stock, then fires orders-dispatch for each.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
+import { heartbeat } from "../_shared/monitoring.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
   try {
     const db = admin();
+    await heartbeat(db, "scheduled-dispatch", null, "ok");
     const cutoff = new Date(Date.now() + 30 * 60 * 1000).toISOString();
     const { data: orders, error } = await db
       .from("orders")
