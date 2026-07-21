@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
 
 jobs:
   # Frontend: type safety + lint + build. Catches broken imports/types
@@ -35,10 +34,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
       - name: Type-check shared logic
-        run: deno check supabase/functions/_shared/geo.ts supabase/functions/_shared/monitoring.ts supabase/functions/marketing-send/index.ts
+        run: >-
+          deno check
+          supabase/functions/_shared/geo.ts
+          supabase/functions/_shared/monitoring.ts
+          supabase/functions/_shared/order-domain.ts
+          supabase/functions/_shared/order-contracts.ts
+          supabase/functions/agent-run/index.ts
+          supabase/functions/marketing-send/index.ts
       - name: Unit tests (shared)
         run: deno test --allow-read supabase/functions/_shared/
