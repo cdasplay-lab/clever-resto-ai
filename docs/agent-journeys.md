@@ -5,5 +5,6 @@
 - AI quota is charged only when a run reaches the model; deterministic tracking and paused conversations remain free.
 - Cancellation is an atomic database transition and restores tracked stock once, even with retries or concurrent status changes.
 - Telegram, WhatsApp and scheduled dispatch publish best-effort service heartbeats without blocking customer traffic.
+- Chat and future Realtime voice agents consume one shared order-tool contract registry; confirmation and preview fingerprints use the same shared domain rules.
 
 Run live end-to-end tests against preview before production: order, schedule, edit/cancel, stock restoration, tracking/delay, complaint handoff/resume, quota exhaustion and channel outages.

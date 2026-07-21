@@ -9,6 +9,14 @@ import { embedText } from "../_shared/embed.ts";
 import { retryFetch } from "../_shared/retry.ts";
 import { checkBranchCoverage, GOVERNORATES as IQ_GOVS } from "../_shared/geo.ts";
 import { isInternalCall } from "../_shared/auth.ts";
+import { replaceSharedOrderTools } from "../_shared/order-contracts.ts";
+import {
+  cartFingerprint,
+  isConfirmationFresh,
+  isExplicitOrderConfirmation,
+  sha256Hex,
+} from "../_shared/order-domain.ts";
+import type { CartItem, DeliveryInfo as Delivery } from "../_shared/order-domain.ts";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const MODEL = Deno.env.get("AGENT_MODEL") ?? "google/gemini-3-flash-preview";
@@ -94,30 +102,6 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   });
 }
 
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function cartFingerprint(cart: any[], delivery: any, branchId: string | null, customerName?: string | null): string {
-  const norm = {
-    cart: (cart || []).map((c) => ({
-      id: c.menu_item_id, q: c.qty, p: c.unit_price,
-      o: (c.selected_options || []).map((s: any) => `${s.group}=${s.choice}`).sort().join("|"),
-      n: c.notes || "",
-    })),
-    d: {
-      a: delivery?.address || "",
-      p: delivery?.phone || "",
-      t: delivery?.time || "",
-      pm: delivery?.payment_method || "",
-    },
-    b: branchId || "",
-    cn: (customerName || "").toString().trim(),
-  };
-  return JSON.stringify(norm);
-}
-
 // Normalize a branch delivery_areas entry: supports both plain strings
 // and structured objects like { name, fee, eta_minutes }.
 function branchAreaName(a: any): string {
@@ -128,18 +112,13 @@ function branchAreaName(a: any): string {
 }
 
 
-const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
-const REJECT_CONFIRM_RE = /(^|[\s،,.!؟?])(لا|مو|مش|غير|الغ|ألغي|الغي|بدل|غيّر|غير)([\s،,.!؟?]|$)/i;
-const CONFIRMATION_TTL_MS = 10 * 60 * 1000;
-
 async function latestExplicitConfirmation(db: any, conversationId: string, pending: any): Promise<string | null> {
-  const createdAt = new Date(String(pending?.created_at || "")).getTime();
-  if (!Number.isFinite(createdAt) || Date.now() - createdAt > CONFIRMATION_TTL_MS) return null;
+  if (!isConfirmationFresh(pending?.created_at)) return null;
   const { data } = await db.from("messages").select("content,created_at")
     .eq("conversation_id", conversationId).eq("role", "user")
     .gte("created_at", pending.created_at).order("created_at", { ascending: false }).limit(1).maybeSingle();
   const text = String(data?.content || "").trim();
-  if (!text || REJECT_CONFIRM_RE.test(text) || !CONFIRM_RE.test(text)) return null;
+  if (!isExplicitOrderConfirmation(text)) return null;
   return text;
 }
 
@@ -235,23 +214,6 @@ function inferBranchIdFromTexts(texts: string[], branches: any[]): string | null
   return null;
 }
 
-type CartItem = {
-  menu_item_id: string;
-  name: string;
-  qty: number;
-  unit_price: number;
-  notes?: string;
-  selected_options?: { group: string; choice: string }[];
-};
-
-type Delivery = {
-  address?: string;
-  phone?: string;
-  time?: string;
-  area?: string;
-  payment_method?: "cash" | "card_on_delivery";
-};
-
 // Find in-stock alternatives in the same category, used when an item is OOS.
 async function suggestAlternatives(
   db: any,
@@ -282,7 +244,7 @@ async function suggestAlternatives(
 
 
 // ---------- Tool definitions (sent to the model) ----------
-const TOOLS = [
+const AGENT_TOOL_LAYOUT = [
   {
     type: "function",
     function: {
@@ -601,6 +563,10 @@ const TOOLS = [
     },
   },
 ] as const;
+
+// Replace shared definitions in place so the current model sees the exact same
+// tool order. Shadow-mode work can remove the legacy copies after comparison.
+const TOOLS = replaceSharedOrderTools(AGENT_TOOL_LAYOUT);
 
 // ---------- Complaint keyword detection ----------
 const COMPLAINT_PATTERNS: Array<{ re: RegExp; type: string }> = [

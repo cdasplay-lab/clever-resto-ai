@@ -5,10 +5,22 @@ const read = (path: string) => Deno.readTextFile(new URL(path, root));
 
 Deno.test("agent confirmation is derived from the latest persisted customer message", async () => {
   const source = await read("agent-run/index.ts");
+  const domain = await read("_shared/order-domain.ts");
   assert.match(source, /latestExplicitConfirmation/);
-  assert.match(source, /REJECT_CONFIRM_RE/);
-  assert.match(source, /CONFIRMATION_TTL_MS/);
-  assert.doesNotMatch(source, /const userOk = typeof args\.user_confirmation_text/);
+  assert.match(source, /isConfirmationFresh/);
+  assert.match(source, /isExplicitOrderConfirmation/);
+  assert.match(domain, /CONFIRMATION_TTL_MS/);
+  assert.match(domain, /REJECT_CONFIRM_RE/);
+  assert.doesNotMatch(
+    source,
+    /const userOk = typeof args\.user_confirmation_text/,
+  );
+});
+
+Deno.test("the current agent consumes the shared order contract registry", async () => {
+  const source = await read("agent-run/index.ts");
+  assert.match(source, /replaceSharedOrderTools\(AGENT_TOOL_LAYOUT\)/);
+  assert.match(source, /\.\.\/_shared\/order-contracts\.ts/);
 });
 
 Deno.test("AI quota is consumed only after deterministic journeys", async () => {
@@ -26,7 +38,9 @@ Deno.test("order cancellation uses the atomic transition RPC", async () => {
 });
 
 Deno.test("cron authentication has no source-controlled fallback secret", async () => {
-  const source = await Deno.readTextFile(new URL("../../../src/lib/cron-auth.ts", import.meta.url));
+  const source = await Deno.readTextFile(
+    new URL("../../../src/lib/cron-auth.ts", import.meta.url),
+  );
   assert.doesNotMatch(source, /FALLBACK_CRON_SECRET|crn_[a-z0-9]{16}/i);
   assert.match(source, /expected\.length >= 32/);
 });
