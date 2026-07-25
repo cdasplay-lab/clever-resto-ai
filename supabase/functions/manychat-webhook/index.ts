@@ -2,8 +2,8 @@
 // existing multi-tenant Clever restaurant agent.
 //
 // Manychat Dynamic Block / External Request calls:
-//   POST /functions/v1/manychat-webhook?r=<restaurant_id>&channel=facebook|instagram
-//   Header: X-Clever-Manychat-Secret: <MANYCHAT_WEBHOOK_SECRET>
+//   POST /functions/v1/manychat-webhook?channel=facebook|instagram
+//   Header: X-API-Key: <restaurant platform API key>
 //
 // Expected body (use Manychat variables):
 // {
@@ -16,22 +16,43 @@
 // }
 //
 // Response is Manychat Dynamic Block v2 JSON. The endpoint is public only at
-// the network layer; every request must pass the shared secret and an active
-// restaurant id.
+// the network layer; every request must pass a restaurant-scoped API key.
 
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
 import { internalHeaders } from "../_shared/auth.ts";
 import { retryFetch } from "../_shared/retry.ts";
 
-const MAX_TEXT_LENGTH = 4000;
+const MAX_INPUT_LENGTH = 4000;
+const MAX_OUTPUT_CHUNK = 1800;
+const MAX_OUTPUT_MESSAGES = 8;
 const AGENT_TIMEOUT_MS = 9_000; // Manychat DevTools timeout is 10 seconds.
 
-function safeEqual(a: string | null, b: string): boolean {
-  if (!a || !b || a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+async function sha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+async function authenticateRestaurant(req: Request): Promise<string | null> {
+  const apiKey = req.headers.get("x-api-key")?.trim();
+  if (!apiKey) return null;
+
+  const db = admin();
+  const keyHash = await sha256(apiKey);
+  const { data, error } = await db
+    .from("api_keys")
+    .select("restaurant_id")
+    .eq("key_hash", keyHash)
+    .maybeSingle();
+
+  if (error || !data?.restaurant_id) return null;
+  await db
+    .from("api_keys")
+    .update({ last_used_at: new Date().toISOString() })
+    .eq("key_hash", keyHash);
+  return data.restaurant_id as string;
 }
 
 function normalizeChannel(raw: string | null): "facebook" | "instagram" | null {
@@ -41,46 +62,47 @@ function normalizeChannel(raw: string | null): "facebook" | "instagram" | null {
   return null;
 }
 
-function cleanText(value: unknown): string {
+function cleanText(value: unknown, max = MAX_INPUT_LENGTH): string {
   return String(value ?? "")
     .replace(/\u0000/g, "")
     .trim()
-    .slice(0, MAX_TEXT_LENGTH);
+    .slice(0, max);
 }
 
-function manychatTextResponse(
-  channel: "facebook" | "instagram",
-  text: string,
-  quickReplies: string[] = [],
-) {
-  const safeText = cleanText(text) || "صار تأخير بسيط، ممكن تعيد رسالتك؟";
+function splitOutput(value: unknown): string[] {
+  let remaining = cleanText(value, MAX_OUTPUT_CHUNK * MAX_OUTPUT_MESSAGES);
+  if (!remaining) remaining = "صار تأخير بسيط، ممكن تعيد رسالتك؟";
+
+  const parts: string[] = [];
+  while (remaining.length > MAX_OUTPUT_CHUNK && parts.length < MAX_OUTPUT_MESSAGES - 1) {
+    let cut = remaining.lastIndexOf("\n\n", MAX_OUTPUT_CHUNK);
+    if (cut < MAX_OUTPUT_CHUNK * 0.45) cut = remaining.lastIndexOf("\n", MAX_OUTPUT_CHUNK);
+    if (cut < MAX_OUTPUT_CHUNK * 0.45) cut = remaining.lastIndexOf(" ", MAX_OUTPUT_CHUNK);
+    if (cut < MAX_OUTPUT_CHUNK * 0.45) cut = MAX_OUTPUT_CHUNK;
+    parts.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+  if (remaining) parts.push(remaining);
+  return parts.filter(Boolean).slice(0, MAX_OUTPUT_MESSAGES);
+}
+
+function manychatTextResponse(channel: "facebook" | "instagram", text: unknown) {
   const content: Record<string, unknown> = {
-    messages: [{ type: "text", text: safeText }],
+    messages: splitOutput(text).map((part) => ({ type: "text", text: part })),
     actions: [],
+    quick_replies: [],
   };
 
-  // Instagram's Dynamic Block response requires an explicit channel type.
+  // Instagram Dynamic Blocks require an explicit channel type.
   if (channel === "instagram") content.type = "instagram";
-
-  // A content quick reply can carry its caption as the next user message.
-  // Keep the set deliberately small to stay within Manychat/Meta limits.
-  const replies = Array.isArray(quickReplies)
-    ? quickReplies.map(cleanText).filter(Boolean).slice(0, 6)
-    : [];
-  if (replies.length) {
-    content.quick_replies = replies.map((caption) => ({
-      type: "content",
-      caption: caption.slice(0, 20),
-      content: {
-        messages: [{ type: "text", text: caption }],
-      },
-    }));
-  }
-
   return { version: "v2", content };
 }
 
-function errorResponse(channel: "facebook" | "instagram", message: string, status = 200) {
+function userFacingResponse(
+  channel: "facebook" | "instagram",
+  message: string,
+  status = 200,
+) {
   return json(manychatTextResponse(channel, message), status);
 }
 
@@ -93,7 +115,7 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
-async function markProcessed(channel: string, eventId: string | null): Promise<boolean> {
+async function alreadyProcessed(channel: string, eventId: string | null): Promise<boolean> {
   if (!eventId) return false;
   const db = admin();
   const { error } = await db.from("processed_updates").insert({
@@ -111,16 +133,11 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
   const url = new URL(req.url);
-  const restaurantId = cleanText(url.searchParams.get("r"));
   const channel = normalizeChannel(url.searchParams.get("channel"));
   if (!channel) return json({ error: "unsupported_channel" }, 400);
 
-  const configuredSecret = Deno.env.get("MANYCHAT_WEBHOOK_SECRET") ?? "";
-  const suppliedSecret = req.headers.get("X-Clever-Manychat-Secret");
-  if (!configuredSecret || !safeEqual(suppliedSecret, configuredSecret)) {
-    return json({ error: "unauthorized" }, 401);
-  }
-  if (!restaurantId) return json({ error: "restaurant_id_required" }, 400);
+  const restaurantId = await authenticateRestaurant(req);
+  if (!restaurantId) return json({ error: "unauthorized" }, 401);
 
   let body: any;
   try {
@@ -139,12 +156,11 @@ Deno.serve(async (req) => {
   const userText = cleanText(body?.text ?? body?.last_input_text ?? body?.message);
   const eventId = cleanText(body?.event_id ?? body?.message_id ?? body?.request_id) || null;
 
-  if (!subscriberId) return errorResponse(channel, "تعذر تحديد حساب الزبون. حاول مرة ثانية.");
-  if (!userText) return errorResponse(channel, "دزلي طلبك برسالة حتى أساعدك 🌹");
+  if (!subscriberId) return userFacingResponse(channel, "تعذر تحديد حساب الزبون. حاول مرة ثانية.");
+  if (!userText) return userFacingResponse(channel, "دزلي طلبك برسالة حتى أساعدك 🌹");
 
-  if (await markProcessed(channel, eventId)) {
-    // Manychat expects a valid Dynamic Block payload even for retries.
-    return errorResponse(channel, "وصلتني رسالتك، لحظة وأكمل وياك 🌹");
+  if (await alreadyProcessed(channel, eventId)) {
+    return userFacingResponse(channel, "وصلتني رسالتك، لحظة وأكمل وياك 🌹");
   }
 
   const db = admin();
@@ -155,7 +171,7 @@ Deno.serve(async (req) => {
     .maybeSingle();
 
   if (!restaurant || !restaurant.is_active) {
-    return errorResponse(channel, "خدمة الطلبات متوقفة مؤقتاً عند المطعم.");
+    return userFacingResponse(channel, "خدمة الطلبات متوقفة مؤقتاً عند المطعم.");
   }
 
   const externalChatId = subscriberId;
@@ -171,7 +187,7 @@ Deno.serve(async (req) => {
 
   if (existingError) {
     console.error("manychat conversation lookup failed", existingError);
-    return errorResponse(channel, "صار خطأ بسيط، جرب مرة ثانية.");
+    return userFacingResponse(channel, "صار خطأ بسيط، جرب مرة ثانية.");
   }
 
   if (existing) {
@@ -182,14 +198,15 @@ Deno.serve(async (req) => {
     const cartHasItems = Array.isArray(existing.cart) && existing.cart.length > 0;
     const updates: Record<string, unknown> = {
       last_message_at: nowIso,
-      customer_name: customerName || undefined,
       customer_handle: `${channel}:${subscriberId}`,
       meta: {
         ...(existing.meta || {}),
         manychat_page_id: pageId || undefined,
         manychat_subscriber_id: subscriberId,
+        source: "manychat",
       },
     };
+    if (customerName) updates.customer_name = customerName;
     if (stale && cartHasItems && existing.state !== "submitted") {
       updates.cart = [];
       updates.delivery = {};
@@ -217,7 +234,7 @@ Deno.serve(async (req) => {
 
     if (createError || !created) {
       console.error("manychat conversation create failed", createError);
-      return errorResponse(channel, "صار خطأ بسيط، جرب مرة ثانية.");
+      return userFacingResponse(channel, "صار خطأ بسيط، جرب مرة ثانية.");
     }
     conversationId = created.id;
   }
@@ -229,11 +246,11 @@ Deno.serve(async (req) => {
   });
   if (messageError) {
     console.error("manychat message insert failed", messageError);
-    return errorResponse(channel, "صار خطأ بسيط، جرب مرة ثانية.");
+    return userFacingResponse(channel, "صار خطأ بسيط، جرب مرة ثانية.");
   }
 
   const baseUrl = Deno.env.get("SUPABASE_URL");
-  if (!baseUrl) return errorResponse(channel, "الخدمة غير جاهزة حالياً، حاول بعد قليل.");
+  if (!baseUrl) return userFacingResponse(channel, "الخدمة غير جاهزة حالياً، حاول بعد قليل.");
 
   try {
     const agentResponse = await withTimeout(
@@ -248,16 +265,16 @@ Deno.serve(async (req) => {
     const data = await agentResponse.json().catch(() => ({}));
     if (!agentResponse.ok) {
       console.error("manychat agent-run failed", agentResponse.status, data);
-      return errorResponse(channel, "صار تأخير بسيط، ممكن تعيد رسالتك؟");
+      return userFacingResponse(channel, "صار تأخير بسيط، ممكن تعيد رسالتك؟");
     }
 
     if (data?.skipped === "bot_paused") {
-      return errorResponse(channel, "وصلت رسالتك للمطعم وراح يرد عليك الموظف بأقرب وقت 🌹");
+      return userFacingResponse(channel, "وصلت رسالتك للمطعم وراح يرد عليك الموظف بأقرب وقت 🌹");
     }
 
-    return json(manychatTextResponse(channel, data?.reply, data?.quick_replies));
+    return json(manychatTextResponse(channel, data?.reply));
   } catch (error) {
     console.error("manychat agent request failed", (error as Error)?.message || error);
-    return errorResponse(channel, "صار تأخير بسيط، ممكن تعيد رسالتك؟");
+    return userFacingResponse(channel, "صار تأخير بسيط، ممكن تعيد رسالتك؟");
   }
 });
