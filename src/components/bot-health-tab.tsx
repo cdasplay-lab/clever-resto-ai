@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +23,8 @@ type Health = {
   avg_latency_ms: number;
   tool_calls_24h: number;
   recent_logs: LogRow[];
+  heartbeats?: { service: string; status: string; last_seen_at: string }[];
+  alerts?: { id: string; severity: string; title: string; status: string; last_seen_at: string }[];
 };
 
 export function BotHealthTab({ restaurantId }: { restaurantId: string }) {
@@ -30,10 +33,24 @@ export function BotHealthTab({ restaurantId }: { restaurantId: string }) {
 
   async function load() {
     setLoading(true);
-    const { data: res, error } = await supabase.rpc("get_bot_health", {
-      _restaurant_id: restaurantId,
-    });
-    if (!error) setData(res as unknown as Health);
+    const [{ data: res, error }, { data: heartbeats }, { data: alerts }] = await Promise.all([
+      supabase.rpc("get_bot_health", { _restaurant_id: restaurantId }),
+      (supabase.from as any)("service_heartbeats")
+        .select("service,status,last_seen_at")
+        .eq("restaurant_id", restaurantId)
+        .order("last_seen_at", { ascending: false }),
+      (supabase.from as any)("monitoring_alerts")
+        .select("id,severity,title,status,last_seen_at")
+        .eq("restaurant_id", restaurantId)
+        .neq("status", "resolved")
+        .order("last_seen_at", { ascending: false }),
+    ]);
+    if (!error)
+      setData({
+        ...(res as unknown as Health),
+        heartbeats: heartbeats ?? [],
+        alerts: alerts ?? [],
+      });
     setLoading(false);
   }
 
@@ -110,6 +127,44 @@ export function BotHealthTab({ restaurantId }: { restaurantId: string }) {
           ))}
         </CardContent>
       </Card>
+      <div className="grid md:grid-cols-2 gap-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">القنوات والخدمات</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {!data.heartbeats?.length && (
+              <p className="text-sm text-muted-foreground">لا توجد نبضات خدمة بعد.</p>
+            )}
+            {data.heartbeats?.map((h) => (
+              <div key={h.service} className="flex justify-between text-sm">
+                <span>{h.service}</span>
+                <Badge variant={h.status === "ok" ? "secondary" : "destructive"}>
+                  {h.status} · {new Date(h.last_seen_at).toLocaleString("ar")}
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">التنبيهات المفتوحة</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {!data.alerts?.length && (
+              <p className="text-sm text-muted-foreground">لا توجد تنبيهات مفتوحة.</p>
+            )}
+            {data.alerts?.map((a) => (
+              <div key={a.id} className="flex justify-between gap-2 text-sm">
+                <span>{a.title}</span>
+                <Badge variant={a.severity === "critical" ? "destructive" : "secondary"}>
+                  {a.severity}
+                </Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

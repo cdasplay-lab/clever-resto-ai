@@ -7,7 +7,7 @@
 //     secrets to provision.
 //  2. Dashboard calls made with the owner's session JWT
 //     (supabase.functions.invoke attaches it automatically).
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 import { admin } from "./supabase.ts";
 
 function bearerToken(req: Request): string {

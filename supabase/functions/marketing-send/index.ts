@@ -17,7 +17,7 @@
 
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { admin } from "../_shared/supabase.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 
 const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
 const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY") ?? "";

@@ -1,7 +1,7 @@
 // send-manual-message: owner sends a manual reply to a conversation through its channel.
 // Auth: requires the caller's Supabase JWT (Authorization: Bearer <token>) so RLS is enforced.
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2.106.2";
 
 const GATEWAY = "https://connector-gateway.lovable.dev";
 

@@ -75,6 +75,8 @@ function AdminPage() {
   const [planCode, setPlanCode] = useState("starter");
   const [months, setMonths] = useState(1);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [activationStatus, setActivationStatus] = useState("active");
+  const [paymentReference, setPaymentReference] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -166,16 +168,15 @@ function AdminPage() {
   async function activate() {
     if (!dialog.row) return;
     setSubmitting(true);
-    const { error } = await supabase.rpc("activate_subscription", {
+    const { error } = await adminRpc("admin_activate_subscription", {
       _restaurant_id: dialog.row.restaurant_id, _plan_code: planCode, _months: months,
+      _status: activationStatus, _payment_method: paymentMethod,
+      _payment_reference: paymentReference || null, _notes: notes || null,
     });
     if (error) { setSubmitting(false); toast.error(error.message); return; }
-    const noteText = `طريقة الدفع: ${paymentMethod}${notes ? ` — ${notes}` : ""}`;
-    await supabase.from("restaurant_subscriptions").update({ notes: noteText })
-      .eq("restaurant_id", dialog.row.restaurant_id).eq("status", "active");
     setSubmitting(false);
     toast.success("تم تفعيل الباقة وتسجيل الدفع");
-    setDialog({ open: false }); setNotes("");
+    setDialog({ open: false }); setNotes(""); setPaymentReference("");
     await load();
   }
 
@@ -409,6 +410,13 @@ function AdminPage() {
               <Input type="number" min={1} value={months} onChange={(e) => setMonths(parseInt(e.target.value || "1", 10))} />
             </div>
             <div>
+              <label className="text-sm mb-2 block">نوع التفعيل</label>
+              <Select value={activationStatus} onValueChange={setActivationStatus}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="active">مدفوع</SelectItem><SelectItem value="trialing">تجريبي</SelectItem></SelectContent>
+              </Select>
+            </div>
+            <div>
               <label className="text-sm mb-2 block">طريقة الدفع</label>
               <Select value={paymentMethod} onValueChange={setPaymentMethod}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
@@ -421,6 +429,10 @@ function AdminPage() {
                 </SelectContent>
               </Select>
             </div>
+            {activationStatus === "active" && <div>
+              <label className="text-sm mb-2 block">مرجع الدفع</label>
+              <Input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} placeholder="رقم الإيصال أو التحويل" />
+            </div>}
             <div>
               <label className="text-sm mb-2 block">ملاحظات (اختياري)</label>
               <Input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="مثلاً: رقم الإيصال، اسم المحوّل..." />
