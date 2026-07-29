@@ -63,8 +63,18 @@ export function ComplaintsTab({ restaurantId }: { restaurantId: string }) {
     }
     const { error } = await supabase.from("complaints").update(patch).eq("id", c.id);
     if (error) { toast.error(error.message); return; }
+    // A complaint pauses the bot for that conversation. Resolving it must hand
+    // the customer back to the bot, otherwise they stay silently unanswered.
+    let resumed = false;
+    if (status === "resolved" && c.conversation_id) {
+      const { error: rErr } = await supabase
+        .from("conversations")
+        .update({ is_bot_paused: false })
+        .eq("id", c.conversation_id);
+      resumed = !rErr;
+    }
     setNotes((n) => ({ ...n, [c.id]: "" }));
-    toast.success("تم التحديث");
+    toast.success(resumed ? "تم الحل ورجع البوت للمحادثة" : "تم التحديث");
     load();
   }
 

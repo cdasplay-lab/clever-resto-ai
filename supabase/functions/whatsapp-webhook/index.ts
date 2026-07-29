@@ -249,7 +249,8 @@ async function processMessage(
     await waSendText(phoneNumberId, from, "الرسائل الصوتية على واتساب لسه ما مدعومة، اكتبلي طلبك نصياً 🙏");
     return;
   } else {
-    // unsupported: ignore quietly
+    // Stickers, documents, contacts, video... — answer instead of going silent.
+    await waSendText(phoneNumberId, from, "أگدر أقرأ النص، الصور، والموقع 📍\nدزّلي طلبك بوحدة من هذي وأخدمك فوراً.");
     return;
   }
 
@@ -258,7 +259,10 @@ async function processMessage(
     userText = userText ? `${userText}\n${locLine}` : locLine;
   }
 
-  if (!userText && !imageDataUrl) return;
+  if (!userText && !imageDataUrl) {
+    await waSendText(phoneNumberId, from, "ما وصلني محتوى أگدر أقراه 🙏 اكتبلي طلبك نصاً أو دزّ صورة.");
+    return;
+  }
 
   const db = admin();
   const externalChatId = from;
@@ -330,7 +334,9 @@ async function processMessage(
       method: "POST",
       headers: internalHeaders(),
       body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
-    }, { attempts: 2, label: "agent-run" });
+      // attempts:1 — agent-run is NOT idempotent (consumes quota, can insert an
+      // order); retrying a 5xx re-runs the whole turn and can duplicate both.
+    }, { attempts: 1, label: "agent-run" });
     data = await r.json().catch(() => ({}));
     ok = r.ok;
   } catch (e) {

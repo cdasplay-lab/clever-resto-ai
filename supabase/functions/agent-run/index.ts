@@ -55,7 +55,31 @@ async function releaseConversationLock(db: any, conversationId: string | null, t
 // Set the PLATFORM_ALERT_CHAT_ID secret to your Telegram chat id to receive
 // real-time alerts. Throttled per restaurant (warm-isolate memory) to avoid spam.
 const ALERT_THROTTLE_MS = 10 * 60 * 1000;
+// Owner-facing nudges (quota, misconfiguration) are rarer and more annoying.
+const OWNER_NUDGE_THROTTLE_MS = 30 * 60 * 1000;
 const lastAlertAt = new Map<string, number>();
+
+// Fire-and-forget Telegram nudge to the restaurant owner, throttled per key so
+// a recurring condition doesn't spam them. Never throws, never blocks the run.
+function notifyOwner(restaurant: any, key: string, text: string) {
+  try {
+    const chatId = restaurant?.owner_telegram_chat_id;
+    const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+    if (!chatId || !LOVABLE_API_KEY || !TELEGRAM_API_KEY) return;
+    const now = Date.now();
+    if (now - (lastAlertAt.get(key) || 0) < OWNER_NUDGE_THROTTLE_MS) return;
+    lastAlertAt.set(key, now);
+    fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+        "X-Connection-Api-Key": TELEGRAM_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    }).catch(() => {});
+  } catch (_) { /* notifying must never break the run */ }
+}
 
 async function alertFatalError(restaurantId: string | null, message: string, conversationId: string | null) {
   try {
@@ -652,11 +676,16 @@ function sanitizeStoredMessageForModel(m: any): string | null {
   return m.content;
 }
 
-function safeFinalReply(text: string, actions: any[], restaurant: any): string {
+function safeFinalReply(text: string, actions: any[], restaurant: any, hasMedia = false): string {
   const trimmed = (text || "").trim();
-  if (!hasInternalLeak(trimmed)) return trimmed;
+  // An empty reply reaches the customer as total silence (channels send only
+  // when reply is non-empty), so treat it exactly like a leaked reply.
+  if (trimmed && !hasInternalLeak(trimmed)) return trimmed;
   if (actions.some((a: any) => a?.type === "send_location")) return `هذا موقع ${restaurant?.name || "المطعم"} 📍`;
   if (actions.some((a: any) => a?.type === "request_location")) return "شارك موقعك من الزر اللي تحت حتى نتأكد من التوصيل 👇";
+  // Media (menu photos) already carries the answer — no filler text needed.
+  if (!trimmed && hasMedia) return "";
+  if (!trimmed) return "عذراً، ما وصلتني الفكرة صح 🙏 ممكن تعيد طلبك بكلمات أبسط؟";
   return "صار خلل بسيط، ممكن نعيد المحاولة؟";
 }
 
@@ -782,6 +811,22 @@ function fmtDur(mins: number): string {
   if (mins < 60) return `${mins} دقيقة`;
   const h = Math.floor(mins / 60), m = mins % 60;
   return m ? `${h} ساعة و${m} دقيقة` : `${h} ساعة`;
+}
+
+// Hard open/closed check for code-level gates (the prompt text alone was never
+// enforced, so a model slip could accept an order at 3 AM).
+// Returns null when hours are undefined → callers must allow (current behavior).
+function isOpenNow(open_hours: any, at?: Date): boolean | null {
+  if (!open_hours || typeof open_hours !== "object" || !Object.keys(open_hours).length) return null;
+  const now = at ?? baghdadNow();
+  const h = open_hours[DAY_KEYS[now.getUTCDay()]];
+  if (!h) return null;
+  if (h.closed) return false;
+  if (!h.open || !h.close) return null;
+  const hhmm = `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`;
+  // Overnight shift (e.g. 18:00 → 02:00) wraps past midnight.
+  if (h.close < h.open) return hhmm >= h.open || hhmm <= h.close;
+  return hhmm >= h.open && hhmm <= h.close;
 }
 
 function openHoursStatus(open_hours: any): string {
@@ -1725,6 +1770,20 @@ async function runTool(
       return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم' أو 'أكد' بصراحة ثم أعد المحاولة." };
     }
 
+    // Closed-restaurant gate. The system prompt forbids this, but prompts are
+    // not guarantees — an immediate order must never reach a closed kitchen.
+    const submitBranch = branchId ? branchesAll.find((b: any) => b.id === branchId) : null;
+    const submitHours = submitBranch?.open_hours && Object.keys(submitBranch.open_hours || {}).length
+      ? submitBranch.open_hours
+      : restaurant.open_hours;
+    if (isOpenNow(submitHours) === false) {
+      return {
+        error: "closed_now",
+        user_message: "إحنا مغلقين هسه 🙏 أگدر أجدوّل طلبك لوقت الفتح إذا تحب.",
+        note: "لا ترسل طلب فوري الآن. اعرض على الزبون جدولة الطلب واستدعِ schedule_order بوقت داخل الدوام.",
+      };
+    }
+
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
@@ -1921,6 +1980,19 @@ async function runTool(
     const maxMs = Date.now() + 14 * 24 * 60 * 60 * 1000;
     if (when.getTime() < minMs) return { error: "الموعد لازم يكون بعد 15 دقيقة على الأقل من الآن. اقترح وقت أبعد." };
     if (when.getTime() > maxMs) return { error: "الموعد بعيد جداً (أقصى حد أسبوعين). اقترح وقت أقرب." };
+    // The slot itself must fall inside working hours (a 4 AM slot was accepted).
+    const schedBranch = branchId ? branchesAll.find((b: any) => b.id === branchId) : null;
+    const schedHours = schedBranch?.open_hours && Object.keys(schedBranch.open_hours || {}).length
+      ? schedBranch.open_hours
+      : restaurant.open_hours;
+    // baghdadNow() shifts UTC by +3, so mirror that for the requested slot.
+    if (isOpenNow(schedHours, new Date(when.getTime() + 3 * 60 * 60 * 1000)) === false) {
+      return {
+        error: "closed_at_that_time",
+        user_message: "هذا الوقت خارج دوامنا 🙏 اختار وقت ثاني ضمن أوقات الفتح.",
+        note: "اعرض على الزبون أقرب وقت داخل الدوام (الجدول موجود بالتعليمات) ثم أعد المحاولة.",
+      };
+    }
     if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
 
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
@@ -2693,11 +2765,21 @@ Deno.serve(async (req) => {
     // But ping the owner/branch so they actually see the customer is still messaging,
     // throttled to once every 5 minutes per conversation to avoid spam.
     if (conv.is_bot_paused) {
+      // The customer must never face silence while the bot is paused: send a
+      // short "someone is coming" notice, throttled by the same window as the
+      // owner ping so repeated messages don't repeat it.
+      let pausedNotice = "";
       try {
         const meta = (conv.meta || {}) as Record<string, any>;
         const lastPingAt = meta.last_handoff_ping_at ? new Date(meta.last_handoff_ping_at).getTime() : 0;
         const PING_THROTTLE_MS = 5 * 60 * 1000;
         if (Date.now() - lastPingAt > PING_THROTTLE_MS) {
+          pausedNotice = "وصلت رسالتك 🙏 موظف من المطعم راح يرد عليك خلال دقائق.";
+          // Persist the throttle immediately — it must not depend on whether
+          // the owner has a Telegram chat configured.
+          await db.from("conversations").update({
+            meta: { ...meta, last_handoff_ping_at: new Date().toISOString() },
+          }).eq("id", conversation_id);
           const { data: rest } = await db
             .from("restaurants")
             .select("id,name,owner_telegram_chat_id")
@@ -2737,15 +2819,15 @@ Deno.serve(async (req) => {
                 body: JSON.stringify({ chat_id: chat, text }),
               }).catch(() => {}),
             ));
-            await db.from("conversations").update({
-              meta: { ...meta, last_handoff_ping_at: new Date().toISOString() },
-            }).eq("id", conversation_id);
           }
         }
       } catch (e) {
         console.error("handoff ping failed:", e);
       }
-      return json({ reply: "", state: conv.state, media: [], skipped: "bot_paused" });
+      if (pausedNotice) {
+        await db.from("messages").insert({ conversation_id, role: "assistant", content: pausedNotice });
+      }
+      return json({ reply: pausedNotice, state: conv.state, media: [], skipped: "bot_paused" });
     }
 
     const { data: restaurant, error: e2 } = await db
@@ -2764,7 +2846,13 @@ Deno.serve(async (req) => {
       _ref: conversation_id,
     });
     if (quotaErr) {
+      // Deliberately fails open (revenue-safe), but the owner should know.
       console.error("consume_quota error:", quotaErr);
+      notifyOwner(
+        restaurant,
+        `quota_err:${restaurant.id}`,
+        "⚠️ صار خلل بفحص باقة الاشتراك — البوت مستمر بالرد مؤقتاً. راجع تبويب «الاشتراك».",
+      );
     } else if (quotaRes && (quotaRes as any).allowed === false) {
       const reason = (quotaRes as any).reason;
       console.log("Bot blocked for restaurant", restaurant.id, "reason:", reason);
@@ -2775,6 +2863,17 @@ Deno.serve(async (req) => {
         : reason === "branch_limit_exceeded"
         ? "النظام يحتاج تحديث إعدادات الفروع من إدارة المطعم قبل ما أكمل الطلب."
         : "النظام متوقف مؤقتاً من إدارة المطعم. حاول لاحقاً أو تواصل ويا المطعم.";
+      // The owner must not learn about this from angry customers.
+      notifyOwner(
+        restaurant,
+        `quota:${restaurant.id}`,
+        `🚫 البوت متوقف عن الرد لزبائنك.\nالسبب: ${
+          reason === "no_active_subscription" ? "الاشتراك منتهي أو غير مفعّل"
+          : reason === "ai_reply_limit" ? "وصلت الحد الشهري لردود البوت"
+          : reason === "branch_limit_exceeded" ? "عدد الفروع أكثر من باقتك"
+          : reason || "غير معروف"
+        }\nجدّد أو ارفع الباقة من تبويب «الاشتراك» حتى يرجع يشتغل.`,
+      );
       await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
       return json({ reply, state: conv.state, media: [], skipped: "quota_blocked", reason });
     }
@@ -3154,7 +3253,7 @@ Deno.serve(async (req) => {
       });
     } catch (_) { /* logging must never break the run */ }
 
-    finalText = safeFinalReply(finalText, actions, restaurant);
+    finalText = safeFinalReply(finalText, actions, restaurant, media.length > 0);
     return json({ reply: finalText, state: conv.state, media, actions, quick_replies: quickReplies });
   } catch (e: any) {
     const msg = e?.message || "error";

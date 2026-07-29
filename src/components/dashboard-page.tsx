@@ -1544,7 +1544,7 @@ function ChannelsTab({ restaurant }: { restaurant: Restaurant }) {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2"><Radio className="h-5 w-5" /> القنوات</CardTitle>
-          <CardDescription>اربط قنوات مطعمك. Telegram يربط بوت خاص بمطعمك. باقي القنوات تخزّن المعرّف فقط حالياً.</CardDescription>
+          <CardDescription>اربط قنوات مطعمك. تيليجرام وواتساب وإنستغرام تستقبل رسائل الزبائن فعلياً. فيسبوك يخزّن المعرّف فقط حالياً.</CardDescription>
         </CardHeader>
       </Card>
 
@@ -1844,6 +1844,9 @@ function SimpleChannelCard({ restaurant, channel }: { restaurant: Restaurant; ch
   const meta = channelMeta(channel);
   const Icon = meta.icon;
   const f = FIELDS[channel];
+  // Instagram has a live webhook that routes on instagram_handle. Facebook has
+  // none — saving a page name does nothing, so never imply it's receiving.
+  const isLive = channel === "instagram";
 
   const [value, setValue] = useState("");
   const [saved, setSaved] = useState(false);
@@ -1904,13 +1907,21 @@ function SimpleChannelCard({ restaurant, channel }: { restaurant: Restaurant; ch
           </div>
           <div>
             <CardTitle className="text-base">{meta.label}</CardTitle>
-            <CardDescription className="text-xs">{saved ? "مسجّل" : "غير مسجّل"}</CardDescription>
+            <CardDescription className="text-xs">
+              {!saved ? "غير مسجّل" : isLive ? "مسجّل ويستقبل رسائل" : "محفوظ — لساتها ما تستقبل رسائل"}
+            </CardDescription>
           </div>
         </div>
         {saved && (
-          <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
-            <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
-          </Badge>
+          isLive ? (
+            <Badge variant="outline" className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+              <CheckCircle2 className="h-3 w-3 ml-1" /> مفعّل
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="bg-amber-500/15 text-amber-500 border-amber-500/30">
+              قريباً
+            </Badge>
+          )
         )}
       </CardHeader>
       <CardContent className="space-y-3">

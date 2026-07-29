@@ -140,7 +140,11 @@ async function processMessagingEvent(event: any, accountId: string, restaurantId
   if (await alreadyProcessed(messageId)) return;
 
   const text = incomingText(event);
-  if (!text) return;
+  if (!text) {
+    // Media/sticker DMs aren't readable yet — answer instead of going silent.
+    await sendInstagramText(accountId, senderId, "أگدر أقرأ الرسائل النصية هنا 🙏 اكتبلي طلبك وأخدمك فوراً.");
+    return;
+  }
 
   const db = admin();
   let conversationId: string;
@@ -210,11 +214,13 @@ async function processMessagingEvent(event: any, accountId: string, restaurantId
     method: "POST",
     headers: internalHeaders(),
     body: JSON.stringify({ conversation_id: conversationId }),
-  }, { attempts: 2, label: "instagram:agent-run" });
+    // attempts:1 — agent-run is NOT idempotent (consumes quota, can insert an
+    // order); retrying a 5xx re-runs the whole turn.
+  }, { attempts: 1, label: "instagram:agent-run" });
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`agent_run_failed:${response.status}`);
-  if (data?.skipped === "bot_paused") return;
+  // bot_paused now carries a throttled "someone is coming" notice — forward it.
   if (data?.reply) await sendInstagramText(accountId, senderId, data.reply);
 }
 

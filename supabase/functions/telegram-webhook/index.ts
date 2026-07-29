@@ -214,10 +214,18 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
   const caption: string | undefined = message?.caption;
   const photos: any[] | undefined = message?.photo;
   const photo = Array.isArray(photos) && photos.length ? photos[photos.length - 1] : null;
-  const voice = message?.voice || message?.audio;
+  // video_note (round video) rides the same transcription path; if the audio
+  // model can't read it, the existing voice fallback message covers it.
+  const voice = message?.voice || message?.audio || message?.video_note;
   const location = message?.location;
 
-  if (!chatId || (!text && !photo && !voice && !location)) return;
+  if (!chatId) return;
+  if (!text && !photo && !voice && !location) {
+    // Stickers, documents, contacts, GIFs... — never leave the customer with
+    // silence, they'd assume the bot is dead.
+    await tgSend(tg, chatId, "أگدر أقرأ النص، الصور، الرسائل الصوتية، والموقع 📍\nدزّلي طلبك بوحدة من هذي وأخدمك فوراً.");
+    return;
+  }
 
   await tgSendTyping(tg, chatId);
 
@@ -251,7 +259,9 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
 
   let transcribedText = "";
   if (voice?.file_id) {
-    const audioDataUrl = await downloadAsDataUrl(voice.file_id, voice.mime_type || "audio/ogg");
+    // Telegram's VideoNote carries no mime_type — it's always mp4.
+    const voiceMime = voice.mime_type || (message?.video_note ? "video/mp4" : "audio/ogg");
+    const audioDataUrl = await downloadAsDataUrl(voice.file_id, voiceMime);
     if (audioDataUrl) {
       const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY")!;
       const mime = audioDataUrl.match(/^data:([^;]+)/)?.[1] || "audio/ogg";
@@ -403,7 +413,9 @@ async function processUpdate(update: any, tg: TgClient, restaurantId: string): P
       method: "POST",
       headers: internalHeaders(),
       body: JSON.stringify({ conversation_id: convId, image_url: imageDataUrl }),
-    }, { attempts: 2, label: "agent-run" });
+      // attempts:1 — agent-run is NOT idempotent (consumes quota, can insert an
+      // order); retrying a 5xx re-runs the whole turn and can duplicate both.
+    }, { attempts: 1, label: "agent-run" });
     data = await r.json().catch(() => ({}));
     ok = r.ok;
   } catch (e) {
