@@ -42,3 +42,8 @@ jobs:
         run: deno check supabase/functions/_shared/geo.ts
       - name: Unit tests (shared)
         run: deno test supabase/functions/_shared/
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Checkout regression tests (offline)
+        run: node --test tests/agent-checkout.test.cjs
