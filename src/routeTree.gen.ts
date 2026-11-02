@@ -9,47 +9,22 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as TermsRouteImport } from './routes/terms'
-import { Route as ResetPasswordRouteImport } from './routes/reset-password'
-import { Route as PrivacyRouteImport } from './routes/privacy'
-import { Route as DataDeletionRouteImport } from './routes/data-deletion'
-import { Route as DashboardRouteImport } from './routes/dashboard'
-import { Route as AuthRouteImport } from './routes/auth'
-import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
+import { Route as AuthRouteImport } from './routes/auth'
+import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as DataDeletionRouteImport } from './routes/data-deletion'
+import { Route as PrivacyRouteImport } from './routes/privacy'
+import { Route as ResetPasswordRouteImport } from './routes/reset-password'
+import { Route as TermsRouteImport } from './routes/terms'
 import { Route as TrackOrderIdRouteImport } from './routes/track.$orderId'
-import { Route as ApiPublicExpandMapsUrlRouteImport } from './routes/api/public/expand-maps-url'
-import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
 import { Route as ApiPublicCheckComplaintsRouteImport } from './routes/api/public/check-complaints'
+import { Route as ApiPublicCheckDelaysRouteImport } from './routes/api/public/check-delays'
+import { Route as ApiPublicExpandMapsUrlRouteImport } from './routes/api/public/expand-maps-url'
 
-const TermsRoute = TermsRouteImport.update({
-  id: '/terms',
-  path: '/terms',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ResetPasswordRoute = ResetPasswordRouteImport.update({
-  id: '/reset-password',
-  path: '/reset-password',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PrivacyRoute = PrivacyRouteImport.update({
-  id: '/privacy',
-  path: '/privacy',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DataDeletionRoute = DataDeletionRouteImport.update({
-  id: '/data-deletion',
-  path: '/data-deletion',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DashboardRoute = DashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AuthRoute = AuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -57,24 +32,39 @@ const AdminRoute = AdminRouteImport.update({
   path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AuthRoute = AuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DataDeletionRoute = DataDeletionRouteImport.update({
+  id: '/data-deletion',
+  path: '/data-deletion',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PrivacyRoute = PrivacyRouteImport.update({
+  id: '/privacy',
+  path: '/privacy',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ResetPasswordRoute = ResetPasswordRouteImport.update({
+  id: '/reset-password',
+  path: '/reset-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TermsRoute = TermsRouteImport.update({
+  id: '/terms',
+  path: '/terms',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TrackOrderIdRoute = TrackOrderIdRouteImport.update({
   id: '/track/$orderId',
   path: '/track/$orderId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPublicExpandMapsUrlRoute = ApiPublicExpandMapsUrlRouteImport.update({
-  id: '/api/public/expand-maps-url',
-  path: '/api/public/expand-maps-url',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ApiPublicCheckDelaysRoute = ApiPublicCheckDelaysRouteImport.update({
-  id: '/api/public/check-delays',
-  path: '/api/public/check-delays',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicCheckComplaintsRoute =
@@ -83,6 +73,16 @@ const ApiPublicCheckComplaintsRoute =
     path: '/api/public/check-complaints',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiPublicCheckDelaysRoute = ApiPublicCheckDelaysRouteImport.update({
+  id: '/api/public/check-delays',
+  path: '/api/public/check-delays',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiPublicExpandMapsUrlRoute = ApiPublicExpandMapsUrlRouteImport.update({
+  id: '/api/public/expand-maps-url',
+  path: '/api/public/expand-maps-url',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -189,46 +189,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/terms': {
-      id: '/terms'
-      path: '/terms'
-      fullPath: '/terms'
-      preLoaderRoute: typeof TermsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/reset-password': {
-      id: '/reset-password'
-      path: '/reset-password'
-      fullPath: '/reset-password'
-      preLoaderRoute: typeof ResetPasswordRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/privacy': {
-      id: '/privacy'
-      path: '/privacy'
-      fullPath: '/privacy'
-      preLoaderRoute: typeof PrivacyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/data-deletion': {
-      id: '/data-deletion'
-      path: '/data-deletion'
-      fullPath: '/data-deletion'
-      preLoaderRoute: typeof DataDeletionRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/dashboard': {
-      id: '/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof DashboardRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/auth': {
-      id: '/auth'
-      path: '/auth'
-      fullPath: '/auth'
-      preLoaderRoute: typeof AuthRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -238,11 +203,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/auth': {
+      id: '/auth'
+      path: '/auth'
+      fullPath: '/auth'
+      preLoaderRoute: typeof AuthRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/data-deletion': {
+      id: '/data-deletion'
+      path: '/data-deletion'
+      fullPath: '/data-deletion'
+      preLoaderRoute: typeof DataDeletionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/privacy': {
+      id: '/privacy'
+      path: '/privacy'
+      fullPath: '/privacy'
+      preLoaderRoute: typeof PrivacyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reset-password': {
+      id: '/reset-password'
+      path: '/reset-password'
+      fullPath: '/reset-password'
+      preLoaderRoute: typeof ResetPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terms': {
+      id: '/terms'
+      path: '/terms'
+      fullPath: '/terms'
+      preLoaderRoute: typeof TermsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/track/$orderId': {
@@ -252,11 +252,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TrackOrderIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/expand-maps-url': {
-      id: '/api/public/expand-maps-url'
-      path: '/api/public/expand-maps-url'
-      fullPath: '/api/public/expand-maps-url'
-      preLoaderRoute: typeof ApiPublicExpandMapsUrlRouteImport
+    '/api/public/check-complaints': {
+      id: '/api/public/check-complaints'
+      path: '/api/public/check-complaints'
+      fullPath: '/api/public/check-complaints'
+      preLoaderRoute: typeof ApiPublicCheckComplaintsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/public/check-delays': {
@@ -266,11 +266,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicCheckDelaysRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/public/check-complaints': {
-      id: '/api/public/check-complaints'
-      path: '/api/public/check-complaints'
-      fullPath: '/api/public/check-complaints'
-      preLoaderRoute: typeof ApiPublicCheckComplaintsRouteImport
+    '/api/public/expand-maps-url': {
+      id: '/api/public/expand-maps-url'
+      path: '/api/public/expand-maps-url'
+      fullPath: '/api/public/expand-maps-url'
+      preLoaderRoute: typeof ApiPublicExpandMapsUrlRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
