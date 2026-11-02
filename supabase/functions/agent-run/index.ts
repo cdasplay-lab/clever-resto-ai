@@ -1508,13 +1508,26 @@ async function runTool(
 
     // ===== Geographic coverage check =====
     const targetBranches = branch ? [branch] : activeBranches;
-    const branchesWithCoverage = targetBranches.filter((b: any) => b.coverage_type && b.coverage_type !== "none");
+    // Only branches whose coverage is actually configured are enforced.
+    const branchesWithCoverage = targetBranches.filter((b: any) => {
+      if (!b.coverage_type || b.coverage_type === "none") return false;
+      if (b.coverage_type === "governorate") return !!b.coverage_governorate;
+      if (b.coverage_type === "polygon") return Array.isArray(b.coverage_polygon) && b.coverage_polygon.length >= 3;
+      if (b.coverage_type === "radius") return Number(b.coverage_radius_km) > 0 && Number.isFinite(Number(b.latitude)) && Number.isFinite(Number(b.longitude)) && b.latitude != null;
+      return false;
+    });
     const customerLocForCov = (delivery as any)?.customer_location || conv.meta?.customer_location;
-    if (branchesWithCoverage.length > 0) {
-      if (!customerLocForCov || !Number.isFinite(customerLocForCov.lat) || !Number.isFinite(customerLocForCov.lng)) {
+    const hasGps = !!customerLocForCov && Number.isFinite(customerLocForCov.lat) && Number.isFinite(customerLocForCov.lng);
+    const hasTextAddress = typeof delivery.address === "string" && delivery.address.trim().length >= 3;
+    if (branchesWithCoverage.length > 0 && !hasGps && hasTextAddress) {
+      // GPS not shared (desktop Telegram, customer doesn't know how) — accept the written address, staff verifies.
+      conv.meta = { ...(conv.meta || {}), manual_address_check: true };
+    }
+    if (branchesWithCoverage.length > 0 && (hasGps || !hasTextAddress)) {
+      if (!hasGps) {
         return {
           error: "customer_location_required",
-          user_message: "حتى نتأكد إن منطقتك ضمن التوصيل، شارك موقعك من الزر اللي تحت 👇",
+          user_message: "اكتبلي عنوانك بالتفصيل (المنطقة وأقرب نقطة دالة) أو شارك موقعك من الزر اللي تحت 👇",
         };
       }
       const covering = targetBranches.filter((b: any) => checkBranchCoverage(b, customerLocForCov).covered);
