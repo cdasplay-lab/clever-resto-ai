@@ -182,13 +182,20 @@ function includesAny(haystack: string, needles: string[]): boolean {
 }
 
 function isRestaurantLocationRequest(text: string): boolean {
+  if (/\[موقع الزبون/.test(text)) return false;
   const n = normalizeArabic(text);
   if (!n) return false;
+  // Customer talking about THEIR OWN location / complaining → never send ours.
+  if (includesAny(n, [
+    "موقعي", "عنواني", "لوكيشني", "انطيتك", "نطيتك", "دزيتلك", "دزيتك", "ارسلتلك",
+    "ما فتحته", "فتحته", "ماخذ", "اخذت", "عنوان التوصيل", "بيتي",
+  ])) return false;
+  if (n.length > 60) return false;
   return includesAny(n, [
-    "لوكيشن", "لوكشن", "الموقع", "موقعكم", "موقعك", "موقع المطعم",
-    "دزلي الموقع", "دزلي اللوكيشن", "ارسل الموقع", "ارسلي الموقع",
-    "وينكم", "وين انتو", "وين المطعم", "وين موقعكم", "اين موقعكم",
-    "العنوان", "عنوانكم", "خريطه", "خريطة", "ناونيشان", "نیشان",
+    "موقعكم", "موقع المطعم", "لوكيشن المطعم", "لوكيشنكم", "عنوانكم", "عنوان المطعم",
+    "وينكم", "وين انتو", "وين المطعم", "وين موقعكم", "اين موقعكم", "وين مكانكم",
+    "وين الفرع", "موقع الفرع", "خريطه المطعم", "خريطة المطعم", "ناونيشان", "نیشان",
+    "دزلي موقعكم", "دزلي لوكيشنكم", "دزلي موقع المطعم",
   ]);
 }
 
@@ -1458,6 +1465,8 @@ async function runTool(
     const pm = args.payment_method === "cash" || args.payment_method === "card_on_delivery"
       ? args.payment_method
       : prevDelivery.payment_method;
+    // Never drop a GPS pin the customer already shared.
+    const keptLoc = (prevDelivery as any)?.customer_location || conv.meta?.customer_location;
     const delivery: Delivery = {
       address: args.address,
       phone: args.phone,
@@ -1465,6 +1474,9 @@ async function runTool(
       area: args.area,
       payment_method: pm,
     };
+    if (keptLoc && Number.isFinite(keptLoc.lat) && Number.isFinite(keptLoc.lng)) {
+      (delivery as any).customer_location = { lat: keptLoc.lat, lng: keptLoc.lng };
+    }
     const newName = (args.customer_name || "").toString().trim() || conv.customer_name || null;
     conv.delivery = delivery;
     conv.customer_name = newName;
@@ -1726,7 +1738,12 @@ async function runTool(
       return `• ${c.qty} × ${c.name}${opts} — ${c.qty * c.unit_price} ${restaurant.currency}`;
     }).join("\n");
     const paymentLabel = delivery.payment_method === "card_on_delivery" ? "بطاقة عند الاستلام" : "نقداً عند الاستلام";
-    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n📍 ${delivery.address}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n💳 الدفع: ${paymentLabel}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
+    const sumLoc = (delivery as any)?.customer_location || conv.meta?.customer_location;
+    const sumHasGps = !!sumLoc && Number.isFinite(sumLoc.lat) && Number.isFinite(sumLoc.lng);
+    const addrLine = sumHasGps
+      ? `📍 موقعك المباشر (GPS) ✅${delivery.address ? `\n🏠 ${delivery.address}` : ""}`
+      : `📍 ${delivery.address}`;
+    const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n${addrLine}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n💳 الدفع: ${paymentLabel}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
     return {
       ok: true,
       confirmation_token: token,
@@ -1801,7 +1818,7 @@ async function runTool(
     if (!delivery.address || !delivery.phone) {
       return { error: "ناقص العنوان أو الهاتف" };
     }
-    const customerLoc = (delivery as any)?.customer_location;
+    const customerLoc = (delivery as any)?.customer_location || conv.meta?.customer_location;
     const orderMeta: Record<string, any> = {};
     if (customerLoc && Number.isFinite(customerLoc.lat) && Number.isFinite(customerLoc.lng)) {
       orderMeta.customer_location = { lat: customerLoc.lat, lng: customerLoc.lng };
