@@ -25,7 +25,8 @@ action from the model. Repeated requests for approval could end in human handoff
 
 `node --test tests/agent-checkout.test.cjs` (Node 24) runs the production entrypoint
 with an in-memory database and model responses; it does not call APIs or create
-live orders. Fifteen regression cases pass. The original implementation fails
+live orders. Nineteen regression cases pass, including the latest Lovable
+written-address fallback, GPS metadata, and location-routing changes. The original implementation fails
 the reproduced covered-branch confirmation scenario.
 
 `deno check supabase/functions/_shared/geo.ts` also passes. The existing shared

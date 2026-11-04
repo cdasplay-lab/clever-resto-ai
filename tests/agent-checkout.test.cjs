@@ -18,7 +18,7 @@ class MemoryDb {
     this.lockError = lockError;
     this.tables = {
       restaurants: [{ id: 'restaurant-1', name: 'Test', currency: 'IQD', min_order: 0, open_hours: {} }],
-      branches: [{ id: 'branch-1', restaurant_id: 'restaurant-1', name: 'Main', is_active: true, min_order: 0, coverage_type: coverage ? 'radius' : 'none', open_hours: {} }],
+      branches: [{ id: 'branch-1', restaurant_id: 'restaurant-1', name: 'Main', is_active: true, min_order: 0, coverage_type: coverage ? 'radius' : 'none', coverage_radius_km: 10, latitude: 35.47, longitude: 44.39, open_hours: {} }],
       conversations: [{ id: 'conversation-1', restaurant_id: 'restaurant-1', customer_name: 'Test Customer', state: 'confirm', is_bot_paused: false,
         cart: [{ menu_item_id: 'item-1', name: 'برجر دجاج', qty: 1, unit_price: 7000 }],
         delivery: { address: 'Test address', phone: '07700000000', payment_method: 'cash', customer_location: { lat: 35.47, lng: 44.39 } },
@@ -72,14 +72,14 @@ class MemoryDb {
   }
 }
 
-function loadAgent(db) {
+function loadAgent(db, coverageCheck = () => ({ covered: true })) {
   let handler;
   const sandbox = {
     Deno: { env: { get: () => '' }, serve: fn => { handler = fn; } },
     admin: () => db,
     corsHeaders: {}, json: (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } }),
     isInternalCall: () => true,
-    checkBranchCoverage: () => ({ covered: true }), IQ_GOVS: [],
+    checkBranchCoverage: coverageCheck, IQ_GOVS: [],
     embedText: async () => [],
     retryFetch: async () => { throw new Error('unexpected external request'); },
     fetch: async () => new Response('{}'),
@@ -89,7 +89,7 @@ function loadAgent(db) {
   };
   vm.createContext(sandbox);
   const code = stripTypeScriptTypes(source, { mode: 'transform' });
-  const api = vm.runInContext(`${code}\n;({runTool, sanitizeToolResultForModel, cartFingerprint, sha256Hex});`, sandbox);
+  const api = vm.runInContext(`${code}\n;({runTool, sanitizeToolResultForModel, cartFingerprint, sha256Hex, isRestaurantLocationRequest});`, sandbox);
   return { ...api, handler: req => handler(req), setModel: fn => { sandbox.callModel = fn; } };
 }
 
@@ -130,7 +130,7 @@ test('changing payment preserves the shared customer location and delivery field
   const db = new MemoryDb();
   const api = loadAgent(db), conv = snapshot(db);
   await api.runTool(db, conv, restaurant(db), 'set_delivery_info', { payment_method: 'card_on_delivery' }, [], []);
-  assert.deepEqual(conv.delivery.customer_location, { lat: 35.47, lng: 44.39 });
+  assert.deepEqual(structuredClone(conv.delivery.customer_location), { lat: 35.47, lng: 44.39 });
   assert.equal(conv.delivery.address, 'Test address');
   assert.equal(conv.delivery.phone, '07700000000');
   assert.equal(conv.delivery.payment_method, 'card_on_delivery');
@@ -275,4 +275,47 @@ test('editing delivery invalidates a cached preview in the same model run', asyn
   assert.equal(response.status, 200);
   assert.equal(step, 4);
   assert.equal(db.tables.conversations[0].delivery.address, 'Updated address');
+});
+
+test('written-address checkout remains available when the customer cannot share GPS', async () => {
+  const db = new MemoryDb({ coverage: true }), api = loadAgent(db);
+  delete db.tables.conversations[0].delivery.customer_location;
+  const { conv, result } = await preview(api, db);
+  assert.equal(conv.meta.manual_address_check, true);
+  assert.equal(db.tables.conversations[0].meta.manual_address_check, true);
+  assert.match(result.summary, /Test address/);
+  assert.equal((await confirm(api, db, conv, result.confirmation_token)).ok, true);
+  assert.equal(db.tables.orders[0].delivery_address, 'Test address');
+});
+
+test('GPS saved in conversation metadata survives delivery updates, preview and submit', async () => {
+  const db = new MemoryDb({ coverage: true }), api = loadAgent(db);
+  const conv = snapshot(db);
+  delete conv.delivery.customer_location;
+  conv.meta.customer_location = { lat: 35.47, lng: 44.39 };
+  await api.runTool(db, conv, restaurant(db), 'set_delivery_info', { payment_method: 'cash' }, [], []);
+  assert.deepEqual(structuredClone(conv.delivery.customer_location), { lat: 35.47, lng: 44.39 });
+  const { result } = await preview(api, db, conv);
+  assert.match(result.summary, /GPS/);
+  assert.equal((await confirm(api, db, conv, result.confirmation_token)).ok, true);
+  assert.deepEqual(db.tables.orders[0].meta.customer_location, { lat: 35.47, lng: 44.39 });
+});
+
+test('messages about the customer location are not mistaken for restaurant directions', () => {
+  const api = loadAgent(new MemoryDb());
+  for (const text of ['[موقع الزبون: lat=35.47, lng=44.39]', 'هذا موقعي', 'ليش ما اخذت اللوكيشن', 'عنوان التوصيل', 'دزيتلك لوكيشني']) {
+    assert.equal(api.isRestaurantLocationRequest(text), false, text);
+  }
+  for (const text of ['وين المطعم', 'دزلي موقعكم', 'وين الفرع']) {
+    assert.equal(api.isRestaurantLocationRequest(text), true, text);
+  }
+});
+
+test('GPS outside configured delivery coverage still blocks checkout', async () => {
+  const db = new MemoryDb({ coverage: true }), api = loadAgent(db, () => ({ covered: false }));
+  const conv = snapshot(db);
+  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], []);
+  assert.equal(result.error, 'out_of_coverage');
+  assert.equal(conv.meta.pending_confirmation, undefined);
+  assert.equal(db.tables.orders.length, 0);
 });

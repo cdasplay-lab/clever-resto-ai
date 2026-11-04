@@ -81,6 +81,6 @@ Deno.serve(async (req) => {
       delivery_address_masked: maskAddress(order.delivery_address),
     });
   } catch (e) {
-    return json({ error: String(e?.message || e) }, 500);
+    return json({ error: String((e as any)?.message || e) }, 500);
   }
 });
