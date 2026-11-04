@@ -26,8 +26,7 @@ const LOCK_POLL_MS = 250;
 function sleepMs(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 // Acquire the conversation lock, polling until it is free or stale.
-// Fail-open: if we never acquire (shouldn't happen thanks to TTL), proceed
-// anyway so a customer's message is never silently dropped.
+// A failed claim must not start a second checkout against the same cart.
 async function acquireConversationLock(db: any, conversationId: string, token: string): Promise<boolean> {
   const deadline = Date.now() + LOCK_MAX_WAIT_MS;
   for (;;) {
@@ -36,7 +35,7 @@ async function acquireConversationLock(db: any, conversationId: string, token: s
     });
     if (!error && data === true) return true;
     if (error) {
-      console.warn("claim_conversation failed; continuing without lock", error?.message || error);
+      console.warn("claim_conversation failed", error?.message || error);
       return false;
     }
     if (Date.now() >= deadline) return false;
@@ -153,6 +152,12 @@ function branchAreaName(a: any): string {
 
 
 const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
+
+// Keep a safe reason + recovery action when sanitizing tool results for the
+// model. Returning only { ok: false } caused repeated confirmation questions.
+function checkoutFailure(error: string, userMessage: string, recovery: string) {
+  return { error, error_code: error, user_message: userMessage, recovery };
+}
 
 // Arabic text normalizer: strips diacritics, unifies alef/ya/ta, collapses repeats.
 // Mirrors public.normalize_ar() in SQL for consistent matching client/edge side.
@@ -1029,6 +1034,7 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
    • مرّر scheduled_for بصيغة ISO 8601 بمنطقة بغداد (+03:00). الوقت الحالي الآن (UTC): ${new Date().toISOString()}. لازم الموعد يكون بعد 15 دقيقة على الأقل وخلال أسبوعين، وضمن دوام الفرع.
    • مرّر scheduled_for_human بنفس الكلمات اللي قالها الزبون.
 ${branchRule}
+إذا فشل التأكيد وفي النتيجة recovery=refresh_preview، استدعِ preview_order واعرض الملخص المحدّث ثم انتظر موافقة جديدة. لا تكرر سؤال التأكيد بدون معاينة ناجحة، ولا تحوّل لموظف بسبب خطأ قابل للإصلاح. إذا recovery=ask_confirmation، اسأل عن الموافقة فقط. إذا recovery=support، أخبر الزبون أن الطلب لم يثبت واعرض إعادة المحاولة أو التحويل لموظف.
 9) المخزون:
    • الأصناف الناضبة لا تظهر أصلاً في show_menu — لا تذكرها بالقوائم العامة.
    • إذا الزبون طلب صنفاً بالاسم وكان out_of_stock في نتائج search_menu، قل بإيجاز "خلصان حالياً" واقترح بديلاً واحداً من نفس الفئة فوراً عبر search_menu. لا تكرر الاعتذار.
@@ -1468,10 +1474,11 @@ async function runTool(
     // Never drop a GPS pin the customer already shared.
     const keptLoc = (prevDelivery as any)?.customer_location || conv.meta?.customer_location;
     const delivery: Delivery = {
-      address: args.address,
-      phone: args.phone,
-      time: args.time,
-      area: args.area,
+      ...prevDelivery,
+      address: args.address ?? prevDelivery.address,
+      phone: args.phone ?? prevDelivery.phone,
+      time: args.time ?? prevDelivery.time,
+      area: args.area ?? prevDelivery.area,
       payment_method: pm,
     };
     if (keptLoc && Number.isFinite(keptLoc.lat) && Number.isFinite(keptLoc.lng)) {
@@ -1506,9 +1513,10 @@ async function runTool(
           user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟",
       };
     }
-    const branchId = conv.meta?.branch_id || null;
+    let branchId = conv.meta?.branch_id || null;
     const branches: any[] = (restaurant as any).__branches || [];
     const activeBranches = branches.filter((b: any) => b.is_active);
+    if (!branchId && activeBranches.length === 1) branchId = activeBranches[0].id;
     if (!branchId && activeBranches.length > 1) {
       return {
         error: "branch_required",
@@ -1516,7 +1524,10 @@ async function runTool(
         available_branches: activeBranches.map((b: any) => ({ id: b.id, name: b.name })),
       };
     }
-    const branch = branchId ? branches.find((b: any) => b.id === branchId) : null;
+    let branch = branchId ? activeBranches.find((b: any) => b.id === branchId) : null;
+    if (branchId && !branch) {
+      return checkoutFailure("BRANCH_UNAVAILABLE", "الفرع المختار غير متاح حالياً. خلينا نحدد فرع متاح لطلبك.", "select_branch");
+    }
 
     // ===== Geographic coverage check =====
     const targetBranches = branch ? [branch] : activeBranches;
@@ -1570,6 +1581,8 @@ async function runTool(
       // If we have multiple covering and no specific branch chosen yet, pick the closest one with coords
       if (!branch && covering.length >= 1) {
         const picked = covering[0];
+        branchId = picked.id;
+        branch = picked;
         conv.meta = { ...(conv.meta || {}), branch_id: picked.id };
         await db.from("conversations").update({ meta: conv.meta }).eq("id", conv.id);
       }
@@ -1727,11 +1740,18 @@ async function runTool(
 
     const newMeta = {
       ...(conv.meta || {}),
+      branch_id: branchId,
       pending_confirmation: { token, fp, created_at: new Date().toISOString() },
       ...(offeredSomething ? { checkout_upsell_offered: true } : {}),
     };
-    await db.from("conversations").update({ meta: newMeta, state: "confirm" }).eq("id", conv.id);
+    const { error: previewError } = await db.from("conversations")
+      .update({ meta: newMeta, state: "confirm" }).eq("id", conv.id);
+    if (previewError) {
+      console.error("preview_order save failed:", previewError);
+      return checkoutFailure("PREVIEW_SAVE_FAILED", "ما كدرت أحفظ ملخص الطلب هسه. تفاصيل طلبك باقية، جرّب بعد لحظة.", "retry_preview");
+    }
     conv.meta = newMeta;
+    conv.state = "confirm";
 
     const lines = cart.map((c) => {
       const opts = c.selected_options?.length ? ` (${c.selected_options.map((s) => s.choice).join("، ")})` : "";
@@ -1765,10 +1785,10 @@ async function runTool(
     // === Confirmation gate ===
     const pending = conv.meta?.pending_confirmation;
     if (!pending?.token || !pending?.fp) {
-      return { error: "لازم تستدعي preview_order أولاً وتعرض الملخّص للزبون قبل الإرسال." };
+      return checkoutFailure("ORDER_PREVIEW_REQUIRED", "خليني أعرض لك ملخص الطلب أولاً حتى تتأكد منه.", "refresh_preview");
     }
     if (!args.confirmation_token || args.confirmation_token !== pending.token) {
-      return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
+      return checkoutFailure("ORDER_CONFIRMATION_STALE", "أحتاج أعرض لك ملخص الطلب المحدّث قبل التثبيت.", "refresh_preview");
     }
     const delivery = (conv.delivery || {}) as Delivery;
     const branchId = conv.meta?.branch_id || null;
@@ -1793,11 +1813,11 @@ async function runTool(
         meta: { ...(conv.meta || {}), pending_confirmation: null },
       }).eq("id", conv.id);
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
-      return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
+      return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت؛ خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
     }
     const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
     if (!userOk) {
-      return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم' أو 'أكد' بصراحة ثم أعد المحاولة." };
+      return checkoutFailure("ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation");
     }
 
     // Closed-restaurant gate. The system prompt forbids this, but prompts are
@@ -1846,7 +1866,7 @@ async function runTool(
     if (error) {
       console.error("submit_order insert failed:", error);
       try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "submit_order", error: error.message, payload: { args } }); } catch (_) {}
-      return { error: "ORDER_SUBMIT_FAILED", user_message: "ما كدرت أرسل الطلب الحين، جرّب مرة ثانية بعد لحظة أو اطلب التحويل لموظف." };
+      return checkoutFailure("ORDER_SUBMIT_FAILED", "ما تثبّت طلبك بعد. تفاصيله باقية، تكدر تعيد المحاولة بعد لحظة أو تطلب موظف.", "support");
     }
 
     // Consume confirmed_order quota. If denied, cancel the order and tell the user.
@@ -1933,7 +1953,7 @@ async function runTool(
 
     const confirmedAtIso = new Date().toISOString();
     await db.from("orders").update({
-      meta: { eta_minutes: etaMinutes, confirmed_at: confirmedAtIso },
+      meta: { ...orderMeta, eta_minutes: etaMinutes, confirmed_at: confirmedAtIso },
     }).eq("id", order.id);
 
     await db
@@ -1945,6 +1965,13 @@ async function runTool(
         meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
       })
       .eq("id", conv.id);
+
+    // Refresh this run's snapshot too: a second tool call must not submit the
+    // old cart again or hand the customer off after an order already exists.
+    conv.state = "submitted";
+    conv.cart = [];
+    conv.delivery = {};
+    conv.meta = { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id };
 
     // Fire-and-forget dispatch to platform webhook
     try {
@@ -1979,10 +2006,10 @@ async function runTool(
     if (!cart.length) return { error: "السلة فارغة" };
     const pending = conv.meta?.pending_confirmation;
     if (!pending?.token || !pending?.fp) {
-      return { error: "لازم تستدعي preview_order أولاً وتعرض الملخّص للزبون قبل الجدولة." };
+      return checkoutFailure("ORDER_PREVIEW_REQUIRED", "خليني أعرض لك ملخص الطلب أولاً حتى تتأكد منه.", "refresh_preview");
     }
     if (!args.confirmation_token || args.confirmation_token !== pending.token) {
-      return { error: "confirmation_token غير صحيح. استدعِ preview_order من جديد." };
+      return checkoutFailure("ORDER_CONFIRMATION_STALE", "أحتاج أعرض لك ملخص الطلب المحدّث قبل التثبيت.", "refresh_preview");
     }
     const delivery = (conv.delivery || {}) as Delivery;
     const branchId = conv.meta?.branch_id || null;
@@ -1998,11 +2025,11 @@ async function runTool(
     if (currentFp !== pending.fp) {
       await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
-      return { error: "تغيّر الطلب بعد المعاينة. استدعِ preview_order من جديد وأكّد مع الزبون." };
+      return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت؛ خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
     }
     const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
     if (!userOk) {
-      return { error: "ما رصدت موافقة صريحة من الزبون. اطلب منه يقول 'نعم/أكد/تمام' بصراحة ثم أعد المحاولة." };
+      return checkoutFailure("ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation");
     }
     const when = new Date(String(args.scheduled_for || ""));
     if (isNaN(when.getTime())) return { error: "scheduled_for غير صالح. لازم ISO 8601 مع منطقة زمنية." };
@@ -2048,7 +2075,7 @@ async function runTool(
     if (error) {
       console.error("schedule_order insert failed:", error);
       try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "schedule_order", error: error.message, payload: { args } }); } catch (_) {}
-      return { error: "ORDER_SCHEDULE_FAILED", user_message: "ما كدرت أحجز الطلب الحين، جرّب مرة ثانية أو اطلب التحويل لموظف." };
+      return checkoutFailure("ORDER_SCHEDULE_FAILED", "ما تثبّت حجزك بعد. تفاصيله باقية، تكدر تعيد المحاولة بعد لحظة أو تطلب موظف.", "support");
     }
 
     await db
@@ -2060,6 +2087,11 @@ async function runTool(
         meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
       })
       .eq("id", conv.id);
+
+    conv.state = "submitted";
+    conv.cart = [];
+    conv.delivery = {};
+    conv.meta = { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id };
 
     // Fire-and-forget preference extraction
     try {
@@ -2782,7 +2814,9 @@ Deno.serve(async (req) => {
     // state so we observe the cart/state left by any previous run instead of
     // racing it (prevents lost-update cart corruption from rapid messages).
     lockToken = crypto.randomUUID();
-    await acquireConversationLock(db, conversation_id, lockToken);
+    if (!await acquireConversationLock(db, conversation_id, lockToken)) {
+      return json({ reply: "دا أكمل رسالتك السابقة، انتظر لحظة وبعدين أعد رسالتك 🌹", skipped: "conversation_busy", media: [], quick_replies: [] });
+    }
 
     const { data: conv, error: e1 } = await db
       .from("conversations")
@@ -3161,8 +3195,10 @@ Deno.serve(async (req) => {
 
     const toolCallCache = new Map<string, any>(); // key: name+args -> last result
     let consecutiveToolSteps = 0;
+    let checkoutRepair: any = null;
+    const humanRequested = /(موظف|بشري|إنسان|انسان|حوّ?لني|human|operator|staff)/i.test(lastUserText);
 
-    for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
+    agentLoop: for (let step = 0; step < MAX_TOOL_ITERATIONS; step++) {
       if (Date.now() - loopStartedAt > TOTAL_LOOP_TIMEOUT_MS) {
         await db.from("agent_logs").insert({
           conversation_id, restaurant_id: restaurant.id, step,
@@ -3227,15 +3263,28 @@ Deno.serve(async (req) => {
               kind: `tool_call:${name}`, payload: { args },
             });
             try {
-              result = await withTimeout(
-                runTool(db, conv, restaurant, name, args, media, actions, customerProfile),
-                PER_TOOL_TIMEOUT_MS,
-                name,
-              );
+              if (name === "handoff_to_human" && checkoutRepair && !humanRequested) {
+                result = checkoutRepair;
+              } else {
+                result = await withTimeout(
+                  runTool(db, conv, restaurant, name, args, media, actions, customerProfile),
+                  PER_TOOL_TIMEOUT_MS,
+                  name,
+                );
+              }
             } catch (err: any) {
               result = { error: err?.message || "tool_failed" };
             }
-            toolCallCache.set(cacheKey, result);
+            if (["preview_order", "submit_order", "schedule_order"].includes(name)
+              && result?.error && result?.recovery && result.recovery !== "support") {
+              checkoutRepair = result;
+            }
+            // A successful mutation invalidates earlier previews/summaries.
+            // Never cache failures: data can be repaired later in this run.
+            if (!result?.error) {
+              if (!["search_menu", "get_cart_summary"].includes(name)) toolCallCache.clear();
+              toolCallCache.set(cacheKey, result);
+            }
             await db.from("agent_logs").insert({
               conversation_id, restaurant_id: restaurant.id, step,
               kind: `tool_result:${name}`, payload: { ...result, _cached: fromCache },
@@ -3259,6 +3308,14 @@ Deno.serve(async (req) => {
             name,
           });
           llmMessages.push(toolMsg);
+
+          // Finish from the committed result, without another model turn that
+          // could ask for confirmation again or execute a second checkout.
+          if (["submit_order", "schedule_order"].includes(name) && result?.ok && result?.order_id) {
+            finalText = safeCustomerText(result.message);
+            await db.from("messages").insert({ conversation_id, role: "assistant", content: finalText });
+            break agentLoop;
+          }
         }
         continue; // loop again so the model can see tool results
       }
