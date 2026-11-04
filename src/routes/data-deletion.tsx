@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { DocumentLayout } from "@/components/public-layout";
 
 export const Route = createFileRoute("/data-deletion")({
   component: DataDeletionPage,
@@ -19,13 +20,7 @@ const EMAIL = "cdasplay@gmail.com";
 
 function DataDeletionPage() {
   return (
-    <div dir="rtl" className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-3xl px-4 py-12">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">→ العودة للرئيسية</Link>
-        <h1 className="mt-4 text-3xl font-bold">تعليمات حذف بيانات المستخدم</h1>
-        <p className="mt-2 text-sm text-muted-foreground">آخر تحديث: {UPDATED}</p>
-
-        <div className="mt-8 space-y-6 leading-relaxed text-sm md:text-base">
+    <DocumentLayout title="تعليمات حذف بيانات المستخدم" updated={UPDATED} active="/data-deletion">
           <section>
             <h2 className="text-xl font-semibold mb-2">١. ما البيانات التي نحتفظ بها</h2>
             <p>
@@ -83,8 +78,6 @@ function DataDeletionPage() {
             <Link to="/privacy" className="underline hover:text-foreground">سياسة الخصوصية</Link>{" "}
             و<Link to="/terms" className="underline hover:text-foreground">شروط الاستخدام</Link>.
           </p>
-        </div>
-      </div>
-    </div>
+    </DocumentLayout>
   );
 }

@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,8 +17,8 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { OnboardingWizard } from "@/components/onboarding-wizard";
-import { MobileBottomNav } from "@/components/mobile-bottom-nav";
-import { MadaLogo } from "@/components/mada-logo";
+import { WorkspaceShell, AllSections } from "@/components/workspace-shell";
+import { isDashboardTab } from "@/lib/dashboard-navigation";
 
 // Lazy-load every secondary tab — they each load only when the user opens them.
 // Massively reduces initial JS bundle for the dashboard.
@@ -196,63 +197,20 @@ function RestaurantManager({
   onLogout: () => void;
   onChange: (r: Restaurant) => void;
 }) {
-  // Honor ?tab= deep-links (e.g. complaints → "افتح المحادثة" builds
-  // ?tab=conversations&conv=<id>). Renders client-side only (behind auth),
-  // so reading location in the initializer is hydration-safe.
-  const [tab, setTab] = useState(() => {
-    if (typeof window === "undefined") return "overview";
-    return new URLSearchParams(window.location.search).get("tab") || "overview";
-  });
+  // Router-managed search preserves deep links and browser back/forward.
+  const { tab: requestedTab } = useSearch({ from: "/dashboard" });
+  const tab = requestedTab || "overview";
+  const navigate = useNavigate({ from: "/dashboard" });
+  function navigateTab(value: string, conversationId?: string) {
+    if (!isDashboardTab(value) && value !== "more") return;
+    void navigate({ search: (previous) => ({ ...previous, tab: value, conv: conversationId ?? previous.conv }) });
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }
   return (
-    <div className="mada-app min-h-screen bg-background px-3 pb-24 pt-safe sm:px-5 md:px-7 md:pb-8" dir="rtl">
-      <div className="mx-auto max-w-6xl">
-        <header className="mb-4 flex items-center justify-between gap-3 border-b border-border/65 py-3 md:mb-6 md:py-4">
-          <MadaLogo compact />
-          <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
-            <Button variant="ghost" size="icon" aria-label="الإشعارات" className="relative rounded-full">
-              <Bell className="h-5 w-5" />
-              <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border-2 border-background bg-destructive" />
-            </Button>
-            <ThemeToggle />
-            <Button variant="ghost" onClick={onLogout} className="hidden rounded-full px-3 md:inline-flex">
-              <LogOut className="ml-2 h-4 w-4" />خروج
-            </Button>
-          </div>
-        </header>
-
-        <section className="mb-4 flex items-end justify-between gap-3 rounded-[1.65rem] bg-card/65 px-4 py-4 shadow-[0_18px_50px_-45px_oklch(0.3_0.05_150/0.5)] md:mb-6 md:px-6 md:py-5">
-          <div className="min-w-0">
-            <p className="text-sm text-muted-foreground">مرحباً، أهلاً برجعتك 👋</p>
-            <h1 className="mt-1 truncate text-xl font-bold md:text-2xl">{restaurant.name}</h1>
-            <p className="mt-1 hidden text-xs text-muted-foreground sm:block">إليك ملخص نشاط مطعمك اليوم</p>
-          </div>
-          <Button variant="outline" size="sm" className="shrink-0 rounded-full bg-background/80" onClick={() => setTab("settings")}>
-            مطعمك <ChevronDown className="h-3.5 w-3.5" />
-          </Button>
-        </section>
-
-        <Tabs value={tab} onValueChange={setTab} dir="rtl">
-          {/* Desktop tabs — on mobile we use the bottom nav below */}
-          <TabsList className="tabs-scroll mb-6 hidden h-auto w-full justify-start gap-1 rounded-2xl bg-card p-1.5 shadow-sm md:flex">
-            <TabsTrigger value="overview">الرئيسية</TabsTrigger>
-            <TabsTrigger value="menu">المنيو</TabsTrigger>
-            <TabsTrigger value="branches">الفروع</TabsTrigger>
-            <TabsTrigger value="orders">الطلبات</TabsTrigger>
-            <TabsTrigger value="conversations">المحادثات</TabsTrigger>
-            <TabsTrigger value="channels">القنوات</TabsTrigger>
-            <TabsTrigger value="analytics">التحليلات</TabsTrigger>
-            <TabsTrigger value="subscription">الاشتراك</TabsTrigger>
-            <TabsTrigger value="health">صحة البوت</TabsTrigger>
-            <TabsTrigger value="customers">الزبائن</TabsTrigger>
-            <TabsTrigger value="social">ستوري/تعليقات</TabsTrigger>
-            <TabsTrigger value="marketing">تسويق</TabsTrigger>
-            <TabsTrigger value="combos">كومبوهات</TabsTrigger>
-            <TabsTrigger value="complaints">الشكاوى</TabsTrigger>
-            <TabsTrigger value="integration">تكامل API</TabsTrigger>
-            <TabsTrigger value="settings">الإعدادات</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="overview"><Suspense fallback={<TabFallback />}><OverviewTab restaurantId={restaurant.id} currency={restaurant.currency} onNavigate={setTab} /></Suspense></TabsContent>
+    <WorkspaceShell name={restaurant.name} tab={tab} onNavigate={navigateTab} onLogout={onLogout}>
+        {tab === "more" && <AllSections onNavigate={navigateTab} />}
+        <Tabs value={tab} onValueChange={navigateTab} dir="rtl" className="mada-section-body">
+          <TabsContent value="overview"><Suspense fallback={<TabFallback />}><OverviewTab restaurantId={restaurant.id} currency={restaurant.currency} onNavigate={navigateTab} /></Suspense></TabsContent>
           <TabsContent value="menu"><MenuTab restaurantId={restaurant.id} /></TabsContent>
           <TabsContent value="branches"><Suspense fallback={<TabFallback />}><BranchesTab restaurantId={restaurant.id} /></Suspense></TabsContent>
           <TabsContent value="orders"><OrdersTab restaurantId={restaurant.id} /></TabsContent>
@@ -271,9 +229,7 @@ function RestaurantManager({
           <TabsContent value="settings"><SettingsTab restaurant={restaurant} onChange={onChange} /></TabsContent>
 
         </Tabs>
-      </div>
-      <MobileBottomNav value={tab} onChange={setTab} />
-    </div>
+    </WorkspaceShell>
   );
 }
 
@@ -1028,10 +984,9 @@ function OrdersTab({ restaurantId }: { restaurantId: string }) {
 
 function ConversationsTab({ restaurantId }: { restaurantId: string }) {
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [selected, setSelected] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return new URLSearchParams(window.location.search).get("conv");
-  });
+  const { conv: linkedConversation } = useSearch({ from: "/dashboard" });
+  const [selected, setSelected] = useState<string | null>(linkedConversation || null);
+  useEffect(() => { setSelected(linkedConversation || null); }, [linkedConversation]);
   const [messages, setMessages] = useState<any[]>([]);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "open" | "urgent">("all");
@@ -1229,7 +1184,7 @@ function ConversationsTab({ restaurantId }: { restaurantId: string }) {
               const isHuman = m.role === "assistant" && m.name === "human";
               return (
                 <div key={m.id} className={`flex ${m.role === "user" ? "justify-start" : "justify-end"}`}>
-                  <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.role === "user" ? "bg-accent" : isHuman ? "bg-emerald-600 text-white" : "bg-primary text-primary-foreground"}`}>
+                  <div className={`max-w-[85%] rounded-xl border px-4 py-3 text-sm ${m.role === "user" ? "border-border bg-muted" : isHuman ? "border-primary bg-primary text-primary-foreground" : "border-primary/20 bg-accent text-accent-foreground"}`}>
                     <div className="mb-0.5 text-[10px] opacity-70">{m.role === "user" ? "عميل" : isHuman ? "موظف" : "بوت"}</div>
                     <div className="whitespace-pre-wrap break-words">{m.content}</div>
                   </div>
@@ -1261,7 +1216,7 @@ function HandoffControls({ conv, onChange }: { conv: Conversation; onChange: () 
   }
   return (
     <Button size="sm" variant={conv.is_bot_paused ? "default" : "outline"} disabled={busy} onClick={toggle}>
-      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : conv.is_bot_paused ? "رجّع للبوت" : "تولّى المحادثة"}
+      {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : conv.is_bot_paused ? "رجّع للبوت" : "استلام المحادثة"}
     </Button>
   );
 }
@@ -1298,7 +1253,7 @@ function Composer({ conversationId, disabled, onSent }: { conversationId: string
   return (
     <div className="border-t p-3">
       {disabled && (
-        <p className="mb-2 text-xs text-muted-foreground">البوت شغّال. اضغط "تولّى المحادثة" حتى ترد يدوياً.</p>
+        <p className="mb-2 text-xs text-muted-foreground">الوكيل يتولى الرد. اضغط "استلام المحادثة" حتى ترد يدوياً.</p>
       )}
       <div className="flex gap-2">
         <Input

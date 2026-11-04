@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { CheckCircle2, Clock, ChefHat, Bike, PackageCheck, XCircle } from "lucide-react";
+import { PublicHeader, PublicFooter } from "@/components/public-layout";
 
 type TrackData = {
   short_id: string;
@@ -79,21 +80,21 @@ function TrackPage() {
 
   if (error) {
     return (
-      <div dir="rtl" className="min-h-screen bg-background flex items-center justify-center p-6">
+      <div dir="rtl" className="min-h-screen bg-background"><PublicHeader /><div className="flex min-h-[65vh] items-center justify-center p-6">
         <div className="max-w-md w-full bg-card border rounded-xl p-6 text-center">
           <XCircle className="w-12 h-12 text-destructive mx-auto mb-3" />
           <p className="text-foreground font-medium">{error}</p>
           <p className="text-sm text-muted-foreground mt-2">تأكد من رابط الطلب أو حاول لاحقاً.</p>
         </div>
-      </div>
+      </div><PublicFooter /></div>
     );
   }
 
   if (!data) {
     return (
-      <div dir="rtl" className="min-h-screen bg-background flex items-center justify-center">
+      <div dir="rtl" className="min-h-screen bg-background"><PublicHeader /><div className="flex min-h-[65vh] items-center justify-center">
         <p className="text-muted-foreground">جاري التحميل…</p>
-      </div>
+      </div><PublicFooter /></div>
     );
   }
 
@@ -101,14 +102,14 @@ function TrackPage() {
   const currentIdx = isCancelled ? -1 : statusIndex(data.status);
 
   return (
-    <div dir="rtl" className="min-h-screen bg-background py-8 px-4">
-      <div className="max-w-lg mx-auto space-y-6">
+    <div dir="rtl" className="min-h-screen bg-background"><PublicHeader />
+      <main className="mx-auto max-w-2xl space-y-6 px-4 py-10 md:py-16">
         {/* Header */}
-        <div className="text-center">
+        <div className="mada-agent-banner text-center">
           <p className="text-sm text-muted-foreground">{data.restaurant_name}{data.branch_name ? ` — ${data.branch_name}` : ""}</p>
-          <h1 className="text-2xl font-bold mt-1">طلب #{data.short_id}</h1>
+          <h1 className="text-3xl font-semibold mt-2">طلب <bdi>#{data.short_id}</bdi></h1>
           {!isCancelled && data.remaining_minutes > 0 && (
-            <p className="text-primary font-medium mt-2">
+            <p className="!text-action font-medium mt-3">
               يوصل خلال ~{data.remaining_minutes} دقيقة
             </p>
           )}
@@ -185,7 +186,7 @@ function TrackPage() {
         <p className="text-center text-xs text-muted-foreground">
           الصفحة تتحدّث تلقائياً كل 15 ثانية.
         </p>
-      </div>
+      </main><PublicFooter />
     </div>
   );
 }

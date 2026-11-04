@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { DocumentLayout } from "@/components/public-layout";
 
 export const Route = createFileRoute("/privacy")({
   component: PrivacyPage,
@@ -8,13 +9,7 @@ const UPDATED = "23 حزيران 2026";
 
 function PrivacyPage() {
   return (
-    <div dir="rtl" className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto max-w-3xl px-4 py-12">
-        <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">→ العودة للرئيسية</Link>
-        <h1 className="mt-4 text-3xl font-bold">سياسة الخصوصية</h1>
-        <p className="mt-2 text-sm text-muted-foreground">آخر تحديث: {UPDATED}</p>
-
-        <div className="mt-8 space-y-6 leading-relaxed text-sm md:text-base">
+    <DocumentLayout title="سياسة الخصوصية" updated={UPDATED} active="/privacy">
           <section>
             <h2 className="text-xl font-semibold mb-2">١. من نحن</h2>
             <p>
@@ -87,8 +82,6 @@ function PrivacyPage() {
           <p className="pt-4 text-sm text-muted-foreground">
             اطّلع أيضاً على <Link to="/terms" className="underline hover:text-foreground">شروط الاستخدام</Link>.
           </p>
-        </div>
-      </div>
-    </div>
+    </DocumentLayout>
   );
 }

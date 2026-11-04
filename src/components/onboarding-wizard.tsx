@@ -9,6 +9,7 @@ import { Loader2, LogOut, CheckCircle2, ArrowRight, ArrowLeft, Upload, X } from 
 import { toast } from "sonner";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { MapsLocationField } from "@/components/maps-location-field";
+import { MadaLogo } from "@/components/mada-logo";
 
 type Restaurant = any;
 
@@ -145,10 +146,10 @@ export function OnboardingWizard({
   }
 
   return (
-    <div className="min-h-screen bg-background p-6" dir="rtl">
-      <div className="mx-auto max-w-2xl">
-        <div className="mb-6 flex items-center justify-between">
-          <h1 className="text-2xl font-bold">إعداد المطعم</h1>
+    <div className="min-h-screen bg-background px-4 py-6 sm:px-6" dir="rtl">
+      <div className="mx-auto max-w-3xl">
+        <div className="mb-8 flex items-center justify-between border-b pb-6">
+          <MadaLogo compact />
           <div className="flex items-center gap-2">
             <ThemeToggle />
             <Button variant="ghost" onClick={onLogout}>
@@ -157,6 +158,7 @@ export function OnboardingWizard({
           </div>
         </div>
 
+        <div className="mb-8"><p className="mb-3 text-xs text-muted-foreground">أهلاً بك في MADA AI</p><h1 className="text-3xl font-semibold md:text-4xl">نجهّز مطعمك، خطوة بخطوة.</h1><p className="mt-3 text-sm text-muted-foreground">أضف معلومات مطعمك، ثم المنيو والفروع وقناة التواصل.</p></div>
         {/* Stepper */}
         <div className="mb-6 flex items-center justify-between gap-2">
           {STEPS.map((s, i) => (
@@ -172,7 +174,7 @@ export function OnboardingWizard({
               >
                 {step > s.id ? <CheckCircle2 className="h-4 w-4" /> : s.id}
               </div>
-              <span className={`hidden text-xs sm:inline ${step === s.id ? "font-semibold" : "text-muted-foreground"}`}>
+              <span className={`text-[10px] sm:text-xs ${step === s.id ? "font-semibold" : "text-muted-foreground"}`}>
                 {s.title}
               </span>
               {i < STEPS.length - 1 && <div className="h-px flex-1 bg-border" />}

@@ -2,33 +2,37 @@ import { cn } from "@/lib/utils";
 
 export function MadaMark({ className }: { className?: string }) {
   return (
-    <div
-      className={cn(
-        "flex items-center justify-center rounded-[1.35rem] bg-primary text-primary-foreground shadow-[0_14px_35px_-18px_oklch(0.35_0.09_155/0.8)]",
-        className,
-      )}
+    <svg
+      viewBox="0 0 40 40"
+      fill="none"
+      className={cn("h-9 w-9 shrink-0 text-action", className)}
       aria-hidden="true"
     >
-      <svg viewBox="0 0 64 64" className="h-[68%] w-[68%]" fill="none">
-        <path d="M14 40h36" stroke="currentColor" strokeWidth="3.3" strokeLinecap="round" />
-        <path d="M19 38a13 13 0 0 1 26 0" stroke="currentColor" strokeWidth="3.3" />
-        <path d="M32 19v-3" stroke="currentColor" strokeWidth="3.3" strokeLinecap="round" />
-        <path d="M28.5 15h7" stroke="currentColor" strokeWidth="3.3" strokeLinecap="round" />
-        <path d="M17 44h29" stroke="currentColor" strokeWidth="3.3" strokeLinecap="round" />
-        <path d="M47 43c4-1 7-4 8-8-4 0-7 2-9 5" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-    </div>
+      <path
+        d="M17 2h6l2 13-5 3-5-3 2-13ZM38 17v6l-13 2-3-5 3-5 13 2ZM23 38h-6l-2-13 5-3 5 3-2 13ZM2 23v-6l13-2 3 5-3 5-13-2Z"
+        fill="currentColor"
+      />
+    </svg>
   );
 }
 
-export function MadaLogo({ compact = false, className }: { compact?: boolean; className?: string }) {
+export function MadaLogo({
+  compact = false,
+  className,
+}: {
+  compact?: boolean;
+  className?: string;
+}) {
   return (
-    <div className={cn("flex items-center gap-3", className)}>
-      <MadaMark className={compact ? "h-11 w-11" : "h-16 w-16"} />
-      <div className="leading-none">
-        <div className={cn("font-serif text-primary", compact ? "text-[1.7rem]" : "text-[2.55rem]")}>Mada</div>
-        {!compact && <div className="mt-1 text-[0.55rem] font-medium tracking-[0.24em] text-mada-gold">RESTAURANT PLATFORM</div>}
-      </div>
-    </div>
+    <span
+      className={cn("mada-logo inline-flex items-center gap-2.5", className)}
+      dir="ltr"
+      aria-label="MADA AI"
+    >
+      <MadaMark className={compact ? "h-7 w-7" : "h-9 w-9"} />
+      <span className={cn("mada-wordmark whitespace-nowrap", compact ? "text-xl" : "text-2xl")}>
+        MADA AI
+      </span>
+    </span>
   );
 }

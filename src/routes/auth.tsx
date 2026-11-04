@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { ArrowLeft, CheckCircle2, Sparkles } from "lucide-react";
-import { MadaLogo, MadaMark } from "@/components/mada-logo";
+import { AccountLayout } from "@/components/public-layout";
 
 export const Route = createFileRoute("/auth")({
   component: AuthPage,
@@ -88,40 +88,13 @@ function AuthPage() {
 
 
   return (
-    <div className="mada-auth relative min-h-screen overflow-hidden bg-background px-4 py-8 sm:px-6 lg:px-10" dir="rtl">
-      <div className="pointer-events-none absolute -right-20 -top-28 h-72 w-72 rounded-full border border-primary/10" />
-      <div className="pointer-events-none absolute -right-8 -top-10 h-44 w-44 rounded-full border border-primary/[0.07]" />
-      <div className="pointer-events-none absolute -bottom-24 -left-16 h-80 w-80 rounded-full bg-primary/[0.045] blur-2xl" />
-
-      <div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-10 lg:grid-cols-[1.05fr_0.95fr]">
-        <section className="hidden min-h-[680px] flex-col justify-between rounded-[2.5rem] bg-primary p-12 text-primary-foreground shadow-[0_40px_90px_-50px_oklch(0.28_0.08_155/0.9)] lg:flex">
-          <MadaLogo className="[&_div]:text-white" />
-          <div>
-            <div className="mb-6 flex h-16 w-16 items-center justify-center rounded-3xl bg-white/10 backdrop-blur">
-              <Sparkles className="h-7 w-7 text-mada-gold" />
-            </div>
-            <h1 className="max-w-lg text-5xl font-bold leading-[1.3]">إدارة مطعمك<br />بذكاء وسهولة</h1>
-            <p className="mt-6 max-w-md text-lg leading-8 text-white/70">من الطلبات إلى التحليلات والـ AI Agent، كل ما تحتاجه في منصة واحدة مرتبة.</p>
-          </div>
-          <div className="grid grid-cols-3 gap-3 text-xs text-white/80">
-            {["طلبات مباشرة", "تحليلات ذكية", "إدارة كاملة"].map((feature) => (
-              <div key={feature} className="flex items-center gap-2 rounded-2xl bg-white/[0.07] px-3 py-3">
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-mada-gold" /> {feature}
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <Card className="mx-auto w-full max-w-lg border-0 bg-card/90 p-1 shadow-[0_30px_80px_-50px_oklch(0.22_0.04_150/0.55)] backdrop-blur">
-          <CardHeader className="px-6 pb-4 pt-7 sm:px-9 sm:pt-9">
-            <div className="mb-7 flex justify-center lg:hidden">
-              <MadaLogo />
-            </div>
-            <div className="mb-5 hidden justify-center lg:flex"><MadaMark className="h-14 w-14" /></div>
-            <CardTitle className="text-center text-2xl sm:text-3xl">{mode === "signin" ? "أهلاً برجعتك" : "ابدأ رحلتك مع Mada"}</CardTitle>
+    <AccountLayout>
+        <Card className="w-full border-0 bg-transparent shadow-none">
+          <CardHeader className="px-0 pb-7 pt-0">
+            <CardTitle className="text-center text-3xl sm:text-4xl">{mode === "signin" ? "أهلاً بعودتك." : "ابدأ مع MADA AI."}</CardTitle>
             <CardDescription className="pt-1 text-center">{mode === "signin" ? "سجل دخولك لإدارة مطعمك" : "أنشئ حسابك وخلّي مطعمك أذكى"}</CardDescription>
         </CardHeader>
-        <CardContent className="space-y-5 px-6 pb-7 sm:px-9 sm:pb-9">
+        <CardContent className="space-y-5 px-0 pb-0">
           <div className="grid gap-2">
             <Button
               type="button"
@@ -152,11 +125,11 @@ function AuthPage() {
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">الإيميل</Label>
-              <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@example.com" dir="ltr" />
+              <Input id="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@example.com" dir="ltr" />
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">كلمة السر</Label>
-              <Input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
+              <Input id="password" type="password" autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
             </div>
             <Button type="submit" className="h-12 w-full rounded-xl text-base" disabled={loading}>
               {loading ? "..." : mode === "signin" ? <>دخول إلى المنصة <ArrowLeft className="h-4 w-4" /></> : <>إنشاء حساب <ArrowLeft className="h-4 w-4" /></>}
@@ -205,10 +178,9 @@ function AuthPage() {
               </div>
             </form>
           )}
-          <p className="text-center text-[11px] leading-5 text-muted-foreground">بتسجيلك أنت توافق على شروط الاستخدام وسياسة الخصوصية</p>
+          <p className="text-center text-[11px] leading-6 text-muted-foreground">بتسجيلك أنت توافق على <Link to="/terms" className="underline underline-offset-4">شروط الاستخدام</Link> و<Link to="/privacy" className="underline underline-offset-4">سياسة الخصوصية</Link></p>
         </CardContent>
       </Card>
-      </div>
-    </div>
+    </AccountLayout>
   );
 }

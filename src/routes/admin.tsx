@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { Loader2, Shield, Search, Power, Activity, Wallet, Store, AlertTriangle } from "lucide-react";
+import { PublicHeader } from "@/components/public-layout";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
@@ -216,11 +217,11 @@ function AdminPage() {
   if (loading) return <div className="flex justify-center p-12"><Loader2 className="animate-spin" /></div>;
   if (!isAdmin) {
     return (
-      <div className="container max-w-md mx-auto p-8 text-center">
+      <div><PublicHeader /><div className="container max-w-md mx-auto p-8 text-center">
         <Shield className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
         <h1 className="text-2xl font-bold mb-2">غير مصرّح</h1>
         <p className="text-muted-foreground">هذه الصفحة لأدمن المنصة فقط.</p>
-      </div>
+      </div></div>
     );
   }
 
@@ -233,12 +234,13 @@ function AdminPage() {
   const since = (iso: string | null) => iso ? new Date(iso).toLocaleString("ar") : "—";
 
   return (
-    <div className="container mx-auto p-6 space-y-6" dir="rtl">
+    <div className="min-h-screen" dir="rtl"><PublicHeader /><main className="mx-auto max-w-[1440px] space-y-6 px-4 py-8 md:px-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold flex items-center gap-2"><Shield /> لوحة السوبر أدمن</h1>
+        <div><p className="mb-2 text-xs text-muted-foreground">MADA AI / إدارة المنصة</p><h1 className="text-2xl font-semibold flex items-center gap-2 md:text-4xl"><Shield /> لوحة السوبر أدمن</h1></div>
         <Button variant="outline" onClick={() => navigate({ to: "/dashboard" })}>عودة</Button>
       </div>
 
+      <div className="mada-stats">{[{ label: "مطعم مسجل", value: rows.length }, { label: "مطاعم مفعلة", value: rows.filter((row) => row.is_active).length }, { label: "اشتراكات نشطة", value: finance?.active_subs ?? "—" }, { label: "تشغيلات آخر 24 ساعة", value: health.reduce((sum, item) => sum + item.total_runs_24h, 0) }].map((item) => <div key={item.label} className="mada-stat"><strong>{item.value}</strong><span>{item.label}</span></div>)}</div>
       <Tabs defaultValue="overview" dir="rtl">
         <TabsList>
           <TabsTrigger value="overview"><Store className="h-4 w-4 ml-1" /> المطاعم</TabsTrigger>
@@ -455,6 +457,6 @@ function AdminPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </main></div>
   );
 }
