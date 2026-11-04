@@ -18,6 +18,7 @@ import {
 import { MadaLogo } from "@/components/mada-logo";
 import { ProductPreview } from "@/components/product-preview";
 import { Button } from "@/components/ui/button";
+import { useScrollReveal } from "@/hooks/use-scroll-reveal";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -91,8 +92,9 @@ const PLANS = [
 
 function Landing() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const landingRef = useScrollReveal();
   return (
-    <div className="mada-landing" dir="rtl">
+    <div ref={landingRef} className="mada-landing" dir="rtl">
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:fixed focus:right-4 focus:top-4 focus:z-50 focus:bg-action focus:p-3 focus:text-ink"
@@ -168,20 +170,23 @@ function Landing() {
         <main id="main">
           <section className="mada-landing-hero">
             <div>
-              <p className="mb-6 flex items-center gap-2 text-xs text-white/60">
+              <p className="mada-enter mb-6 flex items-center gap-2 text-xs text-white/60">
                 <span className="h-1.5 w-1.5 rounded-full bg-action" />
                 وكيل المطاعم الذكي
               </p>
-              <h1>
+              <h1 className="mada-enter" data-enter-delay="1">
                 كل طلب.
                 <br />
                 <span className="whitespace-nowrap text-action">تحت السيطرة.</span>
               </h1>
-              <p className="mt-7 max-w-md text-base leading-8 text-white/65 md:text-lg">
+              <p
+                className="mada-enter mt-7 max-w-md text-base leading-8 text-white/65 md:text-lg"
+                data-enter-delay="2"
+              >
                 وكيل ذكي يستقبل الرسائل ويؤكد الطلبات، وفريقك يركز على الخدمة.
               </p>
-              <div className="mt-8 flex flex-wrap gap-3">
-                <Button size="lg" asChild>
+              <div className="mada-enter mt-8 flex flex-wrap gap-3" data-enter-delay="3">
+                <Button size="lg" asChild className="mada-motion-cta">
                   <a href="#demo">
                     شاهد التجربة
                     <ArrowLeft className="h-4 w-4" />
@@ -194,25 +199,34 @@ function Landing() {
                   كيف يعمل؟
                 </a>
               </div>
-              <p className="mt-6 text-xs text-white/40">
+              <p className="mada-enter mt-6 text-xs text-white/40" data-enter-delay="4">
                 الطلبات والمحادثات والمنيو، في مساحة واحدة.
               </p>
             </div>
-            <ProductPreview />
+            <div className="mada-enter min-w-0" data-enter-delay="2">
+              <ProductPreview />
+            </div>
           </section>
         </main>
       </div>
       <section id="how" className="mada-light-section">
         <div className="mx-auto max-w-[1344px] px-5 py-14 sm:px-8 lg:px-12">
-          <p className="mb-3 text-xs text-black/45">من الفكرة إلى التنفيذ</p>
-          <h2 className="mada-landing-section-title">من الرسالة إلى الطلب.</h2>
+          <div data-reveal>
+            <p className="mb-3 text-xs text-black/45">من الفكرة إلى التنفيذ</p>
+            <h2 className="mada-landing-section-title">من الرسالة إلى الطلب.</h2>
+          </div>
           <div className="mt-9 grid gap-8 md:grid-cols-3">
             {[
               { title: "استقبل", text: "رسائل الزبائن تصل إلى مساحة موحدة." },
               { title: "افهم", text: "الوكيل يفهم الطلب ويرتب الأصناف والتوصيل." },
               { title: "نفّذ", text: "يعرض الملخص، ويثبت الطلب بعد التأكيد." },
             ].map((step, i) => (
-              <div key={step.title} className="border-s border-black/15 ps-5">
+              <div
+                key={step.title}
+                data-reveal
+                data-reveal-delay={i}
+                className="border-s border-black/15 ps-5"
+              >
                 <h3 className="flex items-center gap-3 text-2xl font-semibold">
                   <span className="text-base text-black/40" dir="ltr">
                     0{i + 1}
@@ -223,18 +237,23 @@ function Landing() {
               </div>
             ))}
           </div>
-          <img
-            src="/landing/restaurant-counter.webp"
-            alt="مساحة عمل مطعم بإضاءة دافئة"
-            width={1672}
-            height={941}
-            loading="lazy"
-            className="mt-12 h-44 w-full rounded-xl object-cover object-center sm:h-64"
-          />
+          <div
+            data-reveal="image"
+            className="mada-scene-frame mt-12 h-44 overflow-hidden rounded-xl sm:h-64"
+          >
+            <img
+              src="/landing/restaurant-counter.webp"
+              alt="مساحة عمل مطعم بإضاءة دافئة"
+              width={1672}
+              height={941}
+              loading="lazy"
+              className="h-full w-full object-cover object-center"
+            />
+          </div>
         </div>
       </section>
       <section id="features" className="mx-auto max-w-[1344px] px-5 py-20 sm:px-8 lg:px-12">
-        <div className="flex flex-wrap items-end justify-between gap-5">
+        <div data-reveal className="flex flex-wrap items-end justify-between gap-5">
           <h2 className="mada-landing-section-title">
             فريقك بالخدمة.
             <br />
@@ -245,8 +264,13 @@ function Landing() {
           </p>
         </div>
         <div className="mt-12 grid gap-x-10 md:grid-cols-2">
-          {FEATURES.map(({ icon: Icon, title, text }) => (
-            <article key={title} className="flex gap-5 border-t border-white/20 py-8">
+          {FEATURES.map(({ icon: Icon, title, text }, i) => (
+            <article
+              key={title}
+              data-reveal
+              data-reveal-delay={i % 2}
+              className="mada-feature-card flex gap-5 border-t border-white/20 py-8"
+            >
               <Icon className="mt-1 h-6 w-6 shrink-0 text-action" />
               <div>
                 <h3 className="text-xl font-medium">{title}</h3>
@@ -258,7 +282,7 @@ function Landing() {
       </section>
       <section id="demo" className="mada-light-section">
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-5 py-20 sm:px-8 lg:grid-cols-2">
-          <div>
+          <div data-reveal>
             <p className="mb-3 text-xs text-black/45">جرّب الفكرة</p>
             <h2 className="mada-landing-section-title">
               رسالة بسيطة.
@@ -275,20 +299,26 @@ function Landing() {
               <span className="text-xs">القنوات حسب إعداد مطعمك</span>
             </div>
           </div>
-          <OrderDemo />
+          <div data-reveal data-reveal-delay="1" className="min-w-0">
+            <OrderDemo />
+          </div>
         </div>
       </section>
       <section id="pricing" className="mada-light-section border-t border-black/15">
         <div className="mx-auto max-w-[1344px] px-5 py-20 sm:px-8 lg:px-12">
-          <p className="mb-3 text-xs text-black/45">الاشتراك</p>
-          <h2 className="mada-landing-section-title">باقة تناسب شغلك.</h2>
-          <p className="mt-4 text-sm text-black/55">
-            التكلفة وحدود الاستخدام تحدد عند تفعيل الباقة.
-          </p>
+          <div data-reveal>
+            <p className="mb-3 text-xs text-black/45">الاشتراك</p>
+            <h2 className="mada-landing-section-title">باقة تناسب شغلك.</h2>
+            <p className="mt-4 text-sm text-black/55">
+              التكلفة وحدود الاستخدام تحدد عند تفعيل الباقة.
+            </p>
+          </div>
           <div className="mt-10 grid gap-4 lg:grid-cols-3">
             {PLANS.map((plan, i) => (
               <article
                 key={plan.name}
+                data-reveal
+                data-reveal-delay={i}
                 className={`mada-pricing-card ${i === 1 ? "bg-ink text-white" : "bg-white/30"}`}
               >
                 <span className={`text-xs ${i === 1 ? "text-action" : "text-black/50"}`}>
@@ -323,12 +353,12 @@ function Landing() {
         id="contact"
         className="mx-auto flex max-w-[1344px] flex-col justify-between gap-8 px-5 py-20 sm:px-8 md:flex-row md:items-center lg:px-12"
       >
-        <div>
+        <div data-reveal>
           <p className="mb-3 text-xs text-action">جاهز للخطوة الجاية؟</p>
           <h2 className="mada-landing-section-title">خلّي شغلك أوضح.</h2>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Button asChild size="lg">
+        <div data-reveal data-reveal-delay="1" className="flex flex-wrap gap-3">
+          <Button asChild size="lg" className="mada-motion-cta">
             <Link to="/auth">
               ابدأ بإعداد مطعمك
               <ArrowLeft className="h-4 w-4" />

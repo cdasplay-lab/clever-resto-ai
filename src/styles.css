@@ -552,6 +552,112 @@
     padding: 27px;
     min-width: 0;
   }
+  /* Progressive enhancement: content stays visible without JavaScript or observation. */
+  .mada-landing [data-reveal-state] {
+    transition:
+      opacity 760ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+  .mada-landing [data-reveal-state="pending"] {
+    opacity: 0;
+    transform: translate3d(0, 30px, 0);
+    pointer-events: none;
+  }
+  .mada-landing [data-reveal="image"][data-reveal-state="pending"] {
+    transform: translate3d(0, 24px, 0) scale(0.975);
+  }
+  .mada-landing [data-reveal-delay="1"] {
+    --reveal-delay: 90ms;
+  }
+  .mada-landing [data-reveal-delay="2"] {
+    --reveal-delay: 180ms;
+  }
+  .mada-landing [data-reveal-immediate] {
+    transition-delay: 0ms;
+    transition-duration: 160ms;
+  }
+  .mada-landing .mada-enter {
+    animation: mada-enter 900ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .mada-landing [data-enter-delay="1"] {
+    animation-delay: 80ms;
+  }
+  .mada-landing [data-enter-delay="2"] {
+    animation-delay: 160ms;
+  }
+  .mada-landing [data-enter-delay="3"] {
+    animation-delay: 240ms;
+  }
+  .mada-landing [data-enter-delay="4"] {
+    animation-delay: 320ms;
+  }
+  .mada-scene-frame img {
+    transition: transform 1200ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .mada-landing .mada-pricing-card {
+    transition:
+      opacity 760ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 760ms cubic-bezier(0.22, 1, 0.36, 1),
+      translate 320ms ease,
+      border-color 320ms ease,
+      box-shadow 320ms ease;
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+  .mada-landing .mada-motion-cta {
+    transition:
+      translate 320ms ease,
+      box-shadow 320ms ease;
+  }
+  .mada-landing .mada-pricing-card[data-reveal-immediate] {
+    transition-delay: 0ms;
+    transition-duration: 160ms;
+  }
+  .mada-motion-cta svg,
+  .mada-feature-card > svg {
+    transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes mada-enter {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 20px, 0);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0);
+    }
+  }
+  @media (hover: hover) and (prefers-reduced-motion: no-preference) {
+    .mada-landing .mada-pricing-card:hover {
+      translate: 0 -6px;
+      border-color: oklch(0.65 0.12 120);
+      box-shadow: 0 18px 40px oklch(0.2 0.02 120 / 0.1);
+    }
+    .mada-motion-cta:hover {
+      translate: 0 -2px;
+      box-shadow: 0 8px 28px oklch(0.85 0.16 120 / 0.15);
+    }
+    .mada-motion-cta:hover svg {
+      transform: translateX(-4px);
+    }
+    .mada-feature-card:hover > svg {
+      transform: translateY(-3px) rotate(-6deg);
+    }
+    .mada-scene-frame:hover img {
+      transform: scale(1.04);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mada-landing [data-reveal-state],
+    .mada-landing [data-reveal="image"][data-reveal-state],
+    .mada-landing .mada-enter {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+      animation: none;
+      transition: none;
+    }
+  }
   .tabs-scroll {
     overflow-x: auto;
     overflow-y: hidden;
