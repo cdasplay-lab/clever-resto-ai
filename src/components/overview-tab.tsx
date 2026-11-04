@@ -1,66 +1,65 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import {
+  Activity,
   ArrowLeft,
-  CheckCircle2,
   ChefHat,
+  CheckCircle2,
   Clock3,
+  Facebook,
+  Instagram,
+  Link2,
   Loader2,
+  MessageSquare,
+  RefreshCw,
+  Send,
+  Settings2,
   ShoppingBag,
-  TrendingUp,
-  WalletCards,
+  Truck,
+  Phone,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { money, nextOrderStatus, ORDER_LABELS, relativeTime } from "@/lib/order-presentation";
+import { toast } from "sonner";
 
-type OverviewOrder = {
+type BoardOrder = {
   id: string;
   customer_name: string | null;
-  total: number;
   status: string;
+  total: number;
   created_at: string;
+  items: unknown;
+  delivery_address: string | null;
+  conversation_id: string | null;
 };
-
-const STATUS_LABELS: Record<string, string> = {
-  pending: "طلب جديد",
-  scheduled: "مجدول",
-  confirmed: "تم التأكيد",
-  preparing: "قيد التحضير",
-  out_for_delivery: "بالطريق",
-  completed: "تم التوصيل",
-  cancelled: "ملغى",
+type RecentConversation = {
+  id: string;
+  customer_name: string | null;
+  customer_handle: string | null;
+  channel: string;
+  is_bot_paused: boolean;
+  last_message_at: string;
 };
-
-function MetricCard({
-  label,
-  value,
-  icon: Icon,
-  tone,
-}: {
-  label: string;
-  value: string | number;
-  icon: React.ComponentType<{ className?: string }>;
-  tone: "green" | "amber" | "mint" | "sand";
-}) {
-  const tones = {
-    green: "bg-primary/10 text-primary",
-    amber: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
-    mint: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300",
-    sand: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300",
-  };
-
-  return (
-    <Card className="min-w-0 border-0">
-      <CardContent className="p-3.5 sm:p-5">
-        <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-2xl ${tones[tone]}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-        <div className="truncate text-xl font-bold tabular-nums sm:text-2xl">{value}</div>
-        <div className="mt-0.5 truncate text-[11px] text-muted-foreground sm:text-sm">{label}</div>
-      </CardContent>
-    </Card>
-  );
-}
+type Health = {
+  recent_logs?: {
+    id: string;
+    kind: string;
+    tool_name: string | null;
+    created_at: string;
+    error: string | null;
+  }[];
+};
+const CHANNELS = [
+  { key: "telegram", label: "تيليجرام", icon: Send },
+  { key: "instagram", label: "إنستغرام", icon: Instagram },
+  { key: "whatsapp", label: "واتساب", icon: Phone },
+  { key: "facebook", label: "فيسبوك", icon: Facebook },
+];
+const LANES = [
+  { label: "جديد", states: ["pending", "scheduled"], icon: ShoppingBag },
+  { label: "قيد التحضير", states: ["confirmed", "preparing"], icon: ChefHat },
+  { label: "بالطريق", states: ["out_for_delivery"], icon: Truck },
+];
 
 export default function OverviewTab({
   restaurantId,
@@ -69,146 +68,412 @@ export default function OverviewTab({
 }: {
   restaurantId: string;
   currency: string;
-  onNavigate: (tab: string) => void;
+  onNavigate: (tab: string, conversationId?: string) => void;
 }) {
   const [loading, setLoading] = useState(true);
-  const [orders, setOrders] = useState<OverviewOrder[]>([]);
+  const [failed, setFailed] = useState(false);
+  const [orders, setOrders] = useState<BoardOrder[]>([]);
+  const [todayCount, setTodayCount] = useState(0);
+  const [conversationsCount, setConversationsCount] = useState(0);
+  const [conversations, setConversations] = useState<RecentConversation[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [configured, setConfigured] = useState<string[]>([]);
+  const [agentStatus, setAgentStatus] = useState("جاري التحقق");
+  const [busy, setBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
-    const { data } = await supabase
-      .from("orders")
-      .select("id,customer_name,total,status,created_at")
-      .eq("restaurant_id", restaurantId)
-      .gte("created_at", start.toISOString())
-      .order("created_at", { ascending: false })
-      .limit(200);
-    setOrders((data as OverviewOrder[] | null) ?? []);
-    setLoading(false);
+    try {
+      const [active, today, convs, restaurant, subscription, bot] = await Promise.all([
+        supabase
+          .from("orders")
+          .select("id,customer_name,status,total,created_at,items,delivery_address,conversation_id")
+          .eq("restaurant_id", restaurantId)
+          .in("status", ["pending", "scheduled", "confirmed", "preparing", "out_for_delivery"])
+          .order("created_at", { ascending: false })
+          .limit(60),
+        supabase
+          .from("orders")
+          .select("id", { count: "exact", head: true })
+          .eq("restaurant_id", restaurantId)
+          .gte("created_at", start.toISOString()),
+        supabase
+          .from("conversations")
+          .select("id,customer_name,customer_handle,channel,is_bot_paused,last_message_at", {
+            count: "exact",
+          })
+          .eq("restaurant_id", restaurantId)
+          .gte("last_message_at", start.toISOString())
+          .order("last_message_at", { ascending: false })
+          .limit(6),
+        supabase
+          .from("restaurants")
+          .select("is_active,telegram_bot_username,whatsapp_phone_number_id")
+          .eq("id", restaurantId)
+          .maybeSingle(),
+        supabase.rpc("get_my_subscription", { _restaurant_id: restaurantId }),
+        supabase.rpc("get_bot_health", { _restaurant_id: restaurantId }),
+      ]);
+      if (active.error || today.error || convs.error) throw new Error("تعذّر تحديث البيانات");
+      setOrders((active.data || []) as BoardOrder[]);
+      setTodayCount(today.count || 0);
+      setConversationsCount(convs.count || 0);
+      setConversations((convs.data || []) as RecentConversation[]);
+      setHealth(bot.error ? null : (bot.data as unknown as Health));
+      const channelKeys: string[] = [];
+      if (restaurant.data?.telegram_bot_username) channelKeys.push("telegram");
+      if (restaurant.data?.whatsapp_phone_number_id) channelKeys.push("whatsapp");
+      setConfigured(channelKeys);
+      const payload = subscription.data as {
+        subscription?: { status?: string; period_end?: string };
+      } | null;
+      const sub = payload?.subscription;
+      const activeSub =
+        sub?.status === "active" &&
+        !!sub.period_end &&
+        new Date(sub.period_end).getTime() > Date.now();
+      setAgentStatus(
+        restaurant.error || subscription.error
+          ? "تعذّر التحقق"
+          : restaurant.data?.is_active === false
+            ? "المطعم موقوف"
+            : !activeSub
+              ? "راجع الاشتراك"
+              : !channelKeys.length
+                ? "اربط قناة للبدء"
+                : "مهيّأ لاستقبال الرسائل",
+      );
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
   }, [restaurantId]);
 
   useEffect(() => {
-    load();
-    const channel = supabase
-      .channel(`mada-overview-${restaurantId}`)
-      .on(
+    void load();
+    const channel = supabase.channel(`mada-workspace-${restaurantId}`);
+    for (const table of ["orders", "conversations", "restaurants", "restaurant_subscriptions"]) {
+      channel.on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "orders", filter: `restaurant_id=eq.${restaurantId}` },
-        () => load(),
-      )
-      .subscribe();
+        {
+          event: "*",
+          schema: "public",
+          table,
+          filter: `${table === "restaurants" ? "id" : "restaurant_id"}=eq.${restaurantId}`,
+        },
+        () => void load(),
+      );
+    }
+    channel.subscribe();
+    const interval = window.setInterval(() => void load(), 60000);
     return () => {
-      supabase.removeChannel(channel);
+      void supabase.removeChannel(channel);
+      window.clearInterval(interval);
     };
-  }, [load, restaurantId]);
+  }, [restaurantId, load]);
 
-  const stats = useMemo(() => {
-    const active = orders.filter((o) => o.status !== "cancelled");
-    const sales = active.reduce((sum, o) => sum + Number(o.total || 0), 0);
-    const completed = orders.filter((o) => o.status === "completed").length;
-    const preparing = orders.filter((o) => ["confirmed", "preparing", "out_for_delivery"].includes(o.status)).length;
-    const fresh = orders.filter((o) => ["pending", "scheduled"].includes(o.status)).length;
-
-    const hourly = Array.from({ length: 7 }, (_, index) => {
-      const endHour = index * 4;
-      return active
-        .filter((o) => new Date(o.created_at).getHours() < Math.max(1, endHour))
-        .reduce((sum, o) => sum + Number(o.total || 0), 0);
-    });
-    const max = Math.max(...hourly, 1);
-    const points = hourly.map((value, index) => `${(index / 6) * 100},${92 - (value / max) * 76}`).join(" ");
-    const areaPoints = `0,96 ${points} 100,96`;
-
-    return { sales, completed, preparing, fresh, points, areaPoints };
-  }, [orders]);
-
-  const money = (value: number) => `${value.toLocaleString("ar-IQ")} ${currency || "د.ع"}`;
-
-  if (loading) {
-    return <div className="flex min-h-72 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>;
+  async function advance(order: BoardOrder) {
+    const next = nextOrderStatus(order.status);
+    if (!next || busy) return;
+    setBusy(order.id);
+    try {
+      const { data, error } = await supabase
+        .from("orders")
+        .update({
+          status: next.value as "confirmed" | "preparing" | "out_for_delivery" | "completed",
+        })
+        .eq("id", order.id)
+        .eq("restaurant_id", restaurantId)
+        .eq("status", order.status as "pending")
+        .select("id")
+        .maybeSingle();
+      if (error) throw error;
+      if (!data) {
+        toast.info("تغيرت حالة الطلب، حدّثنا القائمة");
+        await load();
+        return;
+      }
+      await load();
+      const notification = await supabase.functions.invoke("notify-order-status", {
+        body: { order_id: order.id },
+      });
+      if (notification.error) toast.warning("تم تحديث الطلب، لكن تعذّر إرسال إشعار الزبون");
+      else toast.success("تم تحديث الطلب وإشعار الزبون");
+    } catch {
+      toast.error("تعذّر تحديث الطلب، حاول مرة ثانية");
+    } finally {
+      setBusy(null);
+    }
   }
 
-  return (
-    <div className="space-y-4 sm:space-y-6">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <MetricCard label="مبيعات اليوم" value={money(stats.sales)} icon={WalletCards} tone="amber" />
-        <MetricCard label="تم التوصيل" value={stats.completed} icon={CheckCircle2} tone="mint" />
-        <MetricCard label="قيد التحضير" value={stats.preparing} icon={Clock3} tone="green" />
-        <MetricCard label="طلبات جديدة" value={stats.fresh} icon={ShoppingBag} tone="sand" />
+  if (loading)
+    return (
+      <div
+        className="flex min-h-80 items-center justify-center"
+        aria-label="جاري تحميل لوحة المطعم"
+      >
+        <Loader2 className="h-6 w-6 animate-spin" />
       </div>
+    );
+  const preparing = orders.filter((order) =>
+    ["confirmed", "preparing"].includes(order.status),
+  ).length;
+  const fresh = orders.filter((order) => ["pending", "scheduled"].includes(order.status)).length;
 
-      <Card className="overflow-hidden border-0">
-        <CardHeader className="flex flex-row items-center justify-between p-5 pb-0 sm:p-6 sm:pb-0">
-          <div>
-            <CardTitle className="text-base sm:text-lg">نظرة عامة على المبيعات</CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">حركة مبيعات مطعمك خلال اليوم</p>
-          </div>
-          <div className="flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-            <TrendingUp className="h-3.5 w-3.5" /> مباشر
-          </div>
-        </CardHeader>
-        <CardContent className="p-4 sm:p-6">
-          <div className="mb-2 text-3xl font-bold tabular-nums">{money(stats.sales)}</div>
-          <div className="relative h-44 w-full overflow-hidden rounded-2xl bg-gradient-to-b from-primary/[0.04] to-transparent px-2 pt-4">
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" aria-label="مخطط مبيعات اليوم">
-              <defs>
-                <linearGradient id="madaSalesArea" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="var(--primary)" stopOpacity="0.22" />
-                  <stop offset="100%" stopColor="var(--primary)" stopOpacity="0" />
-                </linearGradient>
-              </defs>
-              {[20, 40, 60, 80].map((y) => <line key={y} x1="0" y1={y} x2="100" y2={y} stroke="var(--border)" strokeWidth="0.5" />)}
-              <polygon points={stats.areaPoints} fill="url(#madaSalesArea)" />
-              <polyline points={stats.points} fill="none" stroke="var(--primary)" strokeWidth="2.2" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <div className="absolute inset-x-4 bottom-1 flex justify-between text-[10px] text-muted-foreground">
-              <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>24:00</span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="border-0">
-        <CardHeader className="flex flex-row items-center justify-between p-5 pb-2 sm:p-6 sm:pb-3">
-          <CardTitle className="text-base sm:text-lg">أحدث الطلبات</CardTitle>
-          <Button variant="ghost" size="sm" onClick={() => onNavigate("orders")} className="text-primary">
-            عرض الكل <ArrowLeft className="h-4 w-4" />
+  return (
+    <div>
+      {failed && (
+        <div
+          role="alert"
+          className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/40 p-4 text-sm"
+        >
+          <span>تعذّر تحديث بعض البيانات. المعروض هو آخر تحديث ناجح.</span>
+          <Button variant="outline" size="sm" onClick={() => void load()}>
+            <RefreshCw className="h-4 w-4" />
+            إعادة المحاولة
           </Button>
-        </CardHeader>
-        <CardContent className="px-3 pb-3 sm:px-5 sm:pb-5">
-          {orders.length === 0 ? (
-            <div className="flex min-h-36 flex-col items-center justify-center rounded-2xl bg-muted/45 text-center">
-              <ChefHat className="mb-2 h-8 w-8 text-primary/50" />
-              <p className="text-sm font-medium">أول طلب راح يظهر هنا</p>
-              <p className="mt-1 text-xs text-muted-foreground">اللوحة تتحدث تلقائياً عند وصول الطلبات</p>
-            </div>
-          ) : (
-            <div className="divide-y divide-border/70">
-              {orders.slice(0, 5).map((order) => (
-                <button
-                  key={order.id}
-                  type="button"
-                  onClick={() => onNavigate("orders")}
-                  className="flex w-full items-center gap-3 rounded-xl px-2 py-3 text-right transition-colors hover:bg-muted/55"
+        </div>
+      )}
+      <section className="mada-agent-banner mb-5 flex items-center justify-between gap-3 xl:hidden">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <Activity className="h-4 w-4 text-action" />
+            حالة الوكيل
+          </h2>
+          <p className="mt-1 text-xs">{agentStatus}</p>
+        </div>
+        <Button
+          variant="ghost"
+          className="text-action hover:bg-white/5 hover:text-action"
+          onClick={() => onNavigate("settings")}
+          aria-label="إعدادات الوكيل"
+        >
+          <Settings2 className="h-4 w-4" />
+        </Button>
+      </section>
+      <div className="mada-stats">
+        {[
+          { label: "طلب اليوم", value: todayCount },
+          { label: "محادثات اليوم", value: conversationsCount },
+          { label: "قيد التحضير", value: preparing },
+          { label: "بانتظار القبول", value: fresh },
+        ].map((metric) => (
+          <div key={metric.label} className="mada-stat">
+            <strong>{failed ? "—" : metric.value}</strong>
+            <span>{metric.label}</span>
+          </div>
+        ))}
+      </div>
+      <div className="mada-overview-grid">
+        <section className="mada-panel">
+          <div className="mada-panel-heading">
+            <h2>الطلبات الجارية</h2>
+            <Button variant="ghost" size="sm" onClick={() => onNavigate("orders")}>
+              عرض الكل
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="mada-kanban">
+            {LANES.map(({ label, states, icon: Icon }) => {
+              const items = orders.filter((order) => states.includes(order.status));
+              return (
+                <section
+                  key={label}
+                  className={`mada-lane ${items.length === 0 && (orders.length > 0 || label !== "جديد") ? "hidden sm:block" : ""}`}
                 >
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/9 text-primary">
-                    <ShoppingBag className="h-4 w-4" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-bold">{order.customer_name || "زبون جديد"}</div>
-                    <div className="mt-0.5 text-xs text-muted-foreground">#{order.id.slice(0, 6)} · {STATUS_LABELS[order.status] || order.status}</div>
-                  </div>
-                  <div className="text-left">
-                    <div className="text-sm font-bold tabular-nums">{money(Number(order.total || 0))}</div>
-                    <div className="mt-0.5 text-[10px] text-muted-foreground">{new Date(order.created_at).toLocaleTimeString("ar-IQ", { hour: "2-digit", minute: "2-digit" })}</div>
-                  </div>
-                </button>
-              ))}
+                  <h3 className="mada-lane-title">
+                    <span className="flex items-center gap-2">
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </span>
+                    <span className="text-muted-foreground">{items.length}</span>
+                  </h3>
+                  {items.length === 0 ? (
+                    <div className="flex min-h-28 flex-col items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <CheckCircle2 className="h-5 w-5 opacity-45" />
+                      لا توجد طلبات هنا
+                    </div>
+                  ) : (
+                    items.slice(0, 5).map((order) => {
+                      const next = nextOrderStatus(order.status);
+                      const itemList = Array.isArray(order.items)
+                        ? (order.items as { name?: string; qty?: number; quantity?: number }[])
+                        : [];
+                      return (
+                        <article key={order.id} className="mada-order-ticket">
+                          <div className="flex items-center justify-between gap-2">
+                            <bdi className="text-sm font-semibold">#{order.id.slice(0, 8)}</bdi>
+                            <span className="rounded-full bg-muted px-2 py-0.5 text-[10px]">
+                              {ORDER_LABELS[order.status]}
+                            </span>
+                          </div>
+                          <h4 className="mt-3 text-base font-semibold">
+                            {order.customer_name || "زبون جديد"}
+                          </h4>
+                          <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <Clock3 className="h-3 w-3" />
+                            {relativeTime(order.created_at)}
+                          </p>
+                          <div className="my-4 min-h-10 space-y-1 text-xs">
+                            {itemList.slice(0, 3).map((item, i) => (
+                              <p key={i}>
+                                {item.name || "صنف"} × {item.qty || item.quantity || 1}
+                              </p>
+                            ))}
+                            {itemList.length > 3 && (
+                              <p className="text-muted-foreground">
+                                و{itemList.length - 3} أصناف أخرى
+                              </p>
+                            )}
+                          </div>
+                          <p className="mb-4 text-xl font-semibold">
+                            <bdi>{money(order.total, currency)}</bdi>
+                          </p>
+                          {next && (
+                            <Button
+                              className="w-full"
+                              disabled={!!busy}
+                              onClick={() => void advance(order)}
+                            >
+                              {busy === order.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                next.label
+                              )}
+                            </Button>
+                          )}
+                        </article>
+                      );
+                    })
+                  )}
+                  {items.length > 5 && (
+                    <Button variant="ghost" className="w-full" onClick={() => onNavigate("orders")}>
+                      عرض بقية الطلبات
+                    </Button>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        </section>
+        <aside className="space-y-4">
+          <section className="mada-agent-banner hidden xl:block">
+            <div className="flex items-center justify-between">
+              <h2 className="text-sm font-semibold">حالة الوكيل</h2>
+              <Activity className="h-4 w-4 text-action" />
             </div>
-          )}
-        </CardContent>
-      </Card>
+            <p className="mt-3 text-sm">{agentStatus}</p>
+            <Button
+              variant="ghost"
+              className="mt-3 min-h-9 w-full justify-start px-0 text-action hover:bg-white/5 hover:text-action"
+              onClick={() => onNavigate("settings")}
+            >
+              <Settings2 className="h-4 w-4" />
+              إدارة الوكيل
+              <ArrowLeft className="ms-auto h-4 w-4" />
+            </Button>
+          </section>
+          <section className="mada-panel">
+            <div className="mada-panel-heading">
+              <h2>الوكيل الآن</h2>
+              <Activity className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="divide-y divide-border px-4">
+              {health?.recent_logs?.length ? (
+                health.recent_logs.slice(0, 3).map((log) => (
+                  <div key={log.id} className="py-3">
+                    <p className="text-xs">
+                      {log.error
+                        ? "تحتاج مراجعة سجل التشغيل"
+                        : log.tool_name === "submit_order"
+                          ? "تمت معالجة تثبيت طلب"
+                          : log.kind === "tool"
+                            ? "تم تنفيذ خطوة في المحادثة"
+                            : "نشاط جديد للوكيل"}
+                    </p>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      {relativeTime(log.created_at)}
+                    </p>
+                  </div>
+                ))
+              ) : (
+                <p className="py-5 text-xs text-muted-foreground">
+                  يظهر نشاط الوكيل هنا عند وصول الرسائل
+                </p>
+              )}
+            </div>
+          </section>
+          <section className="mada-panel">
+            <div className="mada-panel-heading">
+              <h2>أحدث المحادثات</h2>
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div className="divide-y divide-border px-4">
+              {conversations.length ? (
+                conversations.slice(0, 3).map((conversation) => (
+                  <button
+                    type="button"
+                    key={conversation.id}
+                    onClick={() => onNavigate("conversations", conversation.id)}
+                    className="block w-full py-3 text-start"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <strong className="min-w-0 truncate text-xs">
+                        {conversation.customer_name || conversation.customer_handle || "زبون"}
+                      </strong>
+                      <span className="text-[10px] text-muted-foreground">
+                        {relativeTime(conversation.last_message_at)}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {conversation.is_bot_paused ? "بانتظار رد الموظف" : "يتولى الرد الوكيل"} ·{" "}
+                      {conversation.channel}
+                    </p>
+                  </button>
+                ))
+              ) : (
+                <p className="py-5 text-xs text-muted-foreground">لا توجد محادثات اليوم</p>
+              )}
+            </div>
+            <div className="px-4 pb-4">
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => onNavigate("conversations")}
+              >
+                فتح المحادثات
+              </Button>
+            </div>
+          </section>
+        </aside>
+      </div>
+      <section className="mada-panel mt-5 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+          <Link2 className="h-4 w-4" />
+          قنوات التواصل
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {CHANNELS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onNavigate("channels")}
+              className="flex items-center gap-2 rounded-lg border p-3 text-start hover:bg-accent"
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              <span>
+                <strong className="block text-xs font-medium">{label}</strong>
+                <span className="text-[10px] text-muted-foreground">
+                  {configured.includes(key) ? "القناة مربوطة" : "إدارة الربط"}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

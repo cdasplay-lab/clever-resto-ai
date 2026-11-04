@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { AccountLayout } from "@/components/public-layout";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -47,8 +48,8 @@ function ResetPasswordPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4" dir="rtl">
-      <Card className="w-full max-w-md">
+    <AccountLayout>
+      <Card className="w-full border-0 bg-transparent">
         <CardHeader>
           <CardTitle>كلمة سر جديدة</CardTitle>
           <CardDescription>
@@ -87,6 +88,6 @@ function ResetPasswordPage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </AccountLayout>
   );
 }
