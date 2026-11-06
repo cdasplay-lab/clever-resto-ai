@@ -151,7 +151,11 @@ function branchAreaName(a: any): string {
 }
 
 
-const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
+const NEGATION_RE = /(^|[\s،,.!؟?])(لا|لأ|كلا|مو|مش|ما|ماكو|بدون|الغي|الغاء|إلغاء|كنسل|وقف|لحظة|انتظر|no|not|cancel|wait)([\s،,.!؟?]|$)/i;
+function isUserConfirmation(t: unknown): boolean {
+  return typeof t === "string" && CONFIRM_RE.test(t) && !NEGATION_RE.test(t);
+}
+const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|إي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
 // Keep a safe reason + recovery action when sanitizing tool results for the
 // model. Returning only { ok: false } caused repeated confirmation questions.
@@ -1815,7 +1819,7 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
       return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت؛ خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
     }
-    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
+    const userOk = isUserConfirmation(args.user_confirmation_text);
     if (!userOk) {
       return checkoutFailure("ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation");
     }
@@ -1839,7 +1843,16 @@ async function runTool(
       return { error: "ناقص العنوان أو الهاتف" };
     }
     const customerLoc = (delivery as any)?.customer_location || conv.meta?.customer_location;
-    const orderMeta: Record<string, any> = {};
+    const orderMeta: Record<string, any> = { confirm_fp: pending.fp };
+    {
+      // Idempotency: the same confirmed preview must never create two orders.
+      const { data: dup } = await db.from("orders").select("id")
+        .eq("conversation_id", conv.id).eq("meta->>confirm_fp", pending.fp).limit(1).maybeSingle();
+      if (dup) {
+        await db.from("conversations").update({ cart: [], state: "submitted", meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
+        return { ok: true, already_submitted: true, order_id: dup.id, user_message: "طلبك مثبّت مسبقاً ✅" };
+      }
+    }
     if (customerLoc && Number.isFinite(customerLoc.lat) && Number.isFinite(customerLoc.lng)) {
       orderMeta.customer_location = { lat: customerLoc.lat, lng: customerLoc.lng };
     }
@@ -2027,7 +2040,7 @@ async function runTool(
       conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
       return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت؛ خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
     }
-    const userOk = typeof args.user_confirmation_text === "string" && CONFIRM_RE.test(args.user_confirmation_text);
+    const userOk = isUserConfirmation(args.user_confirmation_text);
     if (!userOk) {
       return checkoutFailure("ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation");
     }
@@ -2454,7 +2467,7 @@ async function runTool(
       await db.from("conversations").update({
         cart: newCart,
         delivery: { ...(conv.delivery || {}), ...restoredDelivery },
-        state: "ordering",
+        state: "confirm",
         customer_name: conv.customer_name || (profile as any).name || null,
         meta: { ...(conv.meta || {}), pending_confirmation: null },
       }).eq("id", conv.id);
@@ -3072,12 +3085,12 @@ Deno.serve(async (req) => {
       await db.from("conversations").update({
         cart: [],
         delivery: {},
-        state: "idle",
+        state: "greeting",
         meta: { ...(conv.meta || {}), pending_confirmation: null },
       }).eq("id", conversation_id);
       const reply = "تم إلغاء طلبك. متى ما تحب نبدأ من جديد، أنا موجود 🌹";
       await db.from("messages").insert({ conversation_id, role: "assistant", content: reply });
-      return json({ reply, state: "idle", media: [], quick_replies: ["📋 المنيو"] });
+      return json({ reply, state: "greeting", media: [], quick_replies: ["📋 المنيو"] });
     }
 
     // === Complaint keyword shortcut: escalate, stop bot, no LLM call ===

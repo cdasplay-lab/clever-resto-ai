@@ -500,16 +500,17 @@ Deno.serve(async (req) => {
     return json({ ok: true, duplicate: true });
   }
 
-  const work = processUpdate(update, route.tg, route.restaurantId).catch((e) => {
+  // On failure release the dedupe key and return 500 so Telegram retries
+  // instead of the customer's message being silently lost.
+  try {
+    await processUpdate(update, route.tg, route.restaurantId);
+  } catch (e) {
     console.error("processUpdate fatal:", e);
-  });
-
-  // @ts-ignore EdgeRuntime is provided by Supabase Edge runtime
-  if (typeof EdgeRuntime !== "undefined" && (EdgeRuntime as any).waitUntil) {
-    // @ts-ignore
-    (EdgeRuntime as any).waitUntil(work);
-  } else {
-    await work;
+    if (update?.update_id !== undefined && update?.update_id !== null) {
+      await admin().from("processed_updates").delete()
+        .eq("channel", "telegram").eq("update_key", String(update.update_id));
+    }
+    return new Response("retry", { status: 500 });
   }
 
   return json({ ok: true });
