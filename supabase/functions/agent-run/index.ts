@@ -122,11 +122,17 @@ async function sha256Hex(s: string): Promise<string> {
   return Array.from(new Uint8Array(buf)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function cartFingerprint(cart: any[], delivery: any, branchId: string | null, customerName?: string | null): string {
+function cartFingerprint(
+  cart: CartItem[],
+  delivery: Delivery,
+  branchId: string | null,
+  customerName: string | null,
+  customerLocation: Delivery["customer_location"] | null,
+): string {
   const norm = {
     cart: (cart || []).map((c) => ({
       id: c.menu_item_id, q: c.qty, p: c.unit_price,
-      o: (c.selected_options || []).map((s: any) => `${s.group}=${s.choice}`).sort().join("|"),
+      o: (c.selected_options || []).map((s) => `${s.group}=${s.choice}`).sort(),
       n: c.notes || "",
     })),
     d: {
@@ -134,6 +140,8 @@ function cartFingerprint(cart: any[], delivery: any, branchId: string | null, cu
       p: delivery?.phone || "",
       t: delivery?.time || "",
       pm: delivery?.payment_method || "",
+      area: delivery?.area || "",
+      location: customerLocation ? [customerLocation.lat, customerLocation.lng] : null,
     },
     b: branchId || "",
     cn: (customerName || "").toString().trim(),
@@ -151,11 +159,12 @@ function branchAreaName(a: any): string {
 }
 
 
-const NEGATION_RE = /(^|[\s،,.!؟?])(لا|لأ|كلا|مو|مش|ما|ماكو|بدون|الغي|الغاء|إلغاء|كنسل|وقف|لحظة|انتظر|no|not|cancel|wait)([\s،,.!؟?]|$)/i;
-function isUserConfirmation(t: unknown): boolean {
-  return typeof t === "string" && CONFIRM_RE.test(t) && !NEGATION_RE.test(t);
+const PREVIEW_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const CONFIRM_RE = /^(?:نعم|اي|ايوه|تمام|اوكي|صح|صحيح|موافق|اكيد|ok|okay|yes|yep)(?: (?:اكد|اكمل|ارسل|ثبت)(?: الطلب)?)?$|^(?:اكد|اكمل|ارسل|ثبت)(?: الطلب)?$/;
+function isUserConfirmation(text: string): boolean {
+  const normalized = normalizeArabic(text).replace(/[،,\s]+/g, " ").replace(/[ .!✅👍]+$/u, "").trim();
+  return CONFIRM_RE.test(normalized);
 }
-const CONFIRM_RE = /(^|[\s،,.!؟?])(نعم|اكد|أكد|اكّد|أكّد|تمام|اوكي|أوكي|ok|okay|yes|yep|ايوه|أيوه|اي|أي|إي|صح|صحيح|موافق|اكمل|أكمل|ارسل|أرسل|اطلب|أطلب)([\s،,.!؟?]|$)/i;
 
 // Keep a safe reason + recovery action when sanitizing tool results for the
 // model. Returning only { ok: false } caused repeated confirmation questions.
@@ -277,7 +286,26 @@ type Delivery = {
   time?: string;
   area?: string;
   payment_method?: "cash" | "card_on_delivery";
+  customer_location?: { lat: number; lng: number };
 };
+
+type CheckoutMessage = { id: string; content: string };
+
+type CheckoutSnapshot = {
+  cart: CartItem[];
+  delivery: Delivery;
+  branch_id: string | null;
+  customer_name: string | null;
+  customer_location: Delivery["customer_location"] | null;
+};
+
+type CheckoutCommitResult =
+  | { outcome: "committed"; order_id: string; total: number }
+  | { outcome: "replayed"; order_id: string }
+  | {
+      outcome: "stale_preview" | "confirmation_required" | "order_changed"
+        | "branch_unavailable" | "items_unavailable" | "quota_denied";
+    };
 
 // Find in-stock alternatives in the same category, used when an item is OOS.
 async function suggestAlternatives(
@@ -416,14 +444,13 @@ const TOOLS = [
     function: {
       name: "submit_order",
       description:
-        "أرسل الطلب نهائياً للنظام. ممنوع استدعاؤه إلا بعد: (1) preview_order، و(2) موافقة صريحة من الزبون بكلمة مثل 'نعم/أكد/تمام/أوكي'. مرّر confirmation_token اللي رجع من preview_order ونص موافقة الزبون كما كتبها في user_confirmation_text.",
+        "أرسل الطلب نهائياً بعد عرض المعاينة ووصول رسالة تأكيد صريحة من الزبون. مرّر confirmation_token من المعاينة التي وافق عليها الزبون.",
       parameters: {
         type: "object",
         properties: {
           confirmation_token: { type: "string", description: "التوكن اللي رجع من preview_order" },
-          user_confirmation_text: { type: "string", description: "نص موافقة الزبون الحرفي (مثلاً: نعم، أكد، تمام)" },
         },
-        required: ["confirmation_token", "user_confirmation_text"],
+        required: ["confirmation_token"],
         additionalProperties: false,
       },
     },
@@ -438,11 +465,10 @@ const TOOLS = [
         type: "object",
         properties: {
           confirmation_token: { type: "string", description: "التوكن اللي رجع من preview_order" },
-          user_confirmation_text: { type: "string", description: "نص موافقة الزبون الحرفي" },
           scheduled_for: { type: "string", description: "موعد الطلب بصيغة ISO 8601 (مثلاً 2026-06-02T19:00:00+03:00 لبغداد). لازم يكون بعد 15 دقيقة على الأقل من الآن وضمن أسبوعين." },
           scheduled_for_human: { type: "string", description: "تمثيل بشري للموعد كما تفهمه (مثلاً: اليوم الساعة 7 مساءً، بكرة الظهر)" },
         },
-        required: ["confirmation_token", "user_confirmation_text", "scheduled_for", "scheduled_for_human"],
+        required: ["confirmation_token", "scheduled_for", "scheduled_for_human"],
         additionalProperties: false,
       },
     },
@@ -1017,8 +1043,8 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
 2) تأكيد الطلب (إلزامي وبخطوتين):
    أ) قبل المعاينة لازم تجمع: **اسم الزبون** + السلة + العنوان + الهاتف + **طريقة الدفع** (+ الفرع لو متعدد). إذا الاسم محفوظ في ملف الزبون أعلاه، استعمله مباشرة بدون ما تسأل. إذا ما تعرفه، اسأله بصراحة: "حضرتك تشرّفنا، اسمك الكريم؟" ثم مرّره في set_delivery_info ضمن customer_name.
    أ-2) **طريقة الدفع إلزامية**: قبل preview_order اسأل الزبون مرة واحدة بصياغة طبيعية مثل: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟" ومرّر القيمة في set_delivery_info كـ payment_method (cash أو card_on_delivery). لا تكرر السؤال لو سبق وجاوب. لو preview_order رجع payment_method_required، اسأل فوراً.
-   ب) بعد ما تكتمل البيانات استدعِ preview_order. سيرجع لك confirmation_token ونص ملخّص كامل يتضمن طريقة الدفع. اعرض الملخّص للزبون حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
-   ج) لا تستدعِ submit_order إلا بعد ما الزبون يرد بصراحة بـ نعم/أكد/تمام/أوكي. عند الاستدعاء مرّر confirmation_token كما هو ونص موافقة الزبون الحرفي في user_confirmation_text.
+   ب) بعد ما تكتمل البيانات استدعِ preview_order. إذا رجعت إضافة أو كومبو بدون confirmation_token، اعرض الاقتراح فقط. بعد ما يرد الزبون، عدّل السلة إذا وافق واستدعِ preview_order من جديد. عند وجود confirmation_token اعرض الملخّص حرفياً واسأله: "أأكد الطلب؟ (نعم/لا)".
+   ج) لا تستدعِ submit_order إلا بعد ما الزبون يرد على الملخّص بصراحة بـ نعم/إي/أكد/تمام/أوكي. مرّر confirmation_token من الملخّص الذي رد عليه.
    د) لو الزبون عدّل السلة أو العنوان أو الاسم أو طريقة الدفع بعد المعاينة — استدعِ preview_order من جديد قبل submit_order.
 
 3) صنف مو موجود بالمنيو؟ اعتذر باختصار واقترح أقرب بديل من search_menu.
@@ -1038,7 +1064,7 @@ ${selectedBranch ? `\nالفرع المختار حالياً: ${selectedBranch.n
    • مرّر scheduled_for بصيغة ISO 8601 بمنطقة بغداد (+03:00). الوقت الحالي الآن (UTC): ${new Date().toISOString()}. لازم الموعد يكون بعد 15 دقيقة على الأقل وخلال أسبوعين، وضمن دوام الفرع.
    • مرّر scheduled_for_human بنفس الكلمات اللي قالها الزبون.
 ${branchRule}
-إذا فشل التأكيد وفي النتيجة recovery=refresh_preview، استدعِ preview_order واعرض الملخص المحدّث ثم انتظر موافقة جديدة. لا تكرر سؤال التأكيد بدون معاينة ناجحة، ولا تحوّل لموظف بسبب خطأ قابل للإصلاح. إذا recovery=ask_confirmation، اسأل عن الموافقة فقط. إذا recovery=support، أخبر الزبون أن الطلب لم يثبت واعرض إعادة المحاولة أو التحويل لموظف.
+إذا فشل التأكيد وفي النتيجة recovery=refresh_preview، استدعِ preview_order واعرض الملخص المحدّث ثم انتظر موافقة جديدة. لا تكرر سؤال التأكيد بدون معاينة ناجحة، ولا تحوّل لموظف بسبب خطأ قابل للإصلاح. إذا recovery=ask_confirmation، اسأل عن الموافقة فقط. إذا recovery=support، انقل user_message. عند إعادة التأكيد استخدم نفس confirmation_token حتى تسترجع رقم الطلب لو كان محفوظاً.
 9) المخزون:
    • الأصناف الناضبة لا تظهر أصلاً في show_menu — لا تذكرها بالقوائم العامة.
    • إذا الزبون طلب صنفاً بالاسم وكان out_of_stock في نتائج search_menu، قل بإيجاز "خلصان حالياً" واقترح بديلاً واحداً من نفس الفئة فوراً عبر search_menu. لا تكرر الاعتذار.
@@ -1202,6 +1228,7 @@ async function runTool(
   media: MediaItem[],
   actions: any[],
   customerProfile?: any,
+  checkoutMessage?: CheckoutMessage,
 ): Promise<any> {
   if (name === "search_menu") {
     const q = String(args.query || "").trim();
@@ -1501,6 +1528,9 @@ async function runTool(
 
 
   if (name === "preview_order") {
+    if (!checkoutMessage) {
+      return checkoutFailure("PREVIEW_MESSAGE_REQUIRED", "دزلي رسالة حتى نراجع تفاصيل طلبك.", "retry_preview");
+    }
     const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
     if (!cart.length) return { error: "السلة فارغة" };
     const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
@@ -1543,7 +1573,7 @@ async function runTool(
       if (b.coverage_type === "radius") return Number(b.coverage_radius_km) > 0 && Number.isFinite(Number(b.latitude)) && Number.isFinite(Number(b.longitude)) && b.latitude != null;
       return false;
     });
-    const customerLocForCov = (delivery as any)?.customer_location || conv.meta?.customer_location;
+    const customerLocForCov = delivery.customer_location ?? conv.meta?.customer_location ?? null;
     const hasGps = !!customerLocForCov && Number.isFinite(customerLocForCov.lat) && Number.isFinite(customerLocForCov.lng);
     const hasTextAddress = typeof delivery.address === "string" && delivery.address.trim().length >= 3;
     if (branchesWithCoverage.length > 0 && !hasGps && hasTextAddress) {
@@ -1596,10 +1626,6 @@ async function runTool(
     if (subtotal < effectiveMin) {
       return { error: `الحد الأدنى للطلب ${effectiveMin} ${restaurant.currency}. السلة حالياً ${subtotal}.` };
     }
-    const fp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
-    const token = `ord_${fp.slice(0, 16)}`;
-
-
     // ===== Checkout-time upsell (once per conversation) =====
     let checkoutSuggestions: any[] = [];
     let checkoutNote: string | null = null;
@@ -1741,11 +1767,17 @@ async function runTool(
     }
 
     const offeredSomething = !!comboSuggestion || checkoutSuggestions.length > 0;
+    const token = offeredSomething ? null : crypto.randomUUID();
+    const fp = token
+      ? await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name, customerLocForCov))
+      : null;
 
     const newMeta = {
       ...(conv.meta || {}),
       branch_id: branchId,
-      pending_confirmation: { token, fp, created_at: new Date().toISOString() },
+      pending_confirmation: token
+        ? { token, fp, after_user_message_id: checkoutMessage.id, created_at: new Date().toISOString() }
+        : null,
       ...(offeredSomething ? { checkout_upsell_offered: true } : {}),
     };
     const { error: previewError } = await db.from("conversations")
@@ -1770,7 +1802,7 @@ async function runTool(
     const summary = `🧾 ملخّص الطلب:\n${lines}\n\n👤 ${conv.customer_name}\n${addrLine}\n📞 ${delivery.phone}${delivery.time ? `\n⏰ ${delivery.time}` : ""}${branch ? `\n🏬 الفرع: ${branch.name}` : ""}\n💳 الدفع: ${paymentLabel}\n\n💰 الإجمالي: ${subtotal} ${restaurant.currency}`;
     return {
       ok: true,
-      confirmation_token: token,
+      ...(token ? { confirmation_token: token } : {}),
       summary,
       total: subtotal,
       currency: restaurant.currency,
@@ -1782,349 +1814,235 @@ async function runTool(
     };
   }
 
-  if (name === "submit_order") {
-    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
-    if (!cart.length) return { error: "السلة فارغة" };
-
-    // === Confirmation gate ===
+  if (name === "submit_order" || name === "schedule_order") {
     const pending = conv.meta?.pending_confirmation;
-    if (!pending?.token || !pending?.fp) {
-      return checkoutFailure("ORDER_PREVIEW_REQUIRED", "خليني أعرض لك ملخص الطلب أولاً حتى تتأكد منه.", "refresh_preview");
-    }
-    if (!args.confirmation_token || args.confirmation_token !== pending.token) {
-      return checkoutFailure("ORDER_CONFIRMATION_STALE", "أحتاج أعرض لك ملخص الطلب المحدّث قبل التثبيت.", "refresh_preview");
-    }
-    const delivery = (conv.delivery || {}) as Delivery;
-    const branchId = conv.meta?.branch_id || null;
-    const branchesAll: any[] = (restaurant as any).__branches || [];
-    const activeBranches = branchesAll.filter((b: any) => b.is_active);
-    if (!branchId && activeBranches.length > 1) {
-      return {
-        error: "branch_required",
-        user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد.",
-      };
-    }
-    if (!delivery.payment_method) {
-      return {
-        error: "payment_method_required",
-        user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟",
-      };
-    }
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
-    if (currentFp !== pending.fp) {
-      // Cart or delivery changed since preview — force a new preview
-      await db.from("conversations").update({
-        meta: { ...(conv.meta || {}), pending_confirmation: null },
-      }).eq("id", conv.id);
-      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
-      return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت؛ خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
-    }
-    const userOk = isUserConfirmation(args.user_confirmation_text);
-    if (!userOk) {
-      return checkoutFailure("ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation");
-    }
+    const previewId = args?.confirmation_token;
+    const previewFailure = pending?.token
+      ? checkoutFailure("ORDER_CONFIRMATION_STALE", "أحتاج أعرض لك ملخص الطلب المحدّث قبل التثبيت.", "refresh_preview")
+      : checkoutFailure("ORDER_PREVIEW_REQUIRED", "خليني أعرض لك ملخص الطلب أولاً حتى تتأكد منه.", "refresh_preview");
+    if (typeof previewId !== "string" || !PREVIEW_ID_RE.test(previewId)) return previewFailure;
 
-    // Closed-restaurant gate. The system prompt forbids this, but prompts are
-    // not guarantees — an immediate order must never reach a closed kitchen.
-    const submitBranch = branchId ? branchesAll.find((b: any) => b.id === branchId) : null;
-    const submitHours = submitBranch?.open_hours && Object.keys(submitBranch.open_hours || {}).length
-      ? submitBranch.open_hours
-      : restaurant.open_hours;
-    if (isOpenNow(submitHours) === false) {
-      return {
-        error: "closed_now",
-        user_message: "إحنا مغلقين هسه 🙏 أگدر أجدوّل طلبك لوقت الفتح إذا تحب.",
-        note: "لا ترسل طلب فوري الآن. اعرض على الزبون جدولة الطلب واستدعِ schedule_order بوقت داخل الدوام.",
-      };
-    }
+    const confirmationRequired = checkoutFailure(
+      "ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation",
+    );
+    if (!checkoutMessage || !isUserConfirmation(checkoutMessage.content)) return confirmationRequired;
 
-    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    if (!delivery.address || !delivery.phone) {
-      return { error: "ناقص العنوان أو الهاتف" };
-    }
-    const customerLoc = (delivery as any)?.customer_location || conv.meta?.customer_location;
-    const orderMeta: Record<string, any> = { confirm_fp: pending.fp };
-    {
-      // Idempotency: the same confirmed preview must never create two orders.
-      const { data: dup } = await db.from("orders").select("id")
-        .eq("conversation_id", conv.id).eq("meta->>confirm_fp", pending.fp).limit(1).maybeSingle();
-      if (dup) {
-        await db.from("conversations").update({ cart: [], state: "submitted", meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
-        return { ok: true, already_submitted: true, order_id: dup.id, user_message: "طلبك مثبّت مسبقاً ✅" };
+    let expected: CheckoutSnapshot | null = null;
+    let scheduledFor: string | null = null;
+    let scheduledLabel: string | null = null;
+    let etaMinutes: number | null = null;
+
+    // A consumed or superseded token can only look up an existing receipt.
+    if (pending?.token === previewId) {
+      if (!pending.fp || !pending.after_user_message_id) return previewFailure;
+      if (pending.after_user_message_id === checkoutMessage.id) return confirmationRequired;
+
+      const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
+      if (!cart.length) return { error: "السلة فارغة" };
+
+      const delivery = (conv.delivery || {}) as Delivery;
+      const branchId = conv.meta?.branch_id || null;
+      const activeBranches = ((restaurant as any).__branches || []).filter((b: any) => b.is_active);
+      if (!branchId && activeBranches.length > 1) {
+        return {
+          error: "branch_required",
+          user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد.",
+        };
       }
-    }
-    if (customerLoc && Number.isFinite(customerLoc.lat) && Number.isFinite(customerLoc.lng)) {
-      orderMeta.customer_location = { lat: customerLoc.lat, lng: customerLoc.lng };
-    }
-    const { data: order, error } = await db
-      .from("orders")
-      .insert({
-        restaurant_id: restaurant.id,
-        conversation_id: conv.id,
-        branch_id: branchId,
-        customer_name: conv.customer_name,
-        customer_phone: delivery.phone,
-        delivery_address: delivery.address,
-        items: cart,
-        subtotal,
-        total: subtotal,
-        status: "pending",
-        payment_method: delivery.payment_method,
-        meta: orderMeta,
-      })
-      .select()
-      .single();
+      const branch = branchId ? activeBranches.find((b: any) => b.id === branchId) : null;
+      if (branchId && !branch) {
+        return checkoutFailure("BRANCH_UNAVAILABLE", "الفرع المختار غير متاح حالياً. خلينا نحدد فرع متاح لطلبك.", "select_branch");
+      }
+      if (!delivery.payment_method) {
+        return { error: "payment_method_required", user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟" };
+      }
+      if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
 
+      const customerLocation = delivery.customer_location ?? conv.meta?.customer_location ?? null;
+      const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name, customerLocation));
+      if (currentFp !== pending.fp) {
+        return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت. خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
+      }
 
-    if (error) {
-      console.error("submit_order insert failed:", error);
-      try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "submit_order", error: error.message, payload: { args } }); } catch (_) {}
-      return checkoutFailure("ORDER_SUBMIT_FAILED", "ما تثبّت طلبك بعد. تفاصيله باقية، تكدر تعيد المحاولة بعد لحظة أو تطلب موظف.", "support");
-    }
-
-    // Consume confirmed_order quota. If denied, cancel the order and tell the user.
-    const { data: orderQuota } = await db.rpc("consume_quota", {
-      _restaurant_id: restaurant.id,
-      _kind: "confirmed_order",
-      _ref: order.id,
-    });
-    if (orderQuota && (orderQuota as any).allowed === false) {
-      await db.from("orders").update({ status: "cancelled", notes: "quota_exceeded" }).eq("id", order.id);
-      return { error: "عذراً، المطعم وصل لحدّه الشهري من الطلبات. حاول لاحقاً." };
-    }
-
-    // Atomically decrement stock for any tracked items + alert manager on low/out
-    try {
-      const stockItems = (cart as CartItem[]).map((c) => ({ menu_item_id: c.menu_item_id, qty: c.qty }));
-      await db.rpc("decrement_stock", { _items: stockItems });
-      // Check post-decrement stock and notify owner (one alert per state-change)
-      const trackedIds = stockItems.map((s) => s.menu_item_id);
-      if (trackedIds.length) {
-        const { data: postRows } = await db
-          .from("menu_items")
-          .select("id,name,track_stock,stock_qty")
-          .in("id", trackedIds);
-        const LOW_THRESHOLD = 3;
-        const alertsState = ((restaurant as any).feature_flags?.stock_alerts) || {};
-        const newState: Record<string, string> = { ...alertsState };
-        const toNotify: { name: string; qty: number; level: "out" | "low" }[] = [];
-        for (const r of (postRows || [])) {
-          if (!(r as any).track_stock) continue;
-          const qty = Number((r as any).stock_qty ?? 0);
-          const level = qty <= 0 ? "out" : (qty <= LOW_THRESHOLD ? "low" : null);
-          if (!level) continue;
-          if (alertsState[(r as any).id] === level) continue; // already alerted at this level
-          toNotify.push({ name: (r as any).name, qty, level });
-          newState[(r as any).id] = level;
+      const hours = branch?.open_hours && Object.keys(branch.open_hours).length
+        ? branch.open_hours
+        : restaurant.open_hours;
+      if (name === "schedule_order") {
+        const when = new Date(String(args.scheduled_for || ""));
+        if (isNaN(when.getTime())) return { error: "scheduled_for غير صالح. لازم ISO 8601 مع منطقة زمنية." };
+        const now = Date.now();
+        if (when.getTime() < now + 15 * 60 * 1000) {
+          return { error: "الموعد لازم يكون بعد 15 دقيقة على الأقل من الآن. اقترح وقت أبعد." };
         }
-        if (toNotify.length) {
-          const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
-          const ownerChat = (restaurant as any).owner_telegram_chat_id;
-          if (ownerChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
-            const lines = toNotify.map((a) =>
-              a.level === "out" ? `🔴 نفد: ${a.name}` : `⚠️ منخفض: ${a.name} (متبقي ${a.qty})`
-            );
-            fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${LOVABLE_API_KEY}`,
-                "X-Connection-Api-Key": TELEGRAM_API_KEY,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                chat_id: ownerChat,
-                text: `📦 تنبيه مخزون:\n${lines.join("\n")}\n\nأعد التعبئة من لوحة التحكم.`,
-              }),
-            }).catch(() => {});
+        if (when.getTime() > now + 14 * 24 * 60 * 60 * 1000) {
+          return { error: "الموعد بعيد جداً (أقصى حد أسبوعين). اقترح وقت أقرب." };
+        }
+        // isOpenNow expects the same UTC+3 wall clock used by baghdadNow().
+        if (isOpenNow(hours, new Date(when.getTime() + 3 * 60 * 60 * 1000)) === false) {
+          return {
+            error: "closed_at_that_time",
+            user_message: "هذا الوقت خارج دوامنا 🙏 اختار وقت ثاني ضمن أوقات الفتح.",
+            note: "اعرض على الزبون أقرب وقت داخل الدوام (الجدول موجود بالتعليمات) ثم أعد المحاولة.",
+          };
+        }
+        scheduledFor = when.toISOString();
+        scheduledLabel = typeof args.scheduled_for_human === "string" && args.scheduled_for_human.trim()
+          ? args.scheduled_for_human.trim() : null;
+      } else {
+        if (isOpenNow(hours) === false) {
+          return {
+            error: "closed_now",
+            user_message: "إحنا مغلقين هسه 🙏 أگدر أجدول طلبك لوقت الفتح إذا تحب.",
+            note: "لا ترسل طلب فوري الآن. اعرض على الزبون جدولة الطلب واستدعِ schedule_order بوقت داخل الدوام.",
+          };
+        }
+        etaMinutes = 45;
+        try {
+          const prep = Number(branch?.current_prep_minutes) || 25;
+          let deliveryEta = 20;
+          const area = (delivery.area || delivery.address).toLowerCase();
+          if (branchId && area) {
+            const { data: zones } = await db.from("delivery_zones")
+              .select("area_name,eta_minutes").eq("branch_id", branchId).eq("is_active", true);
+            const matched = (zones || []).find((zone: any) => area.includes(String(zone.area_name).toLowerCase()));
+            if (matched?.eta_minutes) deliveryEta = Number(matched.eta_minutes);
           }
-          // Persist alert state to avoid duplicate notifications
-          const mergedFlags = { ...((restaurant as any).feature_flags || {}), stock_alerts: newState };
-          db.from("restaurants").update({ feature_flags: mergedFlags }).eq("id", restaurant.id).then(() => {});
-        }
+          etaMinutes = Math.max(15, prep + deliveryEta);
+        } catch (_) { /* keep default */ }
       }
-    } catch (_) { /* don't block the order */ }
 
-    // === Compute ETA (prep + delivery) and save to order.meta ===
-    let etaMinutes = 45; // default fallback
-    try {
-      const branchesArr: any[] = (restaurant as any).__branches || [];
-      const branchObj = branchId ? branchesArr.find((b: any) => b.id === branchId) : null;
-      const prep = Number(branchObj?.current_prep_minutes) || 25;
-      let deliveryEta = 20;
-      const area = (delivery.area || delivery.address || "").toString().toLowerCase();
-      if (branchId && area) {
-        const { data: zones } = await db
-          .from("delivery_zones")
-          .select("area_name,eta_minutes")
-          .eq("branch_id", branchId)
-          .eq("is_active", true);
-        const matched = (zones || []).find((z: any) => area.includes(String(z.area_name).toLowerCase()));
-        if (matched && matched.eta_minutes) deliveryEta = Number(matched.eta_minutes);
-      }
-      etaMinutes = Math.max(15, prep + deliveryEta);
-    } catch (_) { /* keep default */ }
-
-    const confirmedAtIso = new Date().toISOString();
-    await db.from("orders").update({
-      meta: { ...orderMeta, eta_minutes: etaMinutes, confirmed_at: confirmedAtIso },
-    }).eq("id", order.id);
-
-    await db
-      .from("conversations")
-      .update({
-        state: "submitted",
-        cart: [],
-        delivery: {},
-        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
-      })
-      .eq("id", conv.id);
-
-    // Refresh this run's snapshot too: a second tool call must not submit the
-    // old cart again or hand the customer off after an order already exists.
-    conv.state = "submitted";
-    conv.cart = [];
-    conv.delivery = {};
-    conv.meta = { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id };
-
-    // Fire-and-forget dispatch to platform webhook
-    try {
-      const baseUrl = Deno.env.get("SUPABASE_URL");
-      fetch(`${baseUrl}/functions/v1/orders-dispatch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order_id: order.id }),
-      }).catch(() => {});
-      // Fire-and-forget preference extraction
-      fetch(`${baseUrl}/functions/v1/extract-preferences`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: conv.id, order_id: order.id }),
-      }).catch(() => {});
-    } catch (_) {}
-
-    const shortId = order.id.slice(0, 8);
-    const baseApp = Deno.env.get("PUBLIC_APP_URL") || "https://project--69d6f4f9-fc25-4aef-bc41-e7320569fc12.lovable.app";
-    const trackUrl = `${baseApp}/track/${order.id}`;
-    return {
-      ok: true,
-      order_id: order.id,
-      total: subtotal,
-      eta_minutes: etaMinutes,
-      message: `✅ تم استلام طلبك #${shortId}.\nالتوصيل خلال ~${etaMinutes} دقيقة تقريباً.\n🔗 تتبّع طلبك: ${trackUrl}\nراح نخبرك بكل خطوة 🌹`,
-    };
-  }
-
-  if (name === "schedule_order") {
-    const cart: CartItem[] = Array.isArray(conv.cart) ? conv.cart : [];
-    if (!cart.length) return { error: "السلة فارغة" };
-    const pending = conv.meta?.pending_confirmation;
-    if (!pending?.token || !pending?.fp) {
-      return checkoutFailure("ORDER_PREVIEW_REQUIRED", "خليني أعرض لك ملخص الطلب أولاً حتى تتأكد منه.", "refresh_preview");
-    }
-    if (!args.confirmation_token || args.confirmation_token !== pending.token) {
-      return checkoutFailure("ORDER_CONFIRMATION_STALE", "أحتاج أعرض لك ملخص الطلب المحدّث قبل التثبيت.", "refresh_preview");
-    }
-    const delivery = (conv.delivery || {}) as Delivery;
-    const branchId = conv.meta?.branch_id || null;
-    const branchesAll: any[] = (restaurant as any).__branches || [];
-    const activeBranches = branchesAll.filter((b: any) => b.is_active);
-    if (!branchId && activeBranches.length > 1) {
-      return { error: "branch_required", user_message: "لازم نحدد أقرب فرع. اكتبلي منطقتك أو شارك موقعك حتى أتأكد." };
-    }
-    if (!delivery.payment_method) {
-      return { error: "payment_method_required", user_message: "تحب تدفع نقداً عند الاستلام لو بالبطاقة عند الاستلام؟" };
-    }
-    const currentFp = await sha256Hex(cartFingerprint(cart, delivery, branchId, conv.customer_name));
-    if (currentFp !== pending.fp) {
-      await db.from("conversations").update({ meta: { ...(conv.meta || {}), pending_confirmation: null } }).eq("id", conv.id);
-      conv.meta = { ...(conv.meta || {}), pending_confirmation: null };
-      return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت؛ خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
-    }
-    const userOk = isUserConfirmation(args.user_confirmation_text);
-    if (!userOk) {
-      return checkoutFailure("ORDER_CONFIRMATION_REQUIRED", "تأكد الطلب مثل ما موجود بالملخص؟", "ask_confirmation");
-    }
-    const when = new Date(String(args.scheduled_for || ""));
-    if (isNaN(when.getTime())) return { error: "scheduled_for غير صالح. لازم ISO 8601 مع منطقة زمنية." };
-    const minMs = Date.now() + 15 * 60 * 1000;
-    const maxMs = Date.now() + 14 * 24 * 60 * 60 * 1000;
-    if (when.getTime() < minMs) return { error: "الموعد لازم يكون بعد 15 دقيقة على الأقل من الآن. اقترح وقت أبعد." };
-    if (when.getTime() > maxMs) return { error: "الموعد بعيد جداً (أقصى حد أسبوعين). اقترح وقت أقرب." };
-    // The slot itself must fall inside working hours (a 4 AM slot was accepted).
-    const schedBranch = branchId ? branchesAll.find((b: any) => b.id === branchId) : null;
-    const schedHours = schedBranch?.open_hours && Object.keys(schedBranch.open_hours || {}).length
-      ? schedBranch.open_hours
-      : restaurant.open_hours;
-    // baghdadNow() shifts UTC by +3, so mirror that for the requested slot.
-    if (isOpenNow(schedHours, new Date(when.getTime() + 3 * 60 * 60 * 1000)) === false) {
-      return {
-        error: "closed_at_that_time",
-        user_message: "هذا الوقت خارج دوامنا 🙏 اختار وقت ثاني ضمن أوقات الفتح.",
-        note: "اعرض على الزبون أقرب وقت داخل الدوام (الجدول موجود بالتعليمات) ثم أعد المحاولة.",
+      expected = {
+        cart, delivery, branch_id: branchId, customer_name: conv.customer_name ?? null,
+        customer_location: customerLocation,
       };
     }
-    if (!delivery.address || !delivery.phone) return { error: "ناقص العنوان أو الهاتف" };
 
-    const subtotal = cart.reduce((s, i) => s + i.qty * i.unit_price, 0);
-    const { data: order, error } = await db
-      .from("orders")
-      .insert({
-        restaurant_id: restaurant.id,
-        conversation_id: conv.id,
-        branch_id: branchId,
-        customer_name: conv.customer_name,
-        customer_phone: delivery.phone,
-        delivery_address: delivery.address,
-        items: cart,
-        subtotal,
-        total: subtotal,
-        status: "scheduled",
-        scheduled_for: when.toISOString(),
-        payment_method: delivery.payment_method,
-        notes: args.scheduled_for_human ? `مجدول: ${args.scheduled_for_human}` : null,
-      })
-      .select()
-      .single();
-    if (error) {
-      console.error("schedule_order insert failed:", error);
-      try { await db.from("agent_logs").insert({ restaurant_id: restaurant.id, conversation_id: conv.id, kind: "tool", tool_name: "schedule_order", error: error.message, payload: { args } }); } catch (_) {}
-      return checkoutFailure("ORDER_SCHEDULE_FAILED", "ما تثبّت حجزك بعد. تفاصيله باقية، تكدر تعيد المحاولة بعد لحظة أو تطلب موظف.", "support");
+    const { data, error } = await db.rpc("commit_agent_checkout", {
+      _restaurant_id: restaurant.id,
+      _conversation_id: conv.id,
+      _preview_id: previewId,
+      _confirmation_message_id: checkoutMessage.id,
+      _expected: expected,
+      _scheduled_for: scheduledFor,
+      _scheduled_label: scheduledLabel,
+      _eta_minutes: etaMinutes,
+    });
+    const commit: CheckoutCommitResult | null = data;
+    if (error || !commit) {
+      console.error("commit_agent_checkout failed:", error?.code ?? "missing result");
+      return checkoutFailure(
+        name === "schedule_order" ? "ORDER_SCHEDULE_FAILED" : "ORDER_SUBMIT_FAILED",
+        "ما كدرت أتأكد من تثبيت طلبك هسه. جرّب التأكيد مرة ثانية أو اطلب موظف.",
+        "support",
+      );
     }
 
-    await db
-      .from("conversations")
-      .update({
-        state: "submitted",
-        cart: [],
-        delivery: {},
-        meta: { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id },
-      })
-      .eq("id", conv.id);
+    switch (commit.outcome) {
+      case "replayed":
+        return {
+          ok: true, already_submitted: true, order_id: commit.order_id,
+          message: `طلبك #${commit.order_id.slice(0, 8)} مثبّت مسبقاً ✅`,
+        };
+      case "stale_preview":
+        return previewFailure;
+      case "confirmation_required":
+        return confirmationRequired;
+      case "order_changed":
+        return checkoutFailure("ORDER_CHANGED", "تفاصيل الطلب تغيّرت. خليني أعرض لك الملخص المحدّث حتى تتأكد منه.", "refresh_preview");
+      case "branch_unavailable":
+        return checkoutFailure("BRANCH_UNAVAILABLE", "الفرع المختار غير متاح حالياً. خلينا نحدد فرع متاح لطلبك.", "select_branch");
+      case "items_unavailable":
+        return checkoutFailure("ORDER_ITEMS_UNAVAILABLE", "المتوفر من بعض أصناف طلبك تغيّر. نراجع الأصناف والكميات سويّة؟", "revise_cart");
+      case "quota_denied":
+        return checkoutFailure("ORDER_QUOTA_DENIED", "عذراً، ما نكدر نستلم طلب جديد هسه. حاول لاحقاً أو تواصل ويه المطعم.", "order_unavailable");
+    }
 
+    const orderId = commit.order_id;
     conv.state = "submitted";
     conv.cart = [];
     conv.delivery = {};
-    conv.meta = { ...(conv.meta || {}), pending_confirmation: null, last_order_id: order.id };
+    conv.meta = { ...(conv.meta || {}), pending_confirmation: null, last_order_id: orderId };
 
-    // Fire-and-forget preference extraction
+    // Notifications are sent only for a newly committed checkout.
+    if (!scheduledFor && expected) {
+      try {
+        // Check post-decrement stock and notify owner (one alert per state-change)
+        const trackedIds = expected.cart.map((item) => item.menu_item_id);
+        if (trackedIds.length) {
+          const { data: postRows } = await db
+            .from("menu_items")
+            .select("id,name,track_stock,stock_qty")
+            .in("id", trackedIds)
+            .eq("restaurant_id", restaurant.id);
+          const LOW_THRESHOLD = 3;
+          const alertsState = ((restaurant as any).feature_flags?.stock_alerts) || {};
+          const newState: Record<string, string> = { ...alertsState };
+          const toNotify: { name: string; qty: number; level: "out" | "low" }[] = [];
+          for (const r of (postRows || [])) {
+            if (!(r as any).track_stock) continue;
+            const qty = Number((r as any).stock_qty ?? 0);
+            const level = qty <= 0 ? "out" : (qty <= LOW_THRESHOLD ? "low" : null);
+            if (!level) continue;
+            if (alertsState[(r as any).id] === level) continue; // already alerted at this level
+            toNotify.push({ name: (r as any).name, qty, level });
+            newState[(r as any).id] = level;
+          }
+          if (toNotify.length) {
+            const TELEGRAM_API_KEY = Deno.env.get("TELEGRAM_API_KEY");
+            const ownerChat = (restaurant as any).owner_telegram_chat_id;
+            if (ownerChat && LOVABLE_API_KEY && TELEGRAM_API_KEY) {
+              const lines = toNotify.map((a) =>
+                a.level === "out" ? `🔴 نفد: ${a.name}` : `⚠️ منخفض: ${a.name} (متبقي ${a.qty})`
+              );
+              fetch(`https://connector-gateway.lovable.dev/telegram/sendMessage`, {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${LOVABLE_API_KEY}`,
+                  "X-Connection-Api-Key": TELEGRAM_API_KEY,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  chat_id: ownerChat,
+                  text: `📦 تنبيه مخزون:\n${lines.join("\n")}\n\nأعد التعبئة من لوحة التحكم.`,
+                }),
+              }).catch(() => {});
+            }
+            // Persist alert state to avoid duplicate notifications
+            const mergedFlags = { ...((restaurant as any).feature_flags || {}), stock_alerts: newState };
+            db.from("restaurants").update({ feature_flags: mergedFlags }).eq("id", restaurant.id).then(() => {});
+          }
+        }
+      } catch (_) { /* don't block the order */ }
+    }
+
     try {
       const baseUrl = Deno.env.get("SUPABASE_URL");
+      if (!scheduledFor) {
+        fetch(`${baseUrl}/functions/v1/orders-dispatch`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order_id: orderId }),
+        }).catch(() => {});
+      }
       fetch(`${baseUrl}/functions/v1/extract-preferences`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ conversation_id: conv.id, order_id: order.id }),
+        body: JSON.stringify({ conversation_id: conv.id, order_id: orderId }),
       }).catch(() => {});
     } catch (_) {}
 
-
-
+    const shortId = orderId.slice(0, 8);
+    if (scheduledFor) {
+      return {
+        ok: true, order_id: orderId, total: commit.total, scheduled_for: scheduledFor,
+        scheduled_for_human: scheduledLabel || scheduledFor,
+        message: `تم حجز الطلب #${shortId} ✅ راح يوصل قبل ${scheduledLabel || scheduledFor} إن شاء الله.`,
+      };
+    }
+    const baseApp = Deno.env.get("PUBLIC_APP_URL") || "https://project--69d6f4f9-fc25-4aef-bc41-e7320569fc12.lovable.app";
     return {
-      ok: true,
-      order_id: order.id,
-      scheduled_for: when.toISOString(),
-      scheduled_for_human: args.scheduled_for_human || when.toISOString(),
-      total: subtotal,
-      message: `تم حجز الطلب ✅ راح يوصل قبل ${args.scheduled_for_human || when.toISOString()} إن شاء الله.`,
+      ok: true, order_id: orderId, total: commit.total, eta_minutes: etaMinutes,
+      message: `✅ تم استلام طلبك #${shortId}.\nالتوصيل خلال ~${etaMinutes} دقيقة تقريباً.\n🔗 تتبّع طلبك: ${baseApp}/track/${orderId}\nراح نخبرك بكل خطوة 🌹`,
     };
   }
 
@@ -2979,9 +2897,10 @@ Deno.serve(async (req) => {
     // Skip empty assistant turns so a bad/blank model response does not poison future context.
     const { data: history } = await db
       .from("messages")
-      .select("role,content,tool_calls,tool_call_id,name,created_at")
+      .select("id,role,content,tool_calls,tool_call_id,name,created_at")
       .eq("conversation_id", conversation_id)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(30);
 
     // Session boundary: cut history at the most recent >3h gap so old sessions
@@ -3040,6 +2959,9 @@ Deno.serve(async (req) => {
 
     // === /cancel shortcut: clear cart + pending confirmation without calling the model ===
     const lastUserMsg = [...cleanHistory].reverse().find((m) => m.role === "user");
+    const checkoutMessage = lastUserMsg?.id && typeof lastUserMsg.content === "string"
+      ? { id: lastUserMsg.id, content: lastUserMsg.content }
+      : undefined;
     const lastUserText = typeof lastUserMsg?.content === "string" ? lastUserMsg.content.trim().toLowerCase() : "";
     const recentUserTexts = [...cleanHistory]
       .reverse()
@@ -3280,7 +3202,7 @@ Deno.serve(async (req) => {
                 result = checkoutRepair;
               } else {
                 result = await withTimeout(
-                  runTool(db, conv, restaurant, name, args, media, actions, customerProfile),
+                  runTool(db, conv, restaurant, name, args, media, actions, customerProfile, checkoutMessage),
                   PER_TOOL_TIMEOUT_MS,
                   name,
                 );

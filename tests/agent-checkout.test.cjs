@@ -27,6 +27,14 @@ class MemoryDb {
     };
     this.rpcCalls = [];
   }
+  addUserMessage(content) {
+    const message = {
+      id: `message-${this.tables.messages.length + 1}`, role: 'user', content,
+      conversation_id: 'conversation-1', created_at: new Date().toISOString(),
+    };
+    this.tables.messages.push(message);
+    return message;
+  }
   from(table) {
     const db = this;
     const filters = [];
@@ -47,7 +55,7 @@ class MemoryDb {
     async function execute(single) {
       const rows = db.tables[table] ||= [];
       if (operation === 'insert') {
-        if (table === 'orders' && db.insertError) return { data: null, error: { code: 'P0001', message: 'test database failure' } };
+        assert.notEqual(table, 'orders', 'checkout writes orders through the transaction RPC');
         const inserted = (Array.isArray(value) ? value : [value]).map(v => ({ id: `${table}-${rows.length + 1}`, created_at: new Date().toISOString(), ...structuredClone(v) }));
         rows.push(...inserted);
         return { data: structuredClone(single ? inserted[0] : inserted), error: null };
@@ -68,6 +76,29 @@ class MemoryDb {
     if (name === 'claim_conversation') return this.lockError ? { data: false, error: { message: 'claim failed' } } : { data: true, error: null };
     if (name === 'consume_quota') return { data: { allowed: true }, error: null };
     if (name === 'recall_customer') return { data: { found: false }, error: null };
+    if (name === 'commit_agent_checkout') {
+      const previous = this.tables.orders.find(order => order.checkout_preview_id === args._preview_id);
+      if (previous) return { data: { outcome: 'replayed', order_id: previous.id }, error: null };
+      if (!args._expected) return { data: { outcome: 'stale_preview' }, error: null };
+      if (this.insertError) return { data: null, error: { code: 'P0001' } };
+
+      const conv = this.tables.conversations[0];
+      assert.equal(args._preview_id, conv.meta.pending_confirmation.token);
+      assert.equal(args._confirmation_message_id, this.tables.messages.findLast(m => m.role === 'user').id);
+      const { cart, delivery, branch_id, customer_location } = args._expected;
+      const total = cart.reduce((sum, item) => sum + item.qty * item.unit_price, 0);
+      const id = `orders-${this.tables.orders.length + 1}`;
+      this.tables.orders.push(structuredClone({
+        id, checkout_preview_id: args._preview_id, items: cart, branch_id,
+        delivery_address: delivery.address, total, scheduled_for: args._scheduled_for,
+        meta: { customer_location },
+      }));
+      Object.assign(conv, {
+        cart: [], delivery: {}, state: 'submitted',
+        meta: { ...conv.meta, pending_confirmation: null, last_order_id: id },
+      });
+      return { data: { outcome: 'committed', order_id: id, total }, error: null };
+    }
     return { data: null, error: null };
   }
 }
@@ -96,12 +127,13 @@ function loadAgent(db, coverageCheck = () => ({ covered: true })) {
 function snapshot(db) { return structuredClone(db.tables.conversations[0]); }
 function restaurant(db) { return { ...structuredClone(db.tables.restaurants[0]), __branches: structuredClone(db.tables.branches) }; }
 async function preview(api, db, conv = snapshot(db)) {
-  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], []);
+  const message = db.addUserMessage('هذا عنوان الطلب والدفع نقداً');
+  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], [], undefined, message);
   assert.equal(result.ok, true, JSON.stringify(result));
-  return { conv, result };
+  return { conv, result, message };
 }
 async function confirm(api, db, conv, token, word = 'نعم') {
-  return api.runTool(db, conv, restaurant(db), 'submit_order', { confirmation_token: token, user_confirmation_text: word }, [], []);
+  return api.runTool(db, conv, restaurant(db), 'submit_order', { confirmation_token: token }, [], [], undefined, db.addUserMessage(word));
 }
 
 test('automatic covered branch keeps the same fingerprint on the next turn', async () => {
@@ -161,22 +193,101 @@ test('a changed basket requires a fresh preview and does not insert an order', a
 
 test('failed preview storage does not create an unusable confirmation', async () => {
   const db = new MemoryDb({ previewError: true }), api = loadAgent(db), conv = snapshot(db);
-  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], []);
+  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], [], undefined, db.addUserMessage('عنواني صحيح'));
   assert.equal(result.error_code, 'PREVIEW_SAVE_FAILED');
   assert.equal(conv.meta.pending_confirmation, undefined);
   assert.equal(db.tables.orders.length, 0);
 });
 
-for (const word of ['نعم', 'اي', 'أكد']) test(`confirmation with ${word} creates one order and clears this run's basket`, async () => {
+for (const word of ['نعم', 'إي', 'أكد', 'نعم، أكّد الطلب']) test(`confirmation with ${word} creates one order and clears this run's basket`, async () => {
   const db = new MemoryDb(), api = loadAgent(db);
   const { conv, result } = await preview(api, db);
-  assert.equal((await confirm(api, db, conv, result.confirmation_token, word)).ok, true);
-  const again = await confirm(api, db, conv, result.confirmation_token, word);
-  assert.ok(again.error);
+  const first = await confirm(api, db, conv, result.confirmation_token, word);
+  assert.equal(first.ok, true);
+  const again = await confirm(api, db, snapshot(db), result.confirmation_token, word);
+  assert.equal(again.already_submitted, true);
+  assert.equal(again.order_id, first.order_id);
+  assert.match(again.message, /مثبّت مسبقاً/);
   assert.equal(db.tables.orders.length, 1);
   assert.equal(conv.state, 'submitted');
   assert.equal(conv.cart.length, 0);
   assert.equal(conv.meta.pending_confirmation, null);
+});
+
+test('a fresh preview allows identical items and replay cannot clear the new cart', async () => {
+  const db = new MemoryDb(), api = loadAgent(db);
+  const first = await preview(api, db);
+  const basket = structuredClone(first.conv.cart);
+  const delivery = structuredClone(first.conv.delivery);
+  const firstOrder = await confirm(api, db, first.conv, first.result.confirmation_token, 'إي');
+  Object.assign(db.tables.conversations[0], { cart: basket, delivery, state: 'collecting_items' });
+
+  const second = await preview(api, db);
+  assert.notEqual(second.result.confirmation_token, first.result.confirmation_token);
+  const replay = await confirm(api, db, second.conv, first.result.confirmation_token, 'إي');
+  assert.equal(replay.order_id, firstOrder.order_id);
+  assert.equal(second.conv.cart.length, 1);
+  assert.equal(db.tables.conversations[0].meta.pending_confirmation.token, second.result.confirmation_token);
+
+  const secondOrder = await confirm(api, db, second.conv, second.result.confirmation_token, 'إي');
+  assert.equal(secondOrder.ok, true);
+  assert.notEqual(secondOrder.order_id, firstOrder.order_id);
+  assert.equal(db.tables.orders.length, 2);
+});
+
+test('an approval from the preview turn cannot approve the newly generated preview', async () => {
+  const db = new MemoryDb(), api = loadAgent(db), conv = snapshot(db);
+  const message = db.addUserMessage('إي');
+  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], [], undefined, message);
+  const failure = await api.runTool(db, conv, restaurant(db), 'submit_order',
+    { confirmation_token: result.confirmation_token }, [], [], undefined, message);
+  assert.equal(failure.error_code, 'ORDER_CONFIRMATION_REQUIRED');
+  assert.equal(db.rpcCalls.some(call => call.name === 'commit_agent_checkout'), false);
+});
+
+test('a combo suggestion cannot be mistaken for a confirmation preview', async () => {
+  const db = new MemoryDb(), api = loadAgent(db);
+  db.tables.conversations[0].meta.checkout_upsell_offered = false;
+  db.tables.menu_items.push({ id: 'item-1', restaurant_id: 'restaurant-1', price: 7000 });
+  db.tables.combos.push({
+    id: 'combo-1', restaurant_id: 'restaurant-1', is_active: true, name: 'عرض', price: 6000,
+    items: [{ menu_item_id: 'item-1', qty: 1 }],
+  });
+  const offer = await preview(api, db);
+  assert.equal(offer.result.combo_suggestion.id, 'combo-1');
+  assert.equal(offer.result.confirmation_token, undefined);
+  assert.equal(db.tables.conversations[0].meta.pending_confirmation, null);
+  const actualPreview = await preview(api, db);
+  assert.ok(actualPreview.result.confirmation_token);
+  assert.equal(db.tables.orders.length, 0);
+});
+
+test('negative or ambiguous messages are rejected even when the tool arguments claim approval', async () => {
+  const db = new MemoryDb(), api = loadAgent(db);
+  const { conv, result } = await preview(api, db);
+  for (const text of ['تمام لا تأكد', 'إي بس غيّر العنوان', 'تمام؟']) {
+    const args = { confirmation_token: result.confirmation_token, user_confirmation_text: 'نعم' };
+    const failure = await api.runTool(db, conv, restaurant(db), 'submit_order', args, [], [], undefined, db.addUserMessage(text));
+    assert.equal(failure.error_code, 'ORDER_CONFIRMATION_REQUIRED', text);
+  }
+  assert.equal(db.rpcCalls.some(call => call.name === 'commit_agent_checkout'), false);
+});
+
+test('changing the shared location requires a new confirmation preview', async () => {
+  const db = new MemoryDb(), api = loadAgent(db);
+  const { result } = await preview(api, db);
+  db.tables.conversations[0].delivery.customer_location = { lat: 35.48, lng: 44.41 };
+  const failure = await confirm(api, db, snapshot(db), result.confirmation_token, 'إي');
+  assert.equal(failure.error_code, 'ORDER_CHANGED');
+  assert.equal(db.tables.orders.length, 0);
+});
+
+test('a preview from before the migration must be refreshed', async () => {
+  const db = new MemoryDb(), api = loadAgent(db), conv = snapshot(db);
+  conv.meta.pending_confirmation = { token: 'ord_7b7b1d5ac58a4254', fp: 'old-fingerprint' };
+  const failure = await confirm(api, db, conv, conv.meta.pending_confirmation.token);
+  assert.equal(failure.recovery, 'refresh_preview');
+  assert.equal(db.tables.orders.length, 0);
 });
 
 test('database failure is reported without losing the basket or claiming success', async () => {
@@ -185,7 +296,7 @@ test('database failure is reported without losing the basket or claiming success
   const failure = api.sanitizeToolResultForModel(await confirm(api, db, conv, result.confirmation_token));
   assert.equal(failure.ok, false);
   assert.equal(failure.recovery, 'support');
-  assert.match(failure.user_message, /ما تثبّت/);
+  assert.match(failure.user_message, /ما كدرت أتأكد/);
   assert.equal(conv.cart.length, 1);
   assert.equal(db.tables.orders.length, 0);
 });
@@ -193,8 +304,8 @@ test('database failure is reported without losing the basket or claiming success
 test('a successful scheduled order also consumes the current basket', async () => {
   const db = new MemoryDb(), api = loadAgent(db);
   const { conv, result } = await preview(api, db);
-  const args = { confirmation_token: result.confirmation_token, user_confirmation_text: 'نعم', scheduled_for: new Date(Date.now() + 3600000).toISOString(), scheduled_for_human: 'بعد ساعة' };
-  const scheduled = await api.runTool(db, conv, restaurant(db), 'schedule_order', args, [], []);
+  const args = { confirmation_token: result.confirmation_token, scheduled_for: new Date(Date.now() + 3600000).toISOString(), scheduled_for_human: 'بعد ساعة' };
+  const scheduled = await api.runTool(db, conv, restaurant(db), 'schedule_order', args, [], [], undefined, db.addUserMessage('نعم'));
   assert.equal(scheduled.ok, true, JSON.stringify(scheduled));
   assert.equal(conv.state, 'submitted');
   assert.equal(conv.cart.length, 0);
@@ -214,7 +325,7 @@ test('a failed conversation lock does not process or submit the basket', async (
 test('handler finishes after commit even if the model also requested handoff', async () => {
   const db = new MemoryDb(), api = loadAgent(db);
   const { result } = await preview(api, db);
-  db.tables.messages.push({ role: 'user', content: 'نعم', created_at: new Date().toISOString() });
+  db.addUserMessage('نعم');
   let modelCalls = 0;
   api.setModel(async () => {
     modelCalls++;
@@ -236,7 +347,7 @@ test('handler finishes after commit even if the model also requested handoff', a
 test('a recoverable confirmation failure cannot automatically pause the customer for handoff', async () => {
   const db = new MemoryDb(), api = loadAgent(db);
   await preview(api, db);
-  db.tables.messages.push({ role: 'user', content: 'نعم', created_at: new Date().toISOString() });
+  db.addUserMessage('نعم');
   let step = 0;
   api.setModel(async messages => {
     if (step++ === 0) return { choices: [{ message: { role: 'assistant', content: null, tool_calls: [
@@ -255,7 +366,7 @@ test('a recoverable confirmation failure cannot automatically pause the customer
 
 test('editing delivery invalidates a cached preview in the same model run', async () => {
   const db = new MemoryDb(), api = loadAgent(db);
-  db.tables.messages.push({ role: 'user', content: 'غير العنوان', created_at: new Date().toISOString() });
+  db.addUserMessage('غير العنوان');
   let step = 0;
   api.setModel(async messages => {
     const current = step++;
@@ -314,7 +425,7 @@ test('messages about the customer location are not mistaken for restaurant direc
 test('GPS outside configured delivery coverage still blocks checkout', async () => {
   const db = new MemoryDb({ coverage: true }), api = loadAgent(db, () => ({ covered: false }));
   const conv = snapshot(db);
-  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], []);
+  const result = await api.runTool(db, conv, restaurant(db), 'preview_order', {}, [], [], undefined, db.addUserMessage('هذا موقعي'));
   assert.equal(result.error, 'out_of_coverage');
   assert.equal(conv.meta.pending_confirmation, undefined);
   assert.equal(db.tables.orders.length, 0);
