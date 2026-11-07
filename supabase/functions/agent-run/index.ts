@@ -35,8 +35,9 @@ async function acquireConversationLock(db: any, conversationId: string, token: s
     });
     if (!error && data === true) return true;
     if (error) {
-      console.warn("claim_conversation failed", error?.message || error);
-      return false;
+      // Lock infra unavailable: never block the customer — proceed without lock.
+      console.warn("claim_conversation failed, proceeding unlocked", error?.message || error);
+      return true;
     }
     if (Date.now() >= deadline) return false;
     await sleepMs(LOCK_POLL_MS);
