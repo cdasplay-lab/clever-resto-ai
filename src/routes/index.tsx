@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { supabase } from "@/integrations/supabase/client";
 import {
   ArrowLeft,
   ArrowUpLeft,
@@ -93,6 +94,20 @@ const PLANS = [
 function Landing() {
   const [menuOpen, setMenuOpen] = useState(false);
   const landingRef = useScrollReveal();
+  const [signedIn, setSignedIn] = useState(false);
+  useEffect(() => {
+    // Google sign-in may land here with tokens in the URL hash — send the user to the dashboard.
+    const fromOAuth = window.location.hash.includes("access_token");
+    supabase.auth.getSession().then(({ data }) => {
+      setSignedIn(!!data.session);
+      if (data.session && fromOAuth) window.location.replace("/dashboard");
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      setSignedIn(!!session);
+      if (event === "SIGNED_IN" && session && fromOAuth) window.location.replace("/dashboard");
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
   return (
     <div ref={landingRef} className="mada-landing" dir="rtl">
       <a
@@ -122,10 +137,10 @@ function Landing() {
           </nav>
           <div className="flex items-center gap-2">
             <Link
-              to="/auth"
+              to={signedIn ? "/dashboard" : "/auth"}
               className="rounded-lg border border-white/30 px-5 py-2 text-sm hover:bg-white/5"
             >
-              دخول
+              {signedIn ? "لوحة التحكم" : "دخول"}
             </Link>
             <Button asChild className="hidden sm:inline-flex">
               <Link to="/auth">
