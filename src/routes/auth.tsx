@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,23 @@ function AuthPage() {
   const [forgotOpen, setForgotOpen] = useState(false);
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotLoading, setForgotLoading] = useState(false);
+
+  // After Google sign-in returns here (or if already signed in), go straight to the dashboard.
+  useEffect(() => {
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      window.location.replace("/dashboard");
+    };
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) go();
+    });
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session) go();
+    });
+    return () => sub.subscription.unsubscribe();
+  }, []);
 
   async function sendReset(e: React.FormEvent) {
     e.preventDefault();
@@ -71,7 +88,7 @@ function AuthPage() {
     setOauthLoading(provider);
     try {
       const result = await lovable.auth.signInWithOAuth(provider, {
-        redirect_uri: window.location.origin,
+        redirect_uri: `${window.location.origin}/auth`,
       });
       if (result.error) {
         toast.error(result.error.message ?? "فشل تسجيل الدخول");
