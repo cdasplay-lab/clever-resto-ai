@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1795293335646,
+      "tag": "0000_shared_restaurant_dashboard_access",
+      "breakpoints": true
+    }
+  ]
+}
