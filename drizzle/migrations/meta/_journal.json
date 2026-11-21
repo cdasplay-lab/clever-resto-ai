@@ -8,6 +8,13 @@
       "when": 1795293335646,
       "tag": "0000_shared_restaurant_dashboard_access",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1795293619383,
+      "tag": "0001_allow_authenticated_restaurant_role_checks",
+      "breakpoints": true
     }
   ]
 }
