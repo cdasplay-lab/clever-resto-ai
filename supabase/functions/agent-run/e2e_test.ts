@@ -18,7 +18,8 @@ function db() {
 
 async function userSay(conversationId: string, text: string) {
   const sb = db();
-  await sb.from("messages").insert({ conversation_id: conversationId, role: "user", content: text });
+  const { error } = await sb.from("messages").insert({ conversation_id: conversationId, role: "user", content: text });
+  if (error) throw error;
   const r = await fetch(AGENT_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${SERVICE_KEY}` },
@@ -106,6 +107,7 @@ async function setup() {
       external_chat_id: `e2e-${stamp}`,
       customer_handle: "@e2e_tester",
       customer_name: "زبون اختبار",
+      meta: { checkout_upsell_offered: true },
     })
     .select()
     .single();
@@ -163,28 +165,40 @@ Deno.test({
       console.log("    cart items:", cart.length, "state:", (conv2 as any)?.state);
 
       // 3) Provide delivery info
-      const r3 = await userSay(conversationId, "الاسم: أحمد، الهاتف: 07701234567، العنوان: الكرادة شارع 14");
+      const r3 = await userSay(conversationId, "الاسم أحمد، الهاتف 07701234567، العنوان الكرادة شارع 14، الدفع نقداً عند الاستلام. اعرض ملخص الطلب للتأكيد.");
       assert(r3.ok, `delivery failed: ${JSON.stringify(r3.data)}`);
-      console.log("[3/5] delivery OK:", r3.data.reply?.slice(0, 80));
+      const { data: preview, error: previewError } = await sb.from("conversations")
+        .select("meta").eq("id", conversationId).single();
+      assert(!previewError && preview?.meta?.pending_confirmation?.token, "confirmation preview missing");
+      console.log("[3/5] confirmation preview saved");
 
       // 4) Confirm
-      const r4 = await userSay(conversationId, "نعم أكد الطلب");
+      const r4 = await userSay(conversationId, "إي");
       assert(r4.ok, `confirm failed: ${JSON.stringify(r4.data)}`);
-      console.log("[4/5] confirm OK:", r4.data.reply?.slice(0, 80));
+      const { data: orders, error: orderError } = await sb.from("orders")
+        .select("id,checkout_preview_id").eq("conversation_id", conversationId);
+      assert(!orderError && orders, `orders could not be read: ${orderError?.message}`);
+      assertEquals(orders.length, 1, "confirmation must create exactly one order");
+      assertEquals(orders[0].checkout_preview_id, preview.meta.pending_confirmation.token);
+      assert(r4.data.reply?.includes(orders[0].id.slice(0, 8)), "reply must include the saved order number");
+      const { data: closed, error: closeError } = await sb.from("conversations")
+        .select("state,cart,delivery,meta").eq("id", conversationId).single();
+      assert(!closeError && closed, `conversation could not be read: ${closeError?.message}`);
+      assertEquals(closed.state, "submitted");
+      assertEquals(closed.cart, []);
+      assertEquals(closed.delivery, {});
+      assertEquals(closed.meta.pending_confirmation, null);
+      assertEquals(closed.meta.last_order_id, orders[0].id);
+      console.log("[4/5] one order saved and cart closed");
 
-      // 5) Verify order created (allow a moment for tools to settle).
-      await new Promise((res) => setTimeout(res, 500));
-      const { data: orders } = await sb
-        .from("orders")
-        .select("id,status,total,items,customer_phone,delivery_address")
-        .eq("restaurant_id", restaurantId);
-      console.log("[5/5] orders in DB:", orders?.length ?? 0);
-      if (orders && orders.length > 0) {
-        console.log("    order:", JSON.stringify(orders[0], null, 2));
-      }
-      // Soft assertion — agent may take 1-2 extra turns to finalize.
-      // The hard requirement is that no step crashed.
-      assertEquals(typeof r4.data.reply === "string", true, "final reply missing");
+      // 5) Sending the approval again must leave the original order alone.
+      const r5 = await userSay(conversationId, "إي");
+      assert(r5.ok, `second confirmation failed: ${JSON.stringify(r5.data)}`);
+      const { data: afterReplay, error: replayError } = await sb.from("orders")
+        .select("id").eq("conversation_id", conversationId);
+      assert(!replayError, `could not verify replay: ${replayError?.message}`);
+      assertEquals(afterReplay, [{ id: orders[0].id }]);
+      console.log("[5/5] repeated confirmation kept the same order");
     } finally {
       await cleanup(restaurantId, ownerId);
       console.log("cleanup complete");
